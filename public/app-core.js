@@ -49,7 +49,7 @@ const rolePages = {
     "investment-revenue","investment-expenses","investment-pl","investment-budgets","investment-assets",
     "investment-contracts","investment-reports","investment-analytics","investment-documents","investment-notifications","messages","settings"],
   "Credits Officer": ["dashboard","credits-members","credits-savings","credits-applications","credits-approvals","credits-active",
-    "credits-disbursement","credits-repayments","credits-guarantors","credits-recovery","credits-statements",
+    "credits-disbursement","credits-receipts","credits-repayments","credits-guarantors","credits-recovery","credits-statements",
     "credits-charges","credits-reports","credits-analytics","credits-documents","credits-notifications","messages","settings"],
   "Legal Officer": ["dashboard","settings"],
   "Welfare Officer": ["dashboard","settings"],
@@ -81,7 +81,7 @@ Object.assign(pageMeta,{
 Object.assign(pageMeta,{
   "credits-members":["SACCO accounts","Members"],"credits-savings":["Member funds","Savings"],
   "credits-applications":["Credit workflow","Loan Applications"],"credits-approvals":["Credit authority","Loan Approvals"],
-  "credits-disbursement":["Approved facilities","Loan Disbursement"],"credits-repayments":["Loan servicing","Repayments"],
+  "credits-disbursement":["Approved facilities","Loan Disbursement"],"credits-receipts":["Cash given out","Disbursement Receipts"],"credits-repayments":["Loan servicing","Repayments"],
   "credits-guarantors":["Loan security","Guarantors"],"credits-recovery":["Portfolio quality","Loan Recovery"],
   "credits-statements":["Member records","Statements"],"credits-charges":["Loan charges","Interest & Penalties"],
   "credits-reports":["SACCO reporting","Reports"],"credits-analytics":["Portfolio intelligence","Analytics"],
@@ -348,20 +348,21 @@ function investmentSidebar() {
 }
 function creditsSidebar() {
   const labels={dashboard:"Dashboard",messages:"Messages","credits-members":"Members","credits-savings":"Savings","credits-applications":"Loan Applications",
-    "credits-approvals":"Loan Approvals","credits-active":"Active Loans","credits-disbursement":"Loan Disbursement","credits-repayments":"Repayments",
+    "credits-approvals":"Loan Approvals","credits-active":"Active Loans","credits-disbursement":"Loan Disbursement","credits-receipts":"Disbursement Receipts","credits-repayments":"Repayments",
     "credits-guarantors":"Guarantors","credits-recovery":"Loan Recovery","credits-statements":"Statements",
     "credits-charges":"Interest & Penalties","credits-reports":"Reports","credits-analytics":"Analytics",
     "credits-documents":"Documents","credits-notifications":"Notifications",settings:"Settings"};
   const iconMap={"credits-members":"members","credits-savings":"savings","credits-applications":"file",
-    "credits-approvals":"approvals","credits-active":"loans","credits-disbursement":"wallet","credits-repayments":"receipt",
+    "credits-approvals":"approvals","credits-active":"loans","credits-disbursement":"wallet","credits-receipts":"receipt","credits-repayments":"receipt",
     "credits-guarantors":"users","credits-recovery":"clock","credits-statements":"file","credits-charges":"loans",
     "credits-reports":"reports","credits-analytics":"reports","credits-documents":"file","credits-notifications":"bell"};
   const c=state.credits,applicationBadge=c?.stats?.pendingApplications||0,recoveryBadge=c?.stats?.overdueLoans||0,activeBadge=c?.stats?.activeLoans||0;
+  const repaymentBadge=(c?.transactions||[]).filter(t=>t.type==="Loan repayment"&&t.status==="pending").length;
   const pages=rolePages[executiveWorkspaceRole()]||rolePages[state.role];
-  const sidebarPages=new Set(["dashboard","messages","credits-members","credits-savings","credits-applications","credits-approvals","credits-active","credits-disbursement","credits-repayments","credits-guarantors","credits-recovery","credits-reports","credits-documents","credits-notifications","settings"]);
+  const sidebarPages=new Set(["dashboard","messages","credits-members","credits-savings","credits-applications","credits-approvals","credits-active","credits-disbursement","credits-receipts","credits-repayments","credits-guarantors","credits-recovery","credits-reports","credits-documents","credits-notifications","settings"]);
   return `<aside class="sidebar executive-sidebar credits-sidebar" id="sidebar">
     <div class="executive-brand"><div class="executive-crest credits-crest">${icons.loans}</div><div><strong>KASANGATI G40<br>KWAGALANA</strong><span>SACCO - CREDITS DEPARTMENT</span></div></div>
-    <nav class="nav executive-nav">${pages.filter(page=>sidebarPages.has(page)).map(page=>`<button class="nav-item ${state.page===page?"active":""}" data-page="${page}">${icons[iconMap[page]||page]||icons.dashboard}<span>${labels[page]}</span>${page==="credits-applications"&&applicationBadge?`<b class="nav-badge">${applicationBadge}</b>`:page==="credits-active"&&activeBadge?`<b class="nav-badge">${activeBadge}</b>`:page==="credits-recovery"&&recoveryBadge?`<b class="nav-badge">${recoveryBadge}</b>`:""}</button>`).join("")}</nav>
+    <nav class="nav executive-nav">${pages.filter(page=>sidebarPages.has(page)).map(page=>`<button class="nav-item ${state.page===page?"active":""}" data-page="${page}">${icons[iconMap[page]||page]||icons.dashboard}<span>${labels[page]}</span>${page==="credits-applications"&&applicationBadge?`<b class="nav-badge">${applicationBadge}</b>`:page==="credits-active"&&activeBadge?`<b class="nav-badge">${activeBadge}</b>`:page==="credits-repayments"&&repaymentBadge?`<b class="nav-badge">${repaymentBadge}</b>`:page==="credits-recovery"&&recoveryBadge?`<b class="nav-badge">${recoveryBadge}</b>`:""}</button>`).join("")}</nav>
     <div class="sidebar-bottom">${state.executiveWorkspace?`<button class="executive-quick" data-executive-workspace-exit>${icons.arrowUp}<span>Back to Executive</span></button>`:`<button class="executive-quick" data-action="credits-quick">${icons.arrowUp}<span>Quick Actions</span><b>&gt;</b></button>`}
       <div class="sidebar-user"><div class="avatar blue">${initials(actor())}</div><div><div class="user-name">${actor()}</div><div class="user-role">${state.executiveWorkspace?"Executive read-only view":"Credits Department"}</div></div></div></div>
   </aside>`;
@@ -570,6 +571,7 @@ function view() {
   if(state.page==="credits-approvals") return creditsApprovalsView();
   if(state.page==="credits-active") return creditsActiveLoansView();
   if(state.page==="credits-disbursement") return creditsDisbursementView();
+  if(state.page==="credits-receipts") return creditsReceiptsView();
   if(state.page==="credits-repayments") return creditsRepaymentsView();
   if(state.page==="credits-guarantors") return creditsGuarantorsView();
   if(state.page==="credits-recovery") return creditsRecoveryView();
@@ -781,7 +783,7 @@ function executiveDepartmentsView() {
     <div class="exec-mini-stat"><span class="green">${icons.check}</span><div><small>Active Departments</small><strong>${activeDepartments}</strong><em>${activeDepartments===totalDepartments?"100% active":`${totalDepartments-activeDepartments} inactive`}</em></div></div>
     <div class="exec-mini-stat"><span class="violet">${icons.reports}</span><div><small>Performing Well</small><strong>${performingWell}</strong><em>85% or above</em></div></div>
     <div class="exec-mini-stat"><span class="orange">${icons.info}</span><div><small>Need Attention</small><strong>${needAttention}</strong><em>Below 85%${awaitingScore?` - ${awaitingScore} not scored`:""}</em></div></div></div>
-    <div class="exec-department-layout"><div class="exec-department-cards">${modules.map(m=>`<article class="exec-department-card"><div class="exec-dept-title"><span class="${m[9]}">${icons[departmentIcon(m[0])]}</span><div><h3>${m[1]}</h3><p>${m[2]}</p></div></div><div class="exec-dept-values"><div><small>${m[3]}</small><strong>${m[4]}</strong><small>${m[5]}</small><strong>${m[6]}</strong></div><div class="exec-ring" style="--score:${m[7]}"><span>${m[7]}%</span></div></div><div class="exec-dept-actions"><button data-executive-page="${m[8]}">View summary <b>&gt;</b></button>${m[10]?`<button class="primary" data-executive-workspace="${m[10]}">${icons.eye} Open live dashboard</button>`:""}</div></article>`).join("")}</div>${executivePerformanceWidget(e)}</div>
+    <div class="exec-department-layout"><div class="exec-department-cards">${modules.map(m=>`<article class="exec-department-card"><div class="exec-dept-title"><span class="${m[9]}">${icons[departmentIcon(m[0])]}</span><div><h3>${m[1]}</h3><p>${m[2]}</p></div></div><div class="exec-dept-values"><div><small>${m[3]}</small><strong>${m[4]}</strong><small>${m[5]}</small><strong>${m[6]}</strong></div><div class="exec-ring" style="--score:${m[7]}"><span>${m[7]}%</span></div></div><div class="exec-dept-actions"><button data-executive-page="${m[8]}">View summary <b>&gt;</b></button></div></article>`).join("")}</div>${executivePerformanceWidget(e)}</div>
     <div class="exec-panel exec-dept-chart"><div class="exec-panel-head"><div><h3>Department Performance Chart</h3><p>Verified performance score by organizational arm</p></div></div><div class="exec-wide-bars">${modules.map(m=>`<div><div><i style="height:${Math.max(2,Number(m[7]||0))}%"></i></div><span>${m[0]}${m[7]>0?` - ${m[7]}%`:" - N/A"}</span></div>`).join("")}</div></div>`;
 }
 function executiveModuleView(module) {
@@ -790,7 +792,6 @@ function executiveModuleView(module) {
   if(module==="credits") {
     const active=(e.recentLoans||[]).filter(x=>["active","overdue"].includes(x.status));
     return `<div class="exec-module-metrics">${executiveModuleMetric("Total savings",money(e.stats.totalSavings),"green")}${executiveModuleMetric("Outstanding loans",money(e.stats.outstandingLoans),"red")}${executiveModuleMetric("Active loans",e.loans.active,"blue")}${executiveModuleMetric("Recovery rate",`${e.loans.recoveryRate}%`,"violet")}</div>
-      <div class="module-actions"><button class="button primary" data-executive-workspace="credits">${icons.eye} Open Credits live dashboard</button></div>
       ${executiveRecordTable("Active and recent loans by Legal-registered member",["Loan","Member","Product","Amount","Balance","Status"],e.recentLoans.map(x=>[x.reference,x.member,x.product,money(x.amount),money(x.balance),status(x.status)]))}
       ${active.length?`<section class="exec-panel"><div class="exec-panel-head"><div><h3>Borrowers needing follow-up</h3><p>People currently holding active SACCO facilities</p></div></div><div class="credits-loan-list">${active.map(x=>`<article><div class="credits-loan-main"><span>${escapeHtml(x.reference)}</span><h3>${escapeHtml(x.member)}</h3><p>${escapeHtml(x.product)}</p></div><div><strong>${money(x.amount)}</strong><small>Balance ${money(x.balance)}</small></div>${status(x.status)}</article>`).join("")}</div></section>`:""}`;
   }
@@ -805,8 +806,7 @@ function executiveModuleView(module) {
 }
 function executiveFinanceSummary(e) {
   const f=e.finance,c=f.cashPosition||{},accounts=f.accounts||[];
-  return `<div class="module-actions"><button class="button primary" data-executive-workspace="finance">${icons.eye} Open Finance live dashboard</button></div>
-  <div class="exec-module-metrics executive-finance-metrics">
+  return `<div class="exec-module-metrics executive-finance-metrics">
     ${executiveModuleMetric("Organization income",money(e.stats.organizationIncome),"green")}
     ${executiveModuleMetric("Expenditure",money(e.stats.organizationExpenditure),"red")}
     ${executiveModuleMetric("Net balance",money(e.stats.netBalance),"blue")}
@@ -829,13 +829,20 @@ function executiveApprovalsView() {
   const items=state.executive.approvals||[],history=state.executive.approvalHistory||[];
   const pendingDocuments=(state.executive.documents||[]).filter(d=>d.status==="pending_executive");
   const waitingCount=items.length+pendingDocuments.length;
-  const groups=[["Department Budgets","finance-budget"],["Large Payments","finance-payment"],["Investment Proposals","investment-proposal"],["Major Welfare Requests","welfare-request"],["Contract Signing","legal-contract"],["Large Loans","large-loan"],["Policy Changes","policy"]];
-  const row=x=>x.recordType==="loan"?`<div class="exec-approval-row executive-loan-approval"><div><span>${x.reference} - ${x.department}</span><strong>${escapeHtml(x.title)}</strong><p>${escapeHtml(x.description||"")}</p><small>Credit Committee approved this loan. Executive authorization is required before disbursement.</small></div><div>${x.amount?`<b>${money(x.amount)}</b>`:""}${status(x.status)}<button data-exec-details="${x.id}">View details</button><button class="approve" data-exec-loan-decision="${x.loanId}" data-decision="authorize">Authorize loan</button><button class="more" data-exec-loan-decision="${x.loanId}" data-decision="return">Request information</button><button class="reject" data-exec-loan-decision="${x.loanId}" data-decision="reject">Reject</button></div></div>`:`<div class="exec-approval-row"><div><span>${x.reference} - ${x.department}</span><strong>${escapeHtml(x.title)}</strong><p>${escapeHtml(x.description||"")}${x.assignedTo?` - Reviewer: ${escapeHtml(x.assignedTo)}`:""}</p></div><div>${x.amount?`<b>${money(x.amount)}</b>`:""}${status(x.status)}<button data-exec-details="${x.id}">View details</button><button data-exec-reviewer="${x.id}">Assign reviewer</button><button class="approve" data-exec-decision="${x.id}" data-decision="approve">Approve</button><button class="more" data-exec-decision="${x.id}" data-decision="more_information">Request information</button><button class="reject" data-exec-decision="${x.id}" data-decision="reject">Reject</button></div></div>`;
-  const documentRows=pendingDocuments.map(d=>`<div class="exec-approval-row executive-document-approval"><div><span>${escapeHtml(d.reference)} - ${escapeHtml(d.department||"Legal")}</span><strong>${escapeHtml(d.title)}</strong><p>${escapeHtml(d.documentType)} - Version ${escapeHtml(d.version)} awaiting Executive publication approval.</p></div><div>${status(d.status)}${d.hasFile?`<div class="document-actions"><a href="/api/documents/${d.id}/view" target="_blank" title="View document">${icons.eye}<span>View</span></a><a href="/api/documents/${d.id}/download" title="Download document">${icons.download}</a></div>`:`<span class="status pending no-file-badge">No file</span>`}<button class="approve" data-document-publication="${d.id}" data-decision="approve">Publish</button><button class="more" data-document-publication="${d.id}" data-decision="reject">Return</button></div></div>`);
-  return `<div class="exec-approval-summary">${executiveModuleMetric("Waiting now",waitingCount,"red")}${executiveModuleMetric("High-value requests",items.filter(x=>x.amount>=10000000).length,"orange")}${executiveModuleMetric("Document publications",pendingDocuments.length,"violet")}${executiveModuleMetric("Decision trail","Fully audited","green")}</div><div class="exec-approval-page"><section class="exec-panel"><div class="exec-panel-head"><div><h3>Document Publications</h3><p>${pendingDocuments.length} document${pendingDocuments.length===1?"":"s"} awaiting Executive publication</p></div></div>${documentRows.length?documentRows.join(""):`<div class="exec-empty">No document publications are waiting.</div>`}</section>${groups.map(([label,type])=>{const list=items.filter(x=>x.activityType===type);return `<section class="exec-panel"><div class="exec-panel-head"><div><h3>${label}</h3><p>${list.length} item${list.length===1?"":"s"} awaiting executive decision</p></div></div>${list.length?list.map(row).join(""):`<div class="exec-empty">No ${label.toLowerCase()} are waiting.</div>`}</section>`}).join("")}</div>${executiveApprovalHistory(history)}`;
+  const groups=[["Large Loans","large-loan"],["Document Publications","documents"],["Department Budgets","finance-budget"],["Large Payments","finance-payment"],["Investment Proposals","investment-proposal"],["Major Welfare Requests","welfare-request"],["Contract Signing","legal-contract"],["Policy Changes","policy"]];
+  const newestAt=list=>list.reduce((max,item)=>{const t=new Date(item.createdAt||item.updatedAt||0).getTime();return t>max?t:max;},0);
+  const byNewest=(a,b)=>newestAt(b)-newestAt(a)||Number(b.id||b.loanId||0)-Number(a.id||a.loanId||0);
+  const row=x=>x.recordType==="loan"?`<div class="exec-approval-row executive-loan-approval"><div><span>${x.reference} - ${x.department}</span><strong>${escapeHtml(x.title)}</strong><p>${escapeHtml(x.description||"")}</p><small>${x.nextReviewer?`Next Executive reviewer: ${escapeHtml(x.nextReviewer.fullName)}${x.nextReviewer.isChair?" (Chairperson Tabula - final)":""}. Credits already cleared this loan.`:`All Executive approvals complete. Credits already cleared this loan.`}</small></div><div>${x.amount?`<b>${money(x.amount)}</b>`:""}${status(x.status)}<button data-loan-detail-id="${x.loanId||x.id}">View details</button>${x.canCurrentUserDecide?`<button class="approve" data-exec-loan-decision="${x.loanId}" data-decision="authorize">Approve loan</button><button class="more" data-exec-loan-decision="${x.loanId}" data-decision="return">Request information</button><button class="reject" data-exec-loan-decision="${x.loanId}" data-decision="reject">Reject</button>`:`<span class="maker-checker-note">${x.nextReviewer?`Waiting for ${escapeHtml(x.nextReviewer.fullName)}`:`Queued`}</span>`}</div></div>`:`<div class="exec-approval-row"><div><span>${x.reference} - ${x.department}</span><strong>${escapeHtml(x.title)}</strong><p>${escapeHtml(x.description||"")}${x.assignedTo?` - Reviewer: ${escapeHtml(x.assignedTo)}`:""}</p></div><div>${x.amount?`<b>${money(x.amount)}</b>`:""}${status(x.status)}<button data-exec-details="${x.id}">View details</button><button data-exec-reviewer="${x.id}">Assign reviewer</button><button class="approve" data-exec-decision="${x.id}" data-decision="approve">Approve</button><button class="more" data-exec-decision="${x.id}" data-decision="more_information">Request information</button><button class="reject" data-exec-decision="${x.id}" data-decision="reject">Reject</button></div></div>`;
+  const documentRows=pendingDocuments.slice().sort(byNewest).map(d=>`<div class="exec-approval-row executive-document-approval"><div><span>${escapeHtml(d.reference)} - ${escapeHtml(d.department||"Legal")}</span><strong>${escapeHtml(d.title)}</strong><p>${escapeHtml(d.documentType)} - Version ${escapeHtml(d.version)} awaiting Executive publication approval.</p></div><div>${status(d.status)}${d.hasFile?`<div class="document-actions"><a href="/api/documents/${d.id}/view" target="_blank" title="View document">${icons.eye}<span>View</span></a><a href="/api/documents/${d.id}/download" title="Download document">${icons.download}</a></div>`:`<span class="status pending no-file-badge">No file</span>`}<button class="approve" data-document-publication="${d.id}" data-decision="approve">Publish</button><button class="more" data-document-publication="${d.id}" data-decision="reject">Return</button></div></div>`);
+  const sections=groups.map(([label,type])=>{
+    if(type==="documents")return{label,type,count:pendingDocuments.length,freshness:newestAt(pendingDocuments),empty:`No document publications are waiting.`,body:documentRows.length?documentRows.join(""):null,subtitle:`${pendingDocuments.length} document${pendingDocuments.length===1?"":"s"} awaiting Executive publication`};
+    const list=items.filter(x=>x.activityType===type).slice().sort(byNewest);
+    return{label,type,count:list.length,freshness:newestAt(list),empty:`No ${label.toLowerCase()} are waiting.`,body:list.length?list.map(row).join(""):null,subtitle:`${list.length} item${list.length===1?"":"s"} awaiting executive decision`};
+  }).sort((a,b)=>(b.count>0)-(a.count>0)||b.freshness-a.freshness||groups.findIndex(g=>g[1]===a.type)-groups.findIndex(g=>g[1]===b.type));
+  return `<div class="exec-approval-summary">${executiveModuleMetric("Waiting now",waitingCount,"red")}${executiveModuleMetric("High-value requests",items.filter(x=>x.amount>=10000000).length,"orange")}${executiveModuleMetric("Document publications",pendingDocuments.length,"violet")}${executiveModuleMetric("Decision trail","Fully audited","green")}</div><div class="exec-approval-page">${sections.map(s=>`<section class="exec-panel"><div class="exec-panel-head"><div><h3>${s.label}</h3><p>${s.subtitle}</p></div></div>${s.body||`<div class="exec-empty">${s.empty}</div>`}</section>`).join("")}</div>${executiveApprovalHistory(history)}`;
 }function executiveApprovalHistory(history) {
   const approved=history.filter(x=>x.status==="approved").length,rejected=history.filter(x=>x.status==="rejected").length,returned=history.filter(x=>x.status==="information_requested").length;
-  return `<section class="exec-panel exec-approval-history"><div class="exec-panel-head"><div><h3>Approval History</h3><p>Permanent record of Executive requests, decisions and responsible officers</p></div><div class="exec-history-counts"><span>${approved} approved</span><span>${rejected} rejected</span><span>${returned} information requests</span></div></div><div class="table-scroll"><table><thead><tr><th>Reference</th><th>Request</th><th>Requested by</th><th>Requested on</th><th>Decision</th><th>Decision by</th><th>Decision date</th><th>Action</th></tr></thead><tbody>${history.length?history.map(item=>`<tr><td><strong>${escapeHtml(item.reference)}</strong><small>${escapeHtml(item.department)}</small></td><td><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.activityType.replaceAll("-"," "))}${item.amount?` - ${money(item.amount)}`:""}</small></td><td>${escapeHtml(item.createdBy)}</td><td>${new Date(item.createdAt).toLocaleString()}</td><td><span class="status ${item.status}">${escapeHtml(item.status.replaceAll("_"," "))}</span></td><td>${escapeHtml(item.decisionBy||"Recorded in audit log")}</td><td>${item.decisionAt?new Date(item.decisionAt).toLocaleString():"?"}</td><td><button class="mini-btn" data-exec-details="${item.id}" title="View approval details">${icons.eye}</button></td></tr>`).join(""):`<tr><td colspan="8">No Executive decisions have been recorded yet.</td></tr>`}</tbody></table></div></section>`;
+  return `<section class="exec-panel exec-approval-history"><div class="exec-panel-head"><div><h3>Approval History</h3><p>Permanent record of Executive requests, loan authorizations and responsible officers</p></div><div class="exec-history-counts"><span>${approved} approved</span><span>${rejected} rejected</span><span>${returned} information requests</span></div></div><div class="table-scroll"><table><thead><tr><th>Reference</th><th>Request</th><th>Requested by</th><th>Requested on</th><th>Decision</th><th>Decision by</th><th>Decision date</th><th>Action</th></tr></thead><tbody>${history.length?history.map(item=>`<tr><td><strong>${escapeHtml(item.reference)}</strong><small>${escapeHtml(item.department)}</small></td><td><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(String(item.activityType||"").replaceAll("-"," "))}${item.amount?` - ${money(item.amount)}`:""}</small></td><td>${escapeHtml(item.createdBy||"—")}</td><td>${item.createdAt?new Date(item.createdAt).toLocaleString():"—"}</td><td><span class="status ${item.status}">${escapeHtml(String(item.status||"").replaceAll("_"," "))}</span></td><td>${escapeHtml(item.decisionBy||(item.recordType==="loan"?"See loan process":"Recorded in audit log"))}</td><td>${item.decisionAt?new Date(item.decisionAt).toLocaleString():"—"}</td><td><button class="mini-btn" data-${item.recordType==="loan"?"loan-detail-id":"exec-details"}="${item.loanId||item.id}" title="View full process">${icons.eye}</button></td></tr>`).join(""):`<tr><td colspan="8">No Executive decisions have been recorded yet.</td></tr>`}</tbody></table></div></section>`;
 }
 function executiveMeetingsView() {
   return `<div class="exec-calendar-page">${state.executive.meetings.map(m=>{const d=new Date(m.scheduledAt);return `<article><time><strong>${d.getDate()}</strong><span>${d.toLocaleString("en",{month:"long"})}</span><em>${d.getFullYear()}</em></time><div><span>${m.meetingType} - ${m.department||"Organization-wide"}</span><h3>${m.title}</h3><p>${m.agenda||"Agenda pending"}</p><small>${icons.clock}${d.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})} - ${m.venue||"Venue pending"}</small></div><button data-action="meeting-details" data-id="${m.id}">View details ></button></article>`}).join("")}</div>`;
@@ -1200,10 +1207,11 @@ function executiveSearchView() {
 async function executiveLoanDecision(id,decision) {
   const item=(state.executive.approvals||[]).find(x=>String(x.loanId||x.id)===String(id));
   if(!item)return toast("Loan authorization is no longer available.");
+  if(!item.canCurrentUserDecide)return toast(item.nextReviewer?`Next reviewer is ${item.nextReviewer.fullName}.`:"You are not the next Executive reviewer for this loan.");
   let comment="";
   if(decision!=="authorize") { comment=await promptDialog(decision==="reject"?"Reason for rejecting this loan:":"What information should Credits provide:",""); if(comment===null||!comment.trim())return; }
-  else { if(!await confirmDialog(`Authorize ${item.reference} for ${money(item.amount)}? This will release it to Credits for disbursement.`))return; comment=(await promptDialog("Optional executive comment:","Authorized within executive authority."))||""; }
-  try { await api(`/api/loans/${id}/decision`,{method:"POST",body:JSON.stringify({decision,comment})}); state.executive=await api("/api/executive/command-center"); render(); toast(decision==="authorize"?"Loan authorized for disbursement.":decision==="reject"?"Loan rejected.":"Loan returned to the Credit Committee."); } catch(error){toast(error.message);}
+  else { if(!await confirmDialog(`Approve ${item.reference} for ${money(item.amount)}?${item.nextReviewer?.isChair?" Your Chairperson approval is final.":" The next Executive member will review after you."}`))return; }
+  try { const result=await api(`/api/loans/${id}/decision`,{method:"POST",body:JSON.stringify({decision,comment})}); state.executive=await api("/api/executive/command-center"); render(); toast(decision==="authorize"?"Executive approval recorded.":decision==="reject"?(result.advisoryReject?"Rejection recorded with reason. Loan continues to the next reviewer — only Tabula can finally reject.":result.finalReject?"Loan finally rejected by Tabula Robert.":"Loan rejected."):"Loan returned to Credits for another full review."); } catch(error){toast(error.message);}
 }async function executiveDecision(id,decision) {
   const item=state.executive.approvals.find(x=>String(x.id)===String(id));
   if(!item)return toast("Approval item is no longer available.");
@@ -1244,11 +1252,13 @@ async function executiveAssignReviewer(id) {
   } catch(error){toast(error.message);}
 }
 function executiveApprovalDetails(id) {
-  const item=[...(state.executive.approvals||[]),...(state.executive.approvalHistory||[])].find(x=>String(x.id)===String(id));if(!item)return;
+  const item=[...(state.executive.approvals||[]),...(state.executive.approvalHistory||[])].find(x=>String(x.id)===String(id)||String(x.loanId)===String(id));
+  if(!item)return toast("Approval details are unavailable.");
+  if(item.recordType==="loan")return openLoanDetails(item.loanId||item.id||item.reference);
   detailModal("Executive approval",`${item.reference} - ${item.department}`,[["Request",item.title],["Category",item.activityType.replaceAll("-"," ")],
-    ["Amount",item.amount?money(item.amount):"Not financial"],["Requested by",item.createdBy],["Requested on",item.createdAt?new Date(item.createdAt).toLocaleString():"?"],
-    ["Details",item.description||"?"],["Assigned reviewer",item.assignedTo||"Not assigned"],["Authority level",item.visibilityLevel],["Status",item.status.replaceAll("_"," ")],
-    ["Decision by",item.decisionBy||"Pending"],["Decision date",item.decisionAt?new Date(item.decisionAt).toLocaleString():"Pending"],["Decision comment",item.decisionComment||"?"]]);
+    ["Amount",item.amount?money(item.amount):"Not financial"],["Requested by",item.createdBy],["Requested on",item.createdAt?new Date(item.createdAt).toLocaleDateString():"—"],
+    ["Details",item.description||"—"],["Assigned reviewer",item.assignedTo||"Not assigned"],["Authority level",item.visibilityLevel],["Status",item.status.replaceAll("_"," ")],
+    ["Decision by",item.decisionBy||"Pending"],["Decision date",item.decisionAt?new Date(item.decisionAt).toLocaleString():"Pending"],["Decision comment",item.decisionComment||"—"]]);
 }
 function downloadExecutiveReport(name,format="excel") { downloadGeneratedReport("executive",name,format); }
 function executiveReportPreviewContent(name) {
@@ -1577,7 +1587,7 @@ function creditsPortfolioWidget(c) {
 function creditsPendingApplicationsWidget(c) {
   const rows=c.loans.filter(l=>["pending","review","pending-guarantors","officer-review","committee-review","correction","finance-verification","executive-authorization"].includes(l.status)).slice(0,5);
   return `<section class="finance-panel"><div class="finance-panel-head"><div><h3>Pending Loan Applications</h3><p>Applications requiring progress</p></div><button data-credits-page="credits-applications">View all ></button></div>
-    <div class="credits-application-list">${rows.map(l=>`<article><div><strong>${l.member}</strong><small>${l.reference} - ${new Date(l.createdAt).toLocaleDateString()}</small></div><b>${money(l.amount)}</b>${status(l.status)}<button data-credits-loan-detail="${l.reference}">${icons.eye}</button></article>`).join("")||`<div class="exec-empty">No pending applications.</div>`}</div></section>`;
+    <div class="credits-application-list">${rows.map(l=>`<article><div><strong>${l.member}</strong><small>${l.reference} - ${new Date(l.createdAt).toLocaleDateString()}</small></div><b>${money(l.amount)}</b>${status(l.status)}<button data-loan-detail-id="${l.id}" title="View full process">${icons.eye}</button></article>`).join("")||`<div class="exec-empty">No pending applications.</div>`}</div></section>`;
 }
 function creditsSavingsOverviewWidget(c) {
   const s=c.savings;
@@ -1648,14 +1658,21 @@ async function decideCreditsDeposit(id,decision,isLoanRepayment=false) {
 
 function creditsApplicationsView() {
   const rows=state.credits.loans;
-  return `<div class="module-actions"><button class="button primary" data-open-loan-calculator>${icons.reports}Loan calculator</button></div><div class="credits-workflow">${["Member applies","Guarantors confirm","Credits officer review","Credit Committee approval","Executive authorization","Credits disbursement","Repayment","Closed"].map((x,i)=>`<span><b>${i+1}</b>${x}</span>`).join("<i>&gt;</i>")}</div>
+  return `<div class="module-actions"><button class="button primary" data-open-loan-calculator>${icons.reports}Loan calculator</button></div><div class="credits-workflow">${["Member applies","Guarantors confirm","Credit Committee (3)","Executive Committee (5)","Chairperson Tabula final","Credits disbursement","Repayment","Closed"].map((x,i)=>`<span><b>${i+1}</b>${x}</span>`).join("<i>&gt;</i>")}</div>
     <div class="credits-loan-list">${rows.map(l=>creditsLoanRow(l,true)).join("")}</div>`;
 }
 function creditsApprovalsView() {
-  const rows=state.credits.loans.filter(l=>!["active","completed","rejected","overdue"].includes(l.status));
-  return `<div class="exec-module-metrics">${executiveModuleMetric("Pending",state.credits.stats.pendingApplications,"orange")}${executiveModuleMetric("Officer review",rows.filter(l=>l.status==="officer-review").length,"blue")}${executiveModuleMetric("Committee review",rows.filter(l=>l.status==="committee-review").length,"violet")}${executiveModuleMetric("Awaiting Executive",rows.filter(l=>l.status==="executive-authorization").length,"gold")}</div>
-    <div class="notice"><div>${icons.shield}</div><div><strong>Who approves a loan?</strong><p>Credits Officer reviews and recommends. The Credit Committee approves the amount. Executive gives final authorization. Finance is not part of the loan decision.</p></div></div>
-    <div class="credits-loan-list">${rows.map(l=>creditsLoanRow(l,true)).join("")||`<div class="exec-empty">No applications await approval.</div>`}</div>`;
+  const rows=state.credits.loans.filter(l=>!["active","completed","rejected","overdue","closed"].includes(l.status));
+  const history=state.credits.loans.filter(l=>["ready-disbursement","active","overdue","completed","closed","rejected"].includes(l.status)
+    ||(l.approvalProgress&&(l.approvalProgress.approvedCount>0||(l.approvalProgress.advisoryRejects||[]).length)));
+  const decided=history.filter(l=>["ready-disbursement","active","overdue","completed","closed","rejected"].includes(l.status));
+  return `<div class="exec-module-metrics">${executiveModuleMetric("Pending",state.credits.stats.pendingApplications,"orange")}${executiveModuleMetric("Credits review",rows.filter(l=>["officer-review","pending","review","correction"].includes(l.status)).length,"blue")}${executiveModuleMetric("Awaiting Executive",rows.filter(l=>l.status==="executive-authorization").length,"gold")}${executiveModuleMetric("History records",decided.length,"green")}</div>
+    <div class="notice"><div>${icons.shield}</div><div><strong>Who approves a loan?</strong><p>Credit Committee then Executive Committee, with Chairperson Tabula Robert last and final on rejection.</p></div></div>
+    <div class="credits-loan-list">${rows.map(l=>creditsLoanRow(l,true)).join("")||`<div class="exec-empty">No applications await approval.</div>`}</div>
+    <section class="exec-panel exec-approval-history" style="margin-top:16px"><div class="exec-panel-head"><div><h3>Loan process history</h3><p>Completed and decided loans — open View details for the full Credit and Executive process</p></div></div>
+      <div class="table-scroll"><table><thead><tr><th>Loan</th><th>Member</th><th>Amount</th><th>Stage</th><th>Action</th></tr></thead><tbody>
+      ${decided.length?decided.map(l=>`<tr><td><strong>${escapeHtml(l.reference)}</strong><small>${escapeHtml(l.product||"")}</small></td><td>${escapeHtml(l.member)}</td><td>${money(l.amount)}</td><td>${status(l.status)}</td><td><button class="mini-btn" data-loan-detail-id="${l.id}" title="View full process">${icons.eye}</button></td></tr>`).join(""):`<tr><td colspan="5">No completed loan process records yet.</td></tr>`}
+      </tbody></table></div></section>`;
 }
 function loanRepaymentProgress(l) {
   const totalDue=Number(l.totalDue||l.amount||0),totalPaid=Number(l.totalPaid||Math.max(0,Number(l.amount||0)-Number(l.balance||0))),totalInterest=Number(l.totalInterest||Math.max(0,totalDue-Number(l.amount||0)));
@@ -1665,34 +1682,94 @@ function loanRepaymentProgress(l) {
 }
 function creditsActiveLoansView() {
   const rows=state.credits.loans.filter(l=>["active","overdue"].includes(l.status));
-  return `<div class="exec-module-metrics">${executiveModuleMetric("Active loans",rows.length,"blue")}${executiveModuleMetric("Outstanding principal",money(rows.reduce((n,l)=>n+Number(l.balance||0),0)),"violet")}${executiveModuleMetric("Contract total due",money(rows.reduce((n,l)=>n+Number(l.totalDue||l.amount||0),0)),"orange")}${executiveModuleMetric("Organization interest",money(rows.reduce((n,l)=>n+Number(l.totalInterest||0),0)),"green")}</div>
-    <div class="notice"><div>${icons.users}</div><div><strong>Member identity from Legal registration</strong><p>Each active facility shows the Legal-registered member number, contact details and purpose so Credits and Executive can follow up with the actual borrower.</p></div></div>
+  return `<div class="exec-module-metrics">${executiveModuleMetric("Active loans",rows.length,"blue")}${executiveModuleMetric("Outstanding principal",money(rows.reduce((n,l)=>n+Number(l.balance||0),0)),"violet")}${executiveModuleMetric("Total repayment",money(rows.reduce((n,l)=>n+Number(l.totalDue||l.amount||0),0)),"orange")}${executiveModuleMetric("Cash disbursed",money(rows.reduce((n,l)=>n+Math.max(0,Number(l.amount||0)-Number(l.processingFee||0)),0)),"green")}</div>
     <div class="credits-loan-list">${rows.map(l=>{
       const p=loanRepaymentProgress(l);
-      return `<article class="credits-active-loan"><div class="credits-loan-main"><span>${escapeHtml(l.reference)} - ${escapeHtml(l.product)}</span><h3>${escapeHtml(l.member)}</h3>
-        <p class="credits-borrower-meta"><strong>${escapeHtml(l.memberNumber||"No member number")}</strong> - ${escapeHtml(l.phone||"No phone on Legal record")} - ${escapeHtml(l.email||"No email")}</p>
-        <p>${escapeHtml(l.purpose||"Purpose not provided")} - ${l.termMonths} months at 2% monthly organization interest</p>
-        <small>Applied ${new Date(l.createdAt).toLocaleDateString()} - Officer: ${escapeHtml(l.officerHandling||"Unassigned")} - Status: ${escapeHtml(l.memberStatus||"active")}</small>
-        <div class="credits-row-progress"><div><span>Repayment progress (principal + interest)</span><strong>${p.progressPct}%</strong></div><i><u style="width:${p.progressPct}%"></u></i>
-          <small>Paid ${money(p.totalPaid)} of ${money(p.totalDue)} - Interest ${money(p.totalInterest)} - Remaining ${money(p.remaining)} - Next ${money(l.nextPaymentAmount||0)} on ${l.nextDueDate?new Date(l.nextDueDate).toLocaleDateString():"pending"}</small></div></div>
-        <div><strong>${money(l.amount)}</strong><small>Borrowed</small><strong>${money(l.balance)}</strong><small>Principal left</small></div>${status(l.status)}
-        <div class="credits-loan-actions"><button data-credits-member="${l.memberId}">${icons.users} Member</button><button data-credits-loan-detail="${l.reference}">Details</button>${!isExecutiveReadOnly()&&state.credits?.access?.canEdit?`<button class="approve" data-credits-modal="repayment">Record repayment</button>`:""}</div></article>`;
+      const fee=Number(l.processingFee||0),netDisbursed=Math.max(0,Number(l.amount||0)-fee);
+      return `<article class="credits-active-loan">
+        <div class="credits-loan-main">
+          <span>${escapeHtml(l.reference)} · ${escapeHtml(l.product)}</span>
+          <h3>${escapeHtml(l.member)}</h3>
+          <p class="credits-borrower-meta"><strong>${escapeHtml(l.memberNumber||"No member number")}</strong>${l.phone?` · ${escapeHtml(l.phone)}`:""}${l.email?` · ${escapeHtml(l.email)}`:""}</p>
+          <small>${l.termMonths} months · Applied ${new Date(l.createdAt).toLocaleDateString()}</small>
+        </div>
+        <div class="credits-active-figures">
+          <div><span>Total repayment</span><strong>${money(p.totalDue)}</strong></div>
+          <div><span>Cash given</span><strong>${money(netDisbursed)}</strong></div>
+          <div><span>Principal left</span><strong>${money(l.balance)}</strong></div>
+        </div>
+        ${status(l.status)}
+        <div class="credits-row-progress"><div><span>Repayment progress</span><strong>${p.progressPct}%</strong></div><i><u style="width:${p.progressPct}%"></u></i>
+          <small>Paid ${money(p.totalPaid)} of ${money(p.totalDue)} · Fee ${money(fee)} · Next ${money(l.nextPaymentAmount||0)}${l.nextDueDate?` on ${new Date(l.nextDueDate).toLocaleDateString()}`:""}</small></div>
+        <div class="credits-loan-actions"><button data-credits-member="${l.memberId}">${icons.users} Member</button><button data-loan-detail-id="${l.id}">View details</button>${!isExecutiveReadOnly()&&state.credits?.access?.canEdit?`<button class="approve" data-credits-modal="repayment">Record repayment</button>`:""}</div>
+      </article>`;
     }).join("")||`<div class="exec-empty">No active loans.</div>`}</div>`;
 }
+function loanApprovalQueue(l) {
+  const p=l.approvalProgress;if(!p?.reviewers?.length)return "";
+  const body=p.body||(p.stage==="credits"?"Credit Committee":"Executive Committee");
+  const next=p.nextReviewer?`<strong>Next: ${escapeHtml(p.nextReviewer.fullName)}${p.nextReviewer.positionTitle?` · ${escapeHtml(p.nextReviewer.positionTitle)}`:""}${p.nextReviewer.isFinalRejector?" (Tabula - final reject authority)":p.nextReviewer.isChair?" (final)":""}</strong>`:`<strong>${escapeHtml(body)} complete</strong>`;
+  return `<div class="loan-approval-queue"><div><span>${escapeHtml(body)} · ${p.approvedCount}/${p.requiredCount} approved</span>${next}</div>
+    <ol>${p.reviewers.map(r=>{
+      const waiting=p.nextReviewer&&Number(r.userId)===Number(p.nextReviewer.userId);
+      const cls=r.decision||(waiting?"next":"");
+      let mark=" · queued";
+      if(r.decision==="approve")mark=` · approved${r.comment?`: ${escapeHtml(r.comment)}`:""}`;
+      else if(r.advisoryReject)mark=` · advisory reject${r.comment?`: ${escapeHtml(r.comment)}`:""}`;
+      else if(r.decision==="reject"&&r.isFinalRejector)mark=` · final reject${r.comment?`: ${escapeHtml(r.comment)}`:""}`;
+      else if(r.decision)mark=` · ${r.decision}${r.comment?`: ${escapeHtml(r.comment)}`:""}`;
+      else if(waiting)mark=" · waiting now";
+      return `<li class="${cls}${r.advisoryReject?" advisory-reject":""}">${escapeHtml(r.fullName)}${r.positionTitle?` · ${escapeHtml(r.positionTitle)}`:""}${mark}</li>`;
+    }).join("")}</ol></div>`;
+}
 function creditsLoanRow(l,actions=false) {
-  const canOfficerReview=["officer-review","pending","review","correction"].includes(l.status)&&state.credits.access.canEdit&&!isExecutiveReadOnly();
-  const canCommitteeApprove=l.status==="committee-review"&&state.credits.access.canApprove&&Number(state.credits.access.authorityLevel)>=3&&!isExecutiveReadOnly();
+  const inCreditsReview=["officer-review","pending","review","correction","committee-review"].includes(l.status);
+  const canDecide=inCreditsReview&&l.canCurrentUserDecide&&!isExecutiveReadOnly()&&(state.credits.access.canEdit||state.credits.access.canApprove);
   const active=["active","overdue"].includes(l.status),p=loanRepaymentProgress(l);
-  const repayment=active?`<div class="credits-row-progress"><div><span>Repayment progress (principal + 2% monthly interest)</span><strong>${p.progressPct}%</strong></div><i><u style="width:${p.progressPct}%"></u></i><small>${money(p.totalPaid)} of ${money(p.totalDue)} paid - Next: ${money(l.nextPaymentAmount||0)} - ${l.nextDueDate?new Date(l.nextDueDate).toLocaleDateString():"Schedule pending"}</small></div>`:"";
-  const officerActions=canOfficerReview?`<button class="approve" data-credits-loan="${l.id}" data-credit-decision="recommend">Send to Committee</button><button class="return" data-credits-loan="${l.id}" data-credit-decision="return">Request information</button><button class="reject" data-credits-loan="${l.id}" data-credit-decision="reject">Reject</button>`:"";
-  const committeeActions=canCommitteeApprove?`<button class="approve" data-credits-loan="${l.id}" data-credit-decision="approve">Committee approve</button><button class="return" data-credits-loan="${l.id}" data-credit-decision="return">Return to officer</button><button class="reject" data-credits-loan="${l.id}" data-credit-decision="reject">Reject</button>`:"";
-  const waiting=l.status==="executive-authorization"?`<span class="maker-checker-note">Credit Committee approved - awaiting Executive authorization</span>`:"";
-  return `<article><div class="credits-loan-main"><span>${l.reference} - ${l.product}</span><h3>${l.member}</h3><p>${escapeHtml(l.memberNumber||"")} ${l.phone?`- ${escapeHtml(l.phone)}`:""}</p><p>${l.purpose||"Purpose not provided"} - ${l.termMonths} months at 2% monthly interest charged by the organization</p><small>Applied ${new Date(l.createdAt).toLocaleDateString()} - Officer: ${l.officerHandling}</small>${repayment}</div><div><strong>${money(l.amount)}</strong><small>Balance ${money(l.balance)}</small></div>${status(l.status)}<div class="credits-loan-actions">${officerActions}${committeeActions}${waiting}<button data-credits-loan-detail="${l.reference}">Details</button></div></article>`;
+  const nextLine=l.nextReviewer?`Next: ${escapeHtml(l.nextReviewer.fullName)}${l.nextReviewer.positionTitle?` · ${escapeHtml(l.nextReviewer.positionTitle)}`:""}`:(l.status==="executive-authorization"?"Awaiting Executive Committee":"");
+  const repayment=active?`<div class="credits-row-progress"><div><span>Repayment progress</span><strong>${p.progressPct}%</strong></div><i><u style="width:${p.progressPct}%"></u></i><small>${money(p.totalPaid)} of ${money(p.totalDue)} · Next ${money(l.nextPaymentAmount||0)}</small></div>`:"";
+  const officerActions=canDecide?`<button class="approve" data-credits-loan="${l.id}" data-credit-decision="approve">Approve</button><button class="return" data-credits-loan="${l.id}" data-credit-decision="return">Request information</button><button class="reject" data-credits-loan="${l.id}" data-credit-decision="reject">Reject</button>`:"";
+  return `<article class="credits-loan-card">
+    <div class="credits-loan-main">
+      <span>${escapeHtml(l.reference)} · ${escapeHtml(l.product)}</span>
+      <h3>${escapeHtml(l.member)}</h3>
+      <p>${escapeHtml(l.memberNumber||"")}${l.purpose?` · ${escapeHtml(l.purpose)}`:""} · ${l.termMonths} months</p>
+      <small>Applied ${new Date(l.createdAt).toLocaleDateString()}${nextLine?` · ${nextLine}`:""}</small>
+      ${repayment}
+    </div>
+    <div class="credits-loan-meta">
+      <strong>${money(l.amount)}</strong>
+      ${status(l.status)}
+    </div>
+    <div class="credits-loan-actions">${officerActions}<button data-loan-detail-id="${l.id}">View details</button></div>
+  </article>`;
 }
 function creditsDisbursementView() {
   const rows=state.credits.loans.filter(l=>["ready-disbursement","executive-authorization"].includes(l.status));
+  const receipts=(state.credits.transactions||[]).filter(t=>t.type==="Loan disbursement"&&t.status==="completed");
   return `<div class="credits-workflow">${["Credit Committee approved","Executive authorized","Credits sends funds","Schedule created"].map((x,i)=>`<span><b>${i+1}</b>${x}</span>`).join("<i>&gt;</i>")}</div>
-    <div class="credits-loan-list">${rows.map(l=>`<article><div class="credits-loan-main"><span>${l.reference} - ${l.product}</span><h3>${l.member}</h3><p>${l.purpose} - ${l.termMonths} months</p></div><div><strong>${money(l.verifiedAmount||l.amount)}</strong><small>Approved amount</small></div>${status(l.status)}<div class="credits-loan-actions">${l.status==="ready-disbursement"&&state.credits.access.canEdit?`<button class="approve" data-credits-disburse="${l.id}">Disburse</button>`:""}<button data-credits-loan-detail="${l.reference}">Details</button></div></article>`).join("")||`<div class="exec-empty">No loans currently await disbursement.</div>`}</div>`;
+    <div class="credits-loan-list">${rows.map(l=>{
+      const fee=Number(l.processingFee||Math.round(Number(l.verifiedAmount||l.amount)*0.02));
+      const net=Math.max(0,Number(l.verifiedAmount||l.amount)-fee);
+      return `<article><div class="credits-loan-main"><span>${l.reference} - ${l.product}</span><h3>${l.member}</h3><p>${l.purpose||"Purpose not provided"} - ${l.termMonths} months</p>
+        <small>Approved ${money(l.verifiedAmount||l.amount)} · Fee ${money(fee)} · Cash to send ${money(net)}</small></div>
+        <div><strong>${money(net)}</strong><small>Cash to member</small></div>${status(l.status)}
+        <div class="credits-loan-actions">${l.status==="ready-disbursement"&&state.credits.access.canEdit?`<button class="approve" data-credits-disburse="${l.id}">Disburse</button>`:""}<button data-loan-detail-id="${l.id}">View details</button></div></article>`;
+    }).join("")||`<div class="exec-empty">No loans currently await disbursement.</div>`}</div>
+    <section class="exec-panel exec-approval-history" style="margin-top:16px"><div class="exec-panel-head"><div><h3>Disbursement receipts</h3><p>Money actually given to members after the processing fee</p></div><button data-credits-page="credits-receipts">Open receipts &gt;</button></div>
+      <div class="table-scroll"><table><thead><tr><th>Receipt / Ref</th><th>Member</th><th>Loan</th><th>Cash given</th><th>Method</th><th>Date</th></tr></thead><tbody>
+      ${receipts.length?receipts.slice(0,8).map(t=>`<tr><td><strong>${escapeHtml(t.receiptNumber||t.reference)}</strong></td><td>${escapeHtml(t.member)}</td><td>${escapeHtml(t.loanReference||"—")}</td><td>${money(t.amount)}</td><td>${escapeHtml(t.method||"—")}</td><td>${new Date(t.verifiedAt||t.createdAt).toLocaleString()}</td></tr>`).join(""):`<tr><td colspan="6">No disbursement receipts yet.</td></tr>`}
+      </tbody></table></div></section>`;
+}
+function creditsReceiptsView() {
+  const rows=(state.credits.transactions||[]).filter(t=>t.type==="Loan disbursement"&&t.status==="completed");
+  const totalCash=rows.reduce((n,t)=>n+Number(t.amount||0),0);
+  return `<div class="exec-module-metrics">${executiveModuleMetric("Receipts",rows.length,"blue")}${executiveModuleMetric("Cash given out",money(totalCash),"green")}${executiveModuleMetric("This month",money(rows.filter(t=>new Date(t.verifiedAt||t.createdAt).getMonth()===new Date().getMonth()).reduce((n,t)=>n+Number(t.amount||0),0)),"orange")}</div>
+    <div class="notice"><div>${icons.wallet}</div><div><strong>Net cash after processing fee</strong><p>Each receipt shows the money actually sent to the member. The processing fee stays with the organization and is not part of this cash figure.</p></div></div>
+    ${financeDataTable("Loan disbursement receipts",["Receipt / Ref","Date","Member","Loan","Method","Destination / notes","Cash given","Status"],rows.map(t=>[
+      t.receiptNumber||t.reference,new Date(t.verifiedAt||t.createdAt).toLocaleString(),`${escapeHtml(t.member)}<small class="table-sub">${escapeHtml(t.memberNumber||"")}</small>`,
+      escapeHtml(t.loanReference||"—"),escapeHtml(t.method||"—"),escapeHtml(t.externalReference||t.notes||"—"),money(t.amount),status(t.status)
+    ]))}`;
 }
 function creditsRepaymentsView() {
   const c=state.credits,rows=c.transactions.filter(t=>t.type==="Loan repayment");
@@ -1767,15 +1844,24 @@ async function openCreditsModal(type,context="") {
     repayment:["Record loan repayment","The loan balance and installment schedule update immediately",`<form class="form" data-credits-form="repayment"><div class="form-grid"><div class="field full"><label>Active loan</label><select name="loanId" required><option value="">Select loan</option>${creditsLoanOptions(l=>["active","overdue"].includes(l.status))}</select></div><div class="field"><label>Amount (UGX)</label><input name="amount" type="number" min="1000" step="1000" required></div><div class="field"><label>Payment method</label><select name="method"><option>Cash</option><option>Mobile Money</option><option>Bank transfer</option></select></div><div class="field full"><label>Payment reference</label><input name="externalReference"></div><div class="field full"><label>Notes</label><textarea name="notes"></textarea></div></div>${formActions("Post repayment and issue receipt")}</form>`],
     recovery:["Record recovery follow-up","Keep a permanent reminder and action history",`<form class="form" data-credits-form="recovery"><div class="form-grid"><div class="field full"><label>Overdue loan</label><select name="loanId" required><option value="">Select loan</option>${creditsLoanOptions(l=>l.status==="overdue"||l.daysOverdue>0&&l.balance>0,context)}</select></div><div class="field"><label>Action type</label><select name="actionType"><option>Phone reminder</option><option>SMS reminder</option><option>Demand notice</option><option>Guarantor contact</option><option>Recovery meeting</option><option>Legal referral</option><option>Payment arrangement</option></select></div><div class="field"><label>Next follow-up</label><input name="followUpDate" type="date"></div><div class="field full"><label>Action notes</label><textarea name="notes" required></textarea></div></div>${formActions("Record recovery action")}</form>`],
     charge:["Assess interest, fee or penalty","Charges remain outstanding until settled or formally waived",`<form class="form" data-credits-form="charge"><div class="form-grid"><div class="field full"><label>Loan</label><select name="loanId" required><option value="">Select loan</option>${creditsLoanOptions(l=>["active","overdue"].includes(l.status))}</select></div><div class="field"><label>Charge type</label><select name="chargeType"><option>Late payment penalty</option><option>Service charge</option><option>Processing fee</option><option>Additional interest</option></select></div><div class="field"><label>Amount (UGX)</label><input name="amount" type="number" min="1" required></div><div class="field full"><label>Reason</label><textarea name="reason" required></textarea></div></div>${formActions("Assess charge")}</form>`],
-    loan:["New loan application","Eligibility and guarantor capacity are checked automatically",`<form class="form" data-credits-form="loan"><div class="form-grid"><div class="field full"><label>Member</label><select name="memberId" required><option value="">Select member</option>${creditsMemberOptions()}</select></div><div class="field"><label>Loan product</label><select name="productId">${state.products.map(p=>`<option value="${p.id}">${p.name} - ${p.annualRate}% p.a.</option>`).join("")}</select></div><div class="field"><label>Amount (UGX)</label><input name="amount" type="number" min="100000" step="50000" required></div><div class="field"><label>Repayment term</label><select name="termMonths"><option value="6">6 months</option><option value="12">12 months</option><option value="18">18 months</option><option value="24">24 months</option></select></div><div class="field full"><label>Choose guarantors (1-3)</label><div class="group-member-picker">${(state.guarantorCandidates||[]).map(g=>`<label class="group-member-option"><input type="checkbox" name="guarantorIds" value="${g.id}"><div class="chat-avatar">${initials(g.fullName)}</div><div><strong>${g.fullName}</strong><span>${g.memberNumber} - Savings ${money(g.savings)}</span></div></label>`).join("")||`<div class="empty-state">No eligible guarantor accounts.</div>`}</div><small>Each guarantor's current commitments and savings capacity are checked at submission.</small></div><div class="field full"><label>Purpose</label><textarea name="purpose" required></textarea></div><div class="field full"><label>Supporting document reference</label><input name="supportingDocument"></div></div>${formActions("Submit for guarantor consent")}</form>`]
+    loan:["New loan application","Eligibility and guarantor capacity are checked automatically",`<form class="form" data-credits-form="loan"><div class="form-grid"><div class="field full"><label>Member</label><select name="memberId" required><option value="">Select member</option>${creditsMemberOptions()}</select></div><div class="field"><label>Loan product</label><select name="productId" data-loan-product>${state.products.map(p=>`<option value="${p.id}" data-product-name="${p.name}">${p.name} - ${p.annualRate}% p.a.</option>`).join("")}</select></div><div class="field full" data-other-loan-fields hidden><label>Specify loan product</label><input name="customProductName" maxlength="120" placeholder="Type the loan product name"></div><div class="field"><label>Amount (UGX)</label><input name="amount" type="number" min="100000" step="50000" required></div><div class="field"><label>Repayment term</label><select name="termMonths"><option value="6">6 months</option><option value="12">12 months</option><option value="18">18 months</option><option value="24">24 months</option></select></div><div class="field full"><label>Choose guarantors (1-3)</label><div class="group-member-picker">${(state.guarantorCandidates||[]).map(g=>`<label class="group-member-option"><input type="checkbox" name="guarantorIds" value="${g.id}"><div class="chat-avatar">${initials(g.fullName)}</div><div><strong>${g.fullName}</strong><span>${g.memberNumber} - Savings ${money(g.savings)}</span></div></label>`).join("")||`<div class="empty-state">No eligible guarantor accounts.</div>`}</div><small>Each guarantor's current commitments and savings capacity are checked at submission.</small></div><div class="field full"><label>Purpose</label><textarea name="purpose" required></textarea></div><div class="field full"><label>Supporting document reference</label><input name="supportingDocument"></div></div>${formActions("Submit for guarantor consent")}</form>`]
   };
   const [title,subtitle,form]=forms[type]||forms.deposit;
   document.body.insertAdjacentHTML("beforeend",`<div class="modal-backdrop" id="modal-backdrop"><div class="modal"><div class="modal-head"><div><h2>${title}</h2><p>${subtitle}</p></div><button class="modal-close" data-close>${icons.x}</button></div>${form}</div></div>`);
   document.querySelector("[data-close]").onclick=closeModal;document.querySelector("[data-credits-form]").onsubmit=submitCreditsForm;
+  const syncOtherLoan=()=>{const select=document.querySelector("[data-loan-product]"),box=document.querySelector("[data-other-loan-fields]"),input=document.querySelector("[name=customProductName]");if(!select||!box||!input)return;const option=select.selectedOptions?.[0];const isOther=/^other loan$/i.test(option?.dataset.productName||"");box.hidden=!isOther;input.required=isOther;if(!isOther)input.value="";};
+  document.querySelector("[data-loan-product]")?.addEventListener("change",syncOtherLoan);syncOtherLoan();
 }
 async function submitCreditsForm(event) {
   event.preventDefault();const form=event.currentTarget,data=Object.fromEntries(new FormData(form)),type=form.dataset.creditsForm;
-  if(type==="loan")data.guarantorIds=new FormData(form).getAll("guarantorIds").map(Number);
+  if(type==="loan"){
+    data.guarantorIds=new FormData(form).getAll("guarantorIds").map(Number);
+    data.borrowerDeclaration=data.borrowerDeclaration||"accepted";
+    data.overdueDeclaration=data.overdueDeclaration||"accepted";
+    data.securityType=data.securityType||"savings_and_shares";
+    const option=form.elements.productId?.selectedOptions?.[0];
+    if(/^other loan$/i.test(option?.dataset.productName||"")&&!String(data.customProductName||"").trim())return toast("Type the loan product name for Other Loan.");
+  }
   const endpoints={deposit:"/api/credits/deposits",withdrawal:"/api/credits/withdrawals",repayment:"/api/credits/repayments",
     charge:"/api/credits/charges",loan:"/api/loans",recovery:`/api/credits/recovery/${data.loanId}`};
   if(type==="recovery")delete data.loanId;
@@ -1827,14 +1913,21 @@ function exitMemberDashboard() {
   window.scrollTo(0, 0);
 }
 async function creditsLoanDecision(id,decision) {
-  const comment=await promptDialog(decision==="recommend"?"Credits officer appraisal and recommendation:":decision==="approve"?"Credit Committee approval comment:":decision==="return"?"Information or correction required:":"Reason for rejection:","");
-  if(comment===null||!comment.trim())return;
-  try{await api(`/api/loans/${id}/decision`,{method:"POST",body:JSON.stringify({decision,comment})});await refreshCredits();render();toast(decision==="recommend"?"Application sent to the Credit Committee.":decision==="approve"?"Credit Committee approved the loan and sent it to Executive.":"Loan decision recorded.");}catch(error){toast(error.message);}
+  let comment="";
+  if(decision==="approve"){
+    if(!await confirmDialog("Approve this loan and send it to the next reviewer?"))return;
+  } else {
+    comment=await promptDialog(decision==="return"?"Information or correction required:":"Reason for rejection:","");
+    if(comment===null||!comment.trim())return;
+  }
+  try{const result=await api(`/api/loans/${id}/decision`,{method:"POST",body:JSON.stringify({decision,comment})});await refreshCredits();render();toast(decision==="approve"?"Your Credits approval was recorded. The next officer in the queue will review next.":decision==="reject"?(result.advisoryReject?"Rejection reason recorded. The loan continues to the next reviewer — only Tabula can finally reject.":"Loan rejected."):"Loan decision recorded.");}catch(error){toast(error.message);}
 }
 async function creditsDisburse(id) {
   const loan=state.credits.loans.find(l=>String(l.id)===String(id));if(!loan)return;
-  if(!await confirmDialog(`Disburse ${money(loan.verifiedAmount||loan.amount)} to ${loan.member}? This creates the repayment schedule.`))return;
-  try{const result=await api(`/api/loans/${id}/disburse`,{method:"POST",body:"{}"});await refreshCredits();render();toast(`Loan disbursed. Transaction ${result.transactionReference}.`);}catch(error){toast(error.message);}
+  const fee=Number(loan.processingFee||Math.round(Number(loan.verifiedAmount||loan.amount)*0.02));
+  const net=Math.max(0,Number(loan.verifiedAmount||loan.amount)-fee);
+  if(!await confirmDialog(`Disburse net ${money(net)} to ${loan.member}? Full principal ${money(loan.verifiedAmount||loan.amount)} remains repayable after the ${money(fee)} processing fee deduction.`))return;
+  try{const result=await api(`/api/loans/${id}/disburse`,{method:"POST",body:"{}"});await refreshCredits();render();toast(`Loan disbursed. Net cash ${money(result.netCash)}. Transaction ${result.transactionReference}.`);}catch(error){toast(error.message);}
 }
 async function waiveCreditCharge(id) {
   const reason=await promptDialog("Approved reason for waiving this charge:","");if(reason===null||!reason.trim())return;
@@ -2485,6 +2578,7 @@ function bind() {
   document.querySelectorAll("[data-credits-report]").forEach(el=>el.addEventListener("click",()=>downloadCreditsReport(el.dataset.creditsReport,el.dataset.format||"excel")));
   document.querySelectorAll("[data-credits-report-preview]").forEach(el=>el.addEventListener("click",()=>openOperationalReportPreview("credits",el.dataset.creditsReportPreview)));
   document.querySelectorAll("[data-credits-loan-detail]").forEach(el=>el.addEventListener("click",()=>openLoanDetails(el.dataset.creditsLoanDetail)));
+  document.querySelectorAll("[data-loan-detail-id]").forEach(el=>el.addEventListener("click",()=>openLoanDetails(el.dataset.loanDetailId)));
   document.querySelectorAll("[data-investment-page]").forEach(el=>el.addEventListener("click",()=>{
     state.page=el.dataset.investmentPage;state.investmentQuickOpen=false;render();window.scrollTo(0,0);
   }));
@@ -2756,7 +2850,7 @@ function memberOptions(selected="") { return state.members.map(m=>`<option value
 function userForm() { return `<form class="form" data-form="user"><div class="form-grid"><div class="field full"><label>Full name</label><input name="fullName" required></div><div class="field"><label>Email</label><input name="email" type="email" required></div><div class="field"><label>Phone</label><input name="phone" required></div><div class="field"><label>System role</label><select name="role">${roles.map(r=>`<option>${r}</option>`).join("")}</select></div><div class="field"><label>Branch</label><select name="branchId">${(state.branches||[{id:state.user.branch_id,name:state.user.branch_name}]).map(b=>`<option value="${b.id}">${b.name}</option>`).join("")}</select></div><div class="field"><label>Department dashboard</label><select name="departmentId"><option value="">No staff department</option>${(state.departments||[]).map(d=>`<option value="${d.id}">${d.name}</option>`).join("")}</select></div><div class="field"><label>Department position</label><input name="positionTitle" placeholder="e.g. Welfare Officer"></div><div class="field"><label>Authority level</label><select name="authorityLevel"><option value="1">1 - Member information</option><option value="2">2 - Operational</option><option value="3">3 - Officer</option><option value="4">4 - Department leadership</option><option value="5">5 - Executive / Board</option></select></div><div class="field full"><label>Department rights</label><div class="permission-picker"><label><input type="checkbox" name="canCreate"> Create</label><label><input type="checkbox" name="canEdit"> Edit</label><label><input type="checkbox" name="canApprove"> Approve</label><label><input type="checkbox" name="isHead"> Department head</label></div></div><div class="field full"><label>Link member record (for Member login)</label><select name="memberId"><option value="">Not linked</option>${memberOptions()}</select></div><div class="field full"><label>Temporary password</label><input name="password" type="password" autocomplete="new-password" placeholder="Leave blank to generate securely"><small>Enter a strong password or let the system generate a one-time password.</small></div></div>${formActions("Create secure account")}</form>`; }
 function memberForm() { return `<form class="form" data-form="member"><div class="form-grid"><div class="field full"><label>Full legal name</label><input name="fullName" required></div><div class="field"><label>Phone</label><input name="phone" required></div><div class="field"><label>Email</label><input name="email" type="email"></div><div class="field"><label>National ID</label><input name="nationalId" required></div><div class="field"><label>Opening savings</label><input name="savings" type="number" min="0" value="0"></div><div class="field"><label>Share capital</label><input name="shares" type="number" min="0" value="50000"></div><div class="field"><label>Occupation</label><input name="occupation"></div><div class="field"><label>Employer / Business</label><input name="employer"></div><div class="field full"><label>Address</label><input name="address"></div><div class="field full"><label>Next of kin</label><input name="nextOfKin" required></div></div>${formActions("Register member")}</form>`; }
 function depositForm(type) { return `<form class="form" data-form="deposit"><input type="hidden" name="type" value="${type}"><div class="form-grid"><div class="field full"><label>Member</label><select name="memberId" required><option value="">Select member</option>${memberOptions()}</select></div><div class="field"><label>Amount (UGX)</label><input name="amount" type="number" min="1000" step="1000" required></div><div class="field"><label>Payment method</label><select name="method"><option>Cash</option><option>Mobile Money</option><option>Bank transfer</option><option>Cheque</option></select></div><div class="field full"><label>External reference</label><input name="externalReference"></div></div>${formActions(type==="Loan repayment"?"Record repayment":"Record pending deposit")}</form>`; }
-function loanForm() { return `<form class="form" data-form="loan"><div class="form-grid"><div class="field full"><label>Member</label><select name="memberId" required>${state.role==="Member"?memberOptions(state.members[0].databaseId):`<option value="">Select member</option>${memberOptions()}`}</select></div><div class="field"><label>Loan product</label><select name="productId">${state.products.map(p=>`<option value="${p.id}">${p.name} - ${p.annualRate}% p.a.</option>`).join("")}</select></div><div class="field"><label>Amount (UGX)</label><input name="amount" type="number" min="100000" step="50000" required></div><div class="field"><label>Repayment term</label><select name="termMonths"><option value="6">6 months</option><option value="12">12 months</option><option value="18">18 months</option><option value="24">24 months</option></select></div><div class="field full"><label>Choose guarantors (1-3)</label><div class="group-member-picker">${(state.guarantorCandidates||[]).map(g=>`<label class="group-member-option"><input type="checkbox" name="guarantorIds" value="${g.id}"><div class="chat-avatar">${initials(g.fullName)}</div><div><strong>${g.fullName}</strong><span>${g.memberNumber} - Savings ${money(g.savings)}</span></div></label>`).join("")||`<div class="empty-state">No eligible guarantors with login accounts.</div>`}</div><small>Guarantors must accept from their own dashboards before officer review begins.</small></div><div class="field full"><label>Loan purpose</label><textarea name="purpose" required placeholder="Explain how this loan will be used"></textarea></div></div>${formActions("Submit for guarantor consent")}</form>`; }
+function loanForm() { return `<form class="form" data-form="loan"><div class="form-grid"><div class="field full"><label>Member</label><select name="memberId" required>${state.role==="Member"?memberOptions(state.members[0].databaseId):`<option value="">Select member</option>${memberOptions()}`}</select></div><div class="field"><label>Loan product</label><select name="productId" data-loan-product>${state.products.map(p=>`<option value="${p.id}" data-product-name="${p.name}">${p.name} - ${p.annualRate}% p.a.</option>`).join("")}</select></div><div class="field full" data-other-loan-fields hidden><label>Specify loan product</label><input name="customProductName" maxlength="120" placeholder="Type the loan product name"></div><div class="field"><label>Amount (UGX)</label><input name="amount" type="number" min="100000" step="50000" required></div><div class="field"><label>Repayment term</label><select name="termMonths"><option value="6">6 months</option><option value="12">12 months</option><option value="18">18 months</option><option value="24">24 months</option></select></div><div class="field full"><label>Choose guarantors (1-3)</label><div class="group-member-picker">${(state.guarantorCandidates||[]).map(g=>`<label class="group-member-option"><input type="checkbox" name="guarantorIds" value="${g.id}"><div class="chat-avatar">${initials(g.fullName)}</div><div><strong>${g.fullName}</strong><span>${g.memberNumber} - Savings ${money(g.savings)}</span></div></label>`).join("")||`<div class="empty-state">No eligible guarantors with login accounts.</div>`}</div><small>Guarantors must accept from their own dashboards before officer review begins.</small></div><div class="field full"><label>Loan purpose</label><textarea name="purpose" required placeholder="Explain how this loan will be used"></textarea></div></div>${formActions("Submit for guarantor consent")}</form>`; }
 function withdrawalForm() { return `<form class="form" data-form="withdrawal"><div class="form-grid"><div class="field full"><label>Member</label><select name="memberId" required>${state.role==="Member"?memberOptions(state.members[0].databaseId):`<option value="">Select member</option>${memberOptions()}`}</select></div><div class="field"><label>Amount (UGX)</label><input name="amount" type="number" min="10000" step="10000" required></div><div class="field"><label>Payment method</label><select name="method"><option>Mobile Money</option><option>Bank transfer</option><option>Cash</option></select></div><div class="field full"><label>Reason</label><textarea name="reason" required></textarea><small>A minimum balance of UGX 100,000 must remain.</small></div></div>${formActions("Submit request")}</form>`; }
 function departmentActivityForm() { return `<form class="form" data-form="department-activity"><div class="form-grid"><div class="field"><label>Activity type</label><select name="activityType"><option>General</option><option>Project</option><option>Request</option><option>Review</option><option>Meeting</option><option>Report</option></select></div><div class="field"><label>Visibility level</label><select name="visibilityLevel">${Array.from({length:state.departmentData.access.authorityLevel},(_,i)=>`<option value="${i+1}">Level ${i+1}</option>`).join("")}</select></div><div class="field full"><label>Title</label><input name="title" maxlength="150" required></div><div class="field full"><label>Description</label><textarea name="description" maxlength="1000"></textarea></div><div class="field full"><label>Amount (UGX, optional)</label><input name="amount" type="number" min="0" step="1000"></div></div>${formActions("Create activity")}</form>`; }
 function formActions(label) { return `<div class="form-actions"><button type="button" class="button secondary" data-close-modal>Cancel</button><button type="submit" class="button primary">${label}</button></div>`; }
@@ -2823,18 +2917,78 @@ async function handleLoanAction(action,loanReference) {
     await refreshData();render();
   } catch(error){toast(error.message);}
 }
-async function openLoanDetails(reference) {
-  const basic=state.loans.find(item=>item.id===reference);
-  if(!basic)return toast("Loan details are unavailable.");
+function loanSecurityLabel(type) {
+  if(type==="collateral")return "Collateral";
+  if(type==="savings_and_shares")return "Savings and shares";
+  return type?String(type).replaceAll("_"," "):"Not recorded";
+}
+function loanApplicationDetailsHtml(loan) {
+  const security=String(loan.security_type||"").toLowerCase();
+  const isCollateral=security==="collateral";
+  const policyAccepted=loan.borrower_declaration_accepted===true||loan.borrower_declaration_accepted==="t";
+  const overdueAccepted=loan.overdue_declaration_accepted===true||loan.overdue_declaration_accepted==="t"||policyAccepted;
+  const collateralConsent=loan.collateral_owner_consent===true||loan.collateral_owner_consent==="t";
+  const hasDocument=!!loan.supporting_document_stored_name;
+  const rows=[
+    ["Loan product",escapeHtml(loan.product||"—")],
+    ["Repayment term",`${loan.term_months||"—"} months`],
+    ["Loan purpose",loan.purpose?escapeHtml(loan.purpose):"Not provided"],
+    ["Security offered",escapeHtml(loanSecurityLabel(security))],
+    ["Loan policy accepted",policyAccepted?`<span class="status active">Accepted</span>`:`<span class="status pending">Not recorded</span>`],
+    ["Policy reference",escapeHtml(loan.policy_reference||"—")],
+    ["Overdue penalty declaration",overdueAccepted?`<span class="status active">Accepted</span>`:`<span class="status pending">Not recorded</span>`],
+    ["Savings at application",money(loan.savings_at_application||0)]
+  ];
+  const collateral=isCollateral?`
+    <h3 class="loan-section-title">Collateral details</h3>
+    <div class="loan-application-grid">
+      <div><span>Description</span><strong>${escapeHtml(loan.collateral_description||"Not provided")}</strong></div>
+      <div><span>Estimated value</span><strong>${money(loan.collateral_value||0)}</strong></div>
+      <div><span>Owner</span><strong>${escapeHtml(loan.collateral_owner||"—")}</strong></div>
+      <div><span>Owner phone</span><strong>${escapeHtml(loan.collateral_owner_phone||"—")}</strong></div>
+      <div><span>Owner consent</span><strong>${collateralConsent?`<span class="status active">Consent given</span>`:`<span class="status pending">Not recorded</span>`}</strong></div>
+    </div>`:"";
+  const document=hasDocument?`<div class="notice"><div>${icons.file}</div><div><strong>Supporting document</strong><p>${escapeHtml(loan.supporting_document_original_name||"Attached file")}</p><p><a class="button secondary" href="/api/loans/${loan.id}/supporting-document" target="_blank">${icons.eye} View document</a></p></div></div>`:"";
+  return `<h3 class="loan-section-title">Member application</h3>
+    <div class="loan-application-grid">${rows.map(([label,value])=>`<div><span>${label}</span><strong>${value}</strong></div>`).join("")}</div>
+    ${collateral}${document}`;
+}
+async function openLoanDetails(referenceOrId) {
+  const key=String(referenceOrId||"");
+  let loanId=null;
+  if(/^\d+$/.test(key))loanId=key;
+  else {
+    const fromBootstrap=(state.loans||[]).find(item=>item.id===key||item.reference===key);
+    const fromCredits=(state.credits?.loans||[]).find(item=>item.reference===key||String(item.id)===key);
+    const fromExec=[...(state.executive?.approvals||[]),...(state.executive?.approvalHistory||[])]
+      .find(item=>item.recordType==="loan"&&(item.reference===key||String(item.loanId)===key||String(item.id)===key));
+    loanId=fromBootstrap?.databaseId||fromCredits?.id||fromExec?.loanId||fromExec?.id||null;
+  }
+  if(!loanId)return toast("Loan details are unavailable.");
   try {
-    const details=await api(`/api/loans/${basic.databaseId}/details`);
+    const details=await api(`/api/loans/${loanId}/details`);
     const loan=details.loan;
-    document.body.insertAdjacentHTML("beforeend",`<div class="modal-backdrop" id="modal-backdrop"><div class="modal loan-detail-modal"><div class="modal-head"><div><h2>${loan.reference} - ${loan.product}</h2><p>${loan.member} - ${loan.term_months} months at ${loan.annual_rate}% p.a.</p></div><button class="modal-close" data-close>${icons.x}</button></div>
-      <div class="form"><div class="loan-detail-summary"><div><span>Applied amount</span><strong>${money(loan.amount)}</strong></div><div><span>Outstanding</span><strong>${money(loan.balance)}</strong></div><div><span>Current stage</span>${status(loan.status)}</div><div><span>Verified amount</span><strong>${loan.verified_amount?money(loan.verified_amount):"?"}</strong></div></div>
-      ${loan.eligibility_result?`<div class="notice">${icons.shield}<div><strong>System eligibility check passed</strong><p>${escapeHtml(loan.eligibility_result)} - Savings at application: ${money(loan.savings_at_application||0)} - Existing loans: ${money(loan.existing_loan_balance||0)}</p></div></div>`:""}
-      <h3 class="loan-section-title">Guarantors</h3><div class="loan-guarantors">${details.guarantors.length?details.guarantors.map(g=>`<div class="setting-row"><div class="chat-avatar">${initials(g.name)}</div><div class="setting-copy"><strong>${g.name}</strong><span>${g.memberNumber}${g.note?` - ${escapeHtml(g.note)}`:""}</span></div>${status(g.status)}</div>`).join(""):`<p class="page-subtitle">No guarantors recorded for this legacy loan.</p>`}</div>
-      <h3 class="loan-section-title">Approval journey</h3><div class="workflow-timeline">${details.events.length?details.events.map(event=>`<div class="workflow-event"><i></i><div><strong>${workflowLabel(event.stage,event.action)}</strong><span>${event.actor} - ${new Date(event.createdAt).toLocaleString()}</span>${event.comment?`<p>${escapeHtml(event.comment)}</p>`:""}</div></div>`).join(""):`<p class="page-subtitle">No workflow events recorded for this legacy loan.</p>`}</div>
-      ${details.disbursement?`<h3 class="loan-section-title">Disbursement</h3><div class="notice ${details.disbursement.status==="disbursed"?"":"warning"}">${icons.wallet}<div><strong>${money(details.disbursement.amount)} - ${details.disbursement.status}</strong><p>${details.disbursement.method} to ${escapeHtml(details.disbursement.destination)}${details.disbursement.transactionReference?` - ${details.disbursement.transactionReference}`:""}</p></div></div>`:""}
+    const creditsQueue=details.approvalQueues?.credits;
+    const executiveQueue=details.approvalQueues?.executive;
+    closeModal();
+    document.body.insertAdjacentHTML("beforeend",`<div class="modal-backdrop" id="modal-backdrop"><div class="modal loan-detail-modal"><div class="modal-head"><div><h2>${escapeHtml(loan.reference)} - ${escapeHtml(loan.product)}</h2><p>${escapeHtml(loan.member)} · ${loan.term_months} months · ${status(loan.status)}</p></div><button class="modal-close" data-close>${icons.x}</button></div>
+      <div class="form">
+      <div class="loan-detail-summary">
+        <div><span>Applied amount</span><strong>${money(loan.amount)}</strong></div>
+        <div><span>Outstanding</span><strong>${money(loan.balance)}</strong></div>
+        <div><span>Processing fee</span><strong>${money(loan.processing_fee||0)}</strong></div>
+      </div>
+      ${loan.eligibility_result?`<div class="notice">${icons.shield}<div><strong>Eligibility</strong><p>${escapeHtml(loan.eligibility_result)}</p></div></div>`:""}
+      ${loanApplicationDetailsHtml(loan)}
+      <h3 class="loan-section-title">Guarantors</h3>
+      <div class="loan-guarantors">${details.guarantors.length?details.guarantors.map(g=>`<div class="setting-row"><div class="chat-avatar">${initials(g.name)}</div><div class="setting-copy"><strong>${escapeHtml(g.name)}</strong><span>${escapeHtml(g.memberNumber||"")}${g.note?` · ${escapeHtml(g.note)}`:""}</span></div>${status(g.status)}</div>`).join(""):`<p class="page-subtitle">${String(loan.security_type||"").toLowerCase()==="collateral"?"No guarantors — collateral security was offered.":"No guarantors recorded."}</p>`}</div>
+      <h3 class="loan-section-title">Full approval process</h3>
+      <div class="workflow-timeline">${details.events.length?details.events.map(event=>`<div class="workflow-event"><i></i><div><strong>${workflowLabel(event.stage,event.action)}</strong><span>${escapeHtml(event.actor)} · ${new Date(event.createdAt).toLocaleString()}</span>${event.comment?`<p>${escapeHtml(event.comment)}</p>`:""}</div></div>`).join(""):`<p class="page-subtitle">No workflow events recorded yet.</p>`}</div>
+      <h3 class="loan-section-title">Credit Committee</h3>
+      ${loanApprovalQueue({approvalProgress:creditsQueue})||`<p class="page-subtitle">Credit Committee queue not started.</p>`}
+      <h3 class="loan-section-title">Executive Committee</h3>
+      ${loanApprovalQueue({approvalProgress:executiveQueue})||`<p class="page-subtitle">Executive Committee queue not started.</p>`}
+      ${details.disbursement?`<h3 class="loan-section-title">Disbursement</h3><div class="notice ${details.disbursement.status==="disbursed"?"":"warning"}">${icons.wallet}<div><strong>${money(details.disbursement.amount)} · ${escapeHtml(details.disbursement.status)}</strong><p>${escapeHtml(details.disbursement.method||"")} to ${escapeHtml(details.disbursement.destination||"")}${details.disbursement.transactionReference?` · ${escapeHtml(details.disbursement.transactionReference)}`:""}</p><p>Processing fee ${money(loan.processing_fee||0)} · Cash given to member ${money(Math.max(0,Number(details.disbursement.amount||loan.amount||0)-Number(loan.processing_fee||0)))}</p></div></div>`:""}
       ${details.schedule.length?`<h3 class="loan-section-title">Repayment schedule</h3><div class="table-scroll repayment-scroll"><table><thead><tr><th>#</th><th>Due date</th><th>Opening balance</th><th>Principal</th><th>Interest</th><th>Total due</th><th>Status</th></tr></thead><tbody>${details.schedule.map(row=>`<tr><td>${row.installment}</td><td>${new Date(row.dueDate).toLocaleDateString()}</td><td>${money(row.openingBalance)}</td><td>${money(row.principal)}</td><td>${money(row.interest)}</td><td class="cell-main">${money(row.totalDue)}</td><td>${status(row.status)}</td></tr>`).join("")}</tbody></table></div>`:""}
       <div class="form-actions"><button class="button primary" data-close-2>Done</button></div></div></div></div>`);
     document.querySelector("[data-close]").onclick=closeModal;document.querySelector("[data-close-2]").onclick=closeModal;
@@ -2842,7 +2996,8 @@ async function openLoanDetails(reference) {
 }
 function workflowLabel(stage,action) {
   const labels={"application":"Application submitted","guarantor-consent":"Guarantor response","officer-review":"Loans officer review","committee-review":"Credit committee decision","executive-authorization":"Executive authorization","disbursement":"Funds disbursed"};
-  return `${labels[stage]||stage.replaceAll("-"," ")} - ${action}`;
+  const actions={"advisory-reject":"advisory rejection (loan continues)","reject":"rejection","approve":"approval","return":"returned for information","submitted":"submitted","accepted":"accepted","rejected":"rejected"};
+  return `${labels[stage]||stage.replaceAll("-"," ")} - ${actions[action]||action}`;
 }
 
 function detailModal(title,subtitle,rows) {

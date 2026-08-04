@@ -8,15 +8,32 @@ module.exports = function registerLegalBioDataApi({
       req.legalAccess=access;next();
     });
   }
+  // Official Executive Memo committees → department filter codes (Board is not a department roster).
+  const officialDeptSql=`CASE gb.code
+      WHEN 'exco' THEN 'executive'
+      WHEN 'credit-committee' THEN 'credits'
+      WHEN 'investment-committee' THEN 'investment'
+      WHEN 'legal-committee' THEN 'legal'
+      WHEN 'finance-committee' THEN 'finance'
+      WHEN 'welfare-committee' THEN 'welfare'
+      WHEN 'supervisory-committee' THEN 'supervisory'
+      WHEN 'audit-committee' THEN 'audit'
+      ELSE NULL END`;
+  const officialMemberDepts=`SELECT ga.linked_member_id AS member_id, ${officialDeptSql} AS dept_code,
+      d.name AS dept_name, gb.name AS body_name, ga.position_title
+    FROM governance_appointments ga
+    JOIN governance_bodies gb ON gb.id=ga.body_id
+    JOIN departments d ON d.code=${officialDeptSql}
+    WHERE ga.status='active' AND ga.linked_member_id IS NOT NULL
+      AND gb.code IN ('exco','credit-committee','investment-committee','legal-committee',
+        'finance-committee','welfare-committee','supervisory-committee','audit-committee')`;
   const selectBio=`SELECT m.id AS "memberId",m.member_number AS "memberNumber",m.full_name AS "fullName",
     m.email,CASE WHEN m.provisional THEN NULL ELSE m.phone END AS phone,CASE WHEN m.provisional THEN NULL ELSE m.national_id END AS "nationalId",m.occupation,m.employer,m.address,m.next_of_kin AS "nextOfKin",
     m.beneficiaries,m.status AS "membershipStatus",m.joined_at AS "joinedAt",br.name AS branch,
     b.date_of_birth AS "dateOfBirth",b.gender,b.marital_status AS "maritalStatus",
     COALESCE(b.nationality,'Ugandan') AS nationality,b.home_district AS "homeDistrict",b.subcounty,b.parish,b.village,
     b.emergency_contact_name AS "emergencyContactName",b.emergency_contact_phone AS "emergencyContactPhone",
-    b.emergency_contact_relationship AS "emergencyContactRelationship",b.blood_group AS "bloodGroup",
-    b.disability_notes AS "disabilityNotes",b.profile_photo_reference AS "profilePhotoReference",
-    b.identity_document_reference AS "identityDocumentReference",b.record_notes AS "recordNotes",
+    b.emergency_contact_relationship AS "emergencyContactRelationship",
     COALESCE(b.bio_status,'pending') AS "bioStatus",b.verified_at AS "verifiedAt",
     verifier.full_name AS "verifiedBy",b.updated_at AS "updatedAt",
     login_account.id AS "userId",login_account.email AS "loginEmail",login_account.role AS "accountRole",
@@ -27,34 +44,55 @@ module.exports = function registerLegalBioDataApi({
      CASE WHEN b.gender IS NOT NULL THEN 1 ELSE 0 END+
      CASE WHEN b.nationality IS NOT NULL THEN 1 ELSE 0 END+
      CASE WHEN b.home_district IS NOT NULL THEN 1 ELSE 0 END+
-     CASE WHEN b.emergency_contact_name IS NOT NULL THEN 1 ELSE 0 END+
-     CASE WHEN b.identity_document_reference IS NOT NULL THEN 1 ELSE 0 END)*100/6 AS "completionPercentage"
+     CASE WHEN b.emergency_contact_name IS NOT NULL THEN 1 ELSE 0 END)*100/5 AS "completionPercentage",
+    COALESCE((SELECT json_agg(json_build_object('code',od.dept_code,'name',od.dept_name,
+        'title',od.body_name||': '||od.position_title) ORDER BY od.dept_name)
+      FROM (${officialMemberDepts}) od WHERE od.member_id=m.id),'[]'::json) AS departments
     FROM members m LEFT JOIN member_bio_data b ON b.member_id=m.id
     LEFT JOIN branches br ON br.id=m.branch_id LEFT JOIN users verifier ON verifier.id=b.verified_by
     LEFT JOIN users login_account ON login_account.member_id=m.id`;
 
   app.get("/api/legal/bio-data",auth,requireLegal("view"),asyncRoute(async(req,res)=>{
-    const term=String(req.query.q||"").trim(),status=String(req.query.status||"all");
-    const limit=Math.min(200,Math.max(1,Number(req.query.limit)||100)),like=`%${term}%`;
-    const params=[like,status,limit];
+    const term=String(req.query.q||"").trim(),status=String(req.query.status||"all"),
+      department=String(req.query.department||"all").trim().toLowerCase();
+    const limit=Math.min(300,Math.max(1,Number(req.query.limit)||200)),like=`%${term}%`;
+    const params=[like,status,department,limit];
     const result=await query(`${selectBio}
       WHERE ($1='%%' OR m.full_name ILIKE $1 OR m.member_number ILIKE $1 OR m.phone ILIKE $1
         OR COALESCE(m.email,'') ILIKE $1 OR COALESCE(login_account.email,'') ILIKE $1 OR m.national_id ILIKE $1 OR COALESCE(m.occupation,'') ILIKE $1
         OR COALESCE(m.employer,'') ILIKE $1 OR COALESCE(m.address,'') ILIKE $1
         OR COALESCE(m.next_of_kin,'') ILIKE $1 OR COALESCE(b.home_district,'') ILIKE $1
         OR COALESCE(b.subcounty,'') ILIKE $1 OR COALESCE(b.parish,'') ILIKE $1
-        OR COALESCE(b.village,'') ILIKE $1 OR COALESCE(b.emergency_contact_name,'') ILIKE $1)
+        OR COALESCE(b.village,'') ILIKE $1 OR COALESCE(b.emergency_contact_name,'') ILIKE $1
+        OR COALESCE(login_account.role,'') ILIKE $1)
       AND m.deleted_at IS NULL
       AND ($2='all' OR COALESCE(b.bio_status,'pending')=$2)
-      ORDER BY m.full_name LIMIT $3`,params);
+      AND ($3='all'
+        OR ($3='members' AND NOT EXISTS (
+          SELECT 1 FROM (${officialMemberDepts}) od WHERE od.member_id=m.id))
+        OR EXISTS (
+          SELECT 1 FROM (${officialMemberDepts}) od WHERE od.member_id=m.id AND od.dept_code=$3))
+      ORDER BY m.full_name LIMIT $4`,params);
     const totals=await one(`SELECT COUNT(*)::int AS total,
       COUNT(*) FILTER (WHERE COALESCE(b.bio_status,'pending')='verified')::int AS verified,
       COUNT(*) FILTER (WHERE COALESCE(b.bio_status,'pending')='complete')::int AS complete,
       COUNT(*) FILTER (WHERE COALESCE(b.bio_status,'pending') IN ('pending','needs_update'))::int AS attention
       FROM members m LEFT JOIN member_bio_data b ON b.member_id=m.id
       WHERE m.deleted_at IS NULL`);
-    await audit({userId:req.user.id,action:"MEMBER_BIO_SEARCHED",entityType:"member_bio_data",details:`query=${term||"all"}; status=${status}; results=${result.rowCount}`,...metadata(req)});
-    res.json({records:result.rows,stats:totals,query:term,status,
+    const departments=(await query(`SELECT d.code,d.name,
+      COUNT(DISTINCT od.member_id)::int AS "memberCount"
+      FROM departments d
+      LEFT JOIN (${officialMemberDepts}) od ON od.dept_code=d.code
+      WHERE d.code IN ('executive','credits','investment','legal','finance','welfare','supervisory','audit')
+      GROUP BY d.code,d.name
+      ORDER BY d.name`)).rows;
+    const unassigned=(await one(`SELECT COUNT(*)::int AS count FROM members m
+      WHERE m.deleted_at IS NULL AND NOT EXISTS (
+        SELECT 1 FROM (${officialMemberDepts}) od WHERE od.member_id=m.id)`))?.count||0;
+    await audit({userId:req.user.id,action:"MEMBER_BIO_SEARCHED",entityType:"member_bio_data",
+      details:`query=${term||"all"}; status=${status}; department=${department}; results=${result.rowCount}`,...metadata(req)});
+    res.json({records:result.rows,stats:totals,query:term,status,department,
+      departments:[...departments,{code:"members",name:"General members",memberCount:unassigned}],
       access:{canEdit:Boolean(req.legalAccess.can_edit),authorityLevel:req.legalAccess.authority_level}});
   }));
 
@@ -85,26 +123,21 @@ module.exports = function registerLegalBioDataApi({
           ["active","suspended","inactive"].includes(b.membershipStatus)?b.membershipStatus:"active",member.id]);
         await client.query(`INSERT INTO member_bio_data
       (member_id,date_of_birth,gender,marital_status,nationality,home_district,subcounty,parish,village,
-       emergency_contact_name,emergency_contact_phone,emergency_contact_relationship,blood_group,
-       disability_notes,profile_photo_reference,identity_document_reference,record_notes,bio_status,
+       emergency_contact_name,emergency_contact_phone,emergency_contact_relationship,bio_status,
        created_by,verified_by,verified_at,updated_at)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,
-        CASE WHEN $18='verified' THEN $19::bigint ELSE NULL END,CASE WHEN $18='verified' THEN NOW() ELSE NULL END,NOW())
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,
+        CASE WHEN $13='verified' THEN $14::bigint ELSE NULL END,CASE WHEN $13='verified' THEN NOW() ELSE NULL END,NOW())
       ON CONFLICT (member_id) DO UPDATE SET date_of_birth=EXCLUDED.date_of_birth,gender=EXCLUDED.gender,
         marital_status=EXCLUDED.marital_status,nationality=EXCLUDED.nationality,home_district=EXCLUDED.home_district,
         subcounty=EXCLUDED.subcounty,parish=EXCLUDED.parish,village=EXCLUDED.village,
         emergency_contact_name=EXCLUDED.emergency_contact_name,emergency_contact_phone=EXCLUDED.emergency_contact_phone,
-        emergency_contact_relationship=EXCLUDED.emergency_contact_relationship,blood_group=EXCLUDED.blood_group,
-        disability_notes=EXCLUDED.disability_notes,profile_photo_reference=EXCLUDED.profile_photo_reference,
-        identity_document_reference=EXCLUDED.identity_document_reference,record_notes=EXCLUDED.record_notes,
+        emergency_contact_relationship=EXCLUDED.emergency_contact_relationship,
         bio_status=EXCLUDED.bio_status,verified_by=EXCLUDED.verified_by,verified_at=EXCLUDED.verified_at,updated_at=NOW()`,
         [member.id,b.dateOfBirth||null,b.gender||null,b.maritalStatus||null,String(b.nationality||"Ugandan").trim(),
       String(b.homeDistrict||"").trim()||null,String(b.subcounty||"").trim()||null,String(b.parish||"").trim()||null,
       String(b.village||"").trim()||null,String(b.emergencyContactName||"").trim()||null,
       String(b.emergencyContactPhone||"").trim()||null,String(b.emergencyContactRelationship||"").trim()||null,
-      String(b.bloodGroup||"").trim()||null,String(b.disabilityNotes||"").trim()||null,
-      String(b.profilePhotoReference||"").trim()||null,String(b.identityDocumentReference||"").trim()||null,
-          String(b.recordNotes||"").trim()||null,b.bioStatus,req.user.id]);
+          b.bioStatus,req.user.id]);
         await client.query(`UPDATE users SET full_name=$1,email=COALESCE(NULLIF($2,''),email),phone=$3
           WHERE member_id=$4`,[String(b.fullName||member.full_name).trim(),String(b.email||"").trim().toLowerCase(),
           String(b.phone||"").trim(),member.id]);

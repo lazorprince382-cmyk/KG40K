@@ -33,22 +33,22 @@ module.exports = function registerMemberAccountApi({
         await client.query(`INSERT INTO member_bio_data
           (member_id,date_of_birth,gender,marital_status,nationality,home_district,subcounty,parish,village,
            emergency_contact_name,emergency_contact_phone,emergency_contact_relationship,blood_group,
-           disability_notes,bio_status,created_by,updated_at)
+           bio_status,created_by,updated_at)
           VALUES ($1,NULLIF($2,'')::date,NULLIF($3,''),NULLIF($4,''),NULLIF($5,''),NULLIF($6,''),
             NULLIF($7,''),NULLIF($8,''),NULLIF($9,''),NULLIF($10,''),NULLIF($11,''),NULLIF($12,''),
-            NULLIF($13,''),NULLIF($14,''),'complete',$15,NOW())
+            NULLIF($13,''),'complete',$14,NOW())
           ON CONFLICT (member_id) DO UPDATE SET date_of_birth=EXCLUDED.date_of_birth,gender=EXCLUDED.gender,
             marital_status=EXCLUDED.marital_status,nationality=EXCLUDED.nationality,
             home_district=EXCLUDED.home_district,subcounty=EXCLUDED.subcounty,parish=EXCLUDED.parish,
             village=EXCLUDED.village,emergency_contact_name=EXCLUDED.emergency_contact_name,
             emergency_contact_phone=EXCLUDED.emergency_contact_phone,
             emergency_contact_relationship=EXCLUDED.emergency_contact_relationship,
-            blood_group=EXCLUDED.blood_group,disability_notes=EXCLUDED.disability_notes,updated_at=NOW()`,
+            blood_group=EXCLUDED.blood_group,updated_at=NOW()`,
         [req.user.member_id,b.dateOfBirth||"",b.gender||"",b.maritalStatus||"",String(b.nationality||"").trim(),
           String(b.homeDistrict||"").trim(),String(b.subcounty||"").trim(),String(b.parish||"").trim(),
           String(b.village||"").trim(),String(b.emergencyContactName||"").trim(),
           String(b.emergencyContactPhone||"").trim(),String(b.emergencyContactRelationship||"").trim(),
-          String(b.bloodGroup||"").trim(),String(b.disabilityNotes||"").trim(),req.user.id]);
+          String(b.bloodGroup||"").trim(),req.user.id]);
       });
     } catch(error) {
       if(error.code==="23505")return res.status(409).json({error:"That email address or National ID is already registered"});
@@ -183,18 +183,33 @@ module.exports = function registerMemberAccountApi({
         t.external_reference AS "externalReference",t.notes,t.submission_source AS "submissionSource",
         (t.evidence_stored_name IS NOT NULL) AS "hasEvidence",t.evidence_original_name AS "evidenceName",
         t.verification_comment AS "verificationComment",t.target_fiscal_year AS "targetFiscalYear",t.created_at AS "createdAt",t.verified_at AS "verifiedAt",
-        verifier.full_name AS "verifiedBy" FROM transactions t LEFT JOIN users verifier ON verifier.id=t.verified_by
+        verifier.full_name AS "verifiedBy",t.loan_id AS "loanId",l.reference AS "loanReference"
+        FROM transactions t LEFT JOIN users verifier ON verifier.id=t.verified_by
+        LEFT JOIN loans l ON l.id=t.loan_id
         WHERE t.member_id=$1 ORDER BY t.id DESC LIMIT 100`,[memberId]),
-      query(`SELECT l.id,l.reference,p.name AS product,l.amount::float,l.balance::float,l.term_months AS "termMonths",
+      query(`SELECT l.id,l.reference,
+        CASE WHEN NULLIF(l.custom_product_name,'') IS NOT NULL THEN p.name||' ('||l.custom_product_name||')' ELSE p.name END AS product,
+        l.amount::float,l.balance::float,l.term_months AS "termMonths",l.processing_fee::float AS "processingFee",
         l.purpose,l.status,l.due_date AS "dueDate",l.created_at AS "createdAt",l.verified_amount::float AS "verifiedAmount",
-        COALESCE((SELECT SUM(s.total_due) FROM loan_repayment_schedule s WHERE s.loan_id=l.id),l.amount)::float AS "totalDue",
+        COALESCE((SELECT SUM(s.total_due) FROM loan_repayment_schedule s WHERE s.loan_id=l.id),
+          ROUND((l.amount+(l.amount*(p.annual_rate/1200.0)*(l.term_months+1)/2.0))::numeric,2))::float AS "totalDue",
         COALESCE((SELECT SUM(s.paid_amount) FROM loan_repayment_schedule s WHERE s.loan_id=l.id),0)::float AS "totalPaid",
-        COALESCE((SELECT SUM(s.interest) FROM loan_repayment_schedule s WHERE s.loan_id=l.id),0)::float AS "totalInterest",
+        COALESCE((SELECT SUM(s.interest) FROM loan_repayment_schedule s WHERE s.loan_id=l.id),
+          ROUND((l.amount*(p.annual_rate/1200.0)*(l.term_months+1)/2.0)::numeric,2))::float AS "totalInterest",
         COALESCE((SELECT SUM(GREATEST(0,c.amount-c.paid_amount)) FROM loan_charges c WHERE c.loan_id=l.id AND c.status IN ('outstanding','partial') AND c.charge_type <> 'Processing fee'),0)::float AS "outstandingCharges",
         (SELECT MIN(due_date) FROM loan_repayment_schedule WHERE loan_id=l.id AND status<>'paid') AS "nextDueDate",
         COALESCE((SELECT (total_due-paid_amount)::float FROM loan_repayment_schedule WHERE loan_id=l.id AND status<>'paid' ORDER BY installment_number LIMIT 1),0)::float AS "nextPaymentAmount",
         (SELECT COUNT(*)::int FROM loan_repayment_schedule WHERE loan_id=l.id) AS "totalInstallments",
-        (SELECT COUNT(*)::int FROM loan_repayment_schedule WHERE loan_id=l.id AND status='paid') AS "paidInstallments"
+        (SELECT COUNT(*)::int FROM loan_repayment_schedule WHERE loan_id=l.id AND status='paid') AS "paidInstallments",
+        (SELECT t.amount::float FROM transactions t
+          WHERE t.loan_id=l.id AND t.type='Loan repayment' AND t.status='completed'
+          ORDER BY COALESCE(t.verified_at,t.created_at) DESC,t.id DESC LIMIT 1) AS "lastPaidAmount",
+        (SELECT COALESCE(t.verified_at,t.created_at) FROM transactions t
+          WHERE t.loan_id=l.id AND t.type='Loan repayment' AND t.status='completed'
+          ORDER BY COALESCE(t.verified_at,t.created_at) DESC,t.id DESC LIMIT 1) AS "lastPaidAt",
+        (SELECT COALESCE(t.receipt_number,t.reference) FROM transactions t
+          WHERE t.loan_id=l.id AND t.type='Loan repayment' AND t.status='completed'
+          ORDER BY COALESCE(t.verified_at,t.created_at) DESC,t.id DESC LIMIT 1) AS "lastPaidReceipt"
         FROM loans l JOIN loan_products p ON p.id=l.product_id WHERE l.member_id=$1 ORDER BY l.id DESC`,[memberId]),
       query(`SELECT l.id AS "loanId",l.reference,l.amount::float,l.balance::float,l.status,
         borrower.full_name AS borrower,lg.status AS "guaranteeStatus",lg.response_note AS note,lg.created_at AS "createdAt"
@@ -273,7 +288,11 @@ module.exports = function registerMemberAccountApi({
     return {
       member, summary: {
         savings: member.savings, totalMemberFunds: Number(member.savings) + Number(member.shares),
-        activeLoanBalance: activeLoans.reduce((sum, item) => sum + Number(item.balance), 0),
+        activeLoanBalance: activeLoans.reduce((sum, item) => {
+          const totalDue=Number(item.totalDue||item.amount||0);
+          const totalPaid=Number(item.totalPaid||0);
+          return sum + Math.max(0, totalDue - totalPaid);
+        }, 0),
         availableLoanLimit: Math.max(0, member.savings * 3 - activeLoans.reduce((sum, item) => sum + Number(item.balance), 0)),
         welfareContributions: contributionsTotal, investments: investmentTotal, shares: member.shares,
         pendingRequests, notifications: notifications.rows.filter(item => !item.readAt).length

@@ -29,7 +29,7 @@
           <div class="field"><label>Full name</label><input name="fullName" value="${esc(actor())}" minlength="2" maxlength="120" required></div>
           <div class="field"><label>Email address</label><input name="email" type="email" value="${esc(state.user?.email||m?.email||"")}" required></div>
           <div class="field"><label>Phone number</label><input name="phone" value="${esc(state.user?.phone||m?.phone||"")}" required></div>
-          ${m?`<div class="field"><label>National ID</label><input name="nationalId" value="${esc(m.nationalId||"")}"></div><div class="field"><label>Date of birth</label><input name="dateOfBirth" type="date" value="${m.dateOfBirth?String(m.dateOfBirth).slice(0,10):""}"></div><div class="field"><label>Gender</label><select name="gender"><option value="">Not recorded</option>${["female","male","other","prefer_not_to_say"].map(x=>`<option value="${x}" ${m.gender===x?"selected":""}>${x.replaceAll("_"," ")}</option>`).join("")}</select></div><div class="field"><label>Marital status</label><select name="maritalStatus"><option value="">Not recorded</option>${["single","married","divorced","widowed","separated","other"].map(x=>`<option value="${x}" ${m.maritalStatus===x?"selected":""}>${x}</option>`).join("")}</select></div><div class="field"><label>Nationality</label><input name="nationality" value="${esc(m.nationality||"")}"></div><div class="field"><label>Occupation</label><input name="occupation" value="${esc(m.occupation||"")}"></div><div class="field"><label>Employer</label><input name="employer" value="${esc(m.employer||"")}"></div><div class="field full"><label>Residence / address</label><input name="address" value="${esc(m.address||"")}"></div><div class="field"><label>Home district</label><input name="homeDistrict" value="${esc(m.homeDistrict||"")}"></div><div class="field"><label>Subcounty</label><input name="subcounty" value="${esc(m.subcounty||"")}"></div><div class="field"><label>Parish</label><input name="parish" value="${esc(m.parish||"")}"></div><div class="field"><label>Village</label><input name="village" value="${esc(m.village||"")}"></div><div class="field"><label>Next of kin</label><input name="nextOfKin" value="${esc(m.nextOfKin||"")}"></div><div class="field"><label>Beneficiaries</label><input name="beneficiaries" value="${esc(m.beneficiaries||"")}"></div><div class="field"><label>Emergency contact</label><input name="emergencyContactName" value="${esc(m.emergencyContactName||"")}"></div><div class="field"><label>Emergency phone</label><input name="emergencyContactPhone" value="${esc(m.emergencyContactPhone||"")}"></div><div class="field"><label>Emergency relationship</label><input name="emergencyContactRelationship" value="${esc(m.emergencyContactRelationship||"")}"></div><div class="field full"><label>Accessibility or disability notes</label><textarea name="disabilityNotes">${esc(m.disabilityNotes||"")}</textarea></div><input type="hidden" name="membershipStatus" value="${esc(m.status||"active")}">`:""}
+          ${m?`<div class="field"><label>National ID</label><input name="nationalId" value="${esc(m.nationalId||"")}"></div><div class="field"><label>Date of birth</label><input name="dateOfBirth" type="date" value="${m.dateOfBirth?String(m.dateOfBirth).slice(0,10):""}"></div><div class="field"><label>Gender</label><select name="gender"><option value="">Not recorded</option>${["female","male","other","prefer_not_to_say"].map(x=>`<option value="${x}" ${m.gender===x?"selected":""}>${x.replaceAll("_"," ")}</option>`).join("")}</select></div><div class="field"><label>Marital status</label><select name="maritalStatus"><option value="">Not recorded</option>${["single","married","divorced","widowed","separated","other"].map(x=>`<option value="${x}" ${m.maritalStatus===x?"selected":""}>${x}</option>`).join("")}</select></div><div class="field"><label>Nationality</label><input name="nationality" value="${esc(m.nationality||"")}"></div><div class="field"><label>Occupation</label><input name="occupation" value="${esc(m.occupation||"")}"></div><div class="field"><label>Employer</label><input name="employer" value="${esc(m.employer||"")}"></div><div class="field full"><label>Residence / address</label><input name="address" value="${esc(m.address||"")}"></div><div class="field"><label>Home district</label><input name="homeDistrict" value="${esc(m.homeDistrict||"")}"></div><div class="field"><label>Subcounty</label><input name="subcounty" value="${esc(m.subcounty||"")}"></div><div class="field"><label>Parish</label><input name="parish" value="${esc(m.parish||"")}"></div><div class="field"><label>Village</label><input name="village" value="${esc(m.village||"")}"></div><div class="field"><label>Next of kin</label><input name="nextOfKin" value="${esc(m.nextOfKin||"")}"></div><div class="field"><label>Beneficiaries</label><input name="beneficiaries" value="${esc(m.beneficiaries||"")}"></div><div class="field"><label>Emergency contact</label><input name="emergencyContactName" value="${esc(m.emergencyContactName||"")}"></div><div class="field"><label>Emergency phone</label><input name="emergencyContactPhone" value="${esc(m.emergencyContactPhone||"")}"></div><div class="field"><label>Emergency relationship</label><input name="emergencyContactRelationship" value="${esc(m.emergencyContactRelationship||"")}"></div><input type="hidden" name="membershipStatus" value="${esc(m.status||"active")}">`:""}
         </div><button class="button primary">Save profile information</button></form>
         <form class="card account-form" data-account-photo><h3>Profile picture</h3><p>JPG, PNG or WebP.</p><div class="field"><label>Choose photo</label><input name="photo" type="file" accept="image/jpeg,image/png,image/webp" required></div><div class="form-actions"><button class="button primary">Upload</button>${photo?`<button class="button secondary" type="button" data-remove-photo>Remove</button>`:""}</div></form>
         <form class="card account-form" data-account-password><h3>Change password</h3><p>Changing it signs out every session.</p><div class="field"><label>Current password</label><input name="currentPassword" type="password" required></div><div class="field"><label>New password</label><input name="newPassword" type="password" minlength="8" required><small>Uppercase, lowercase, number and symbol.</small></div><button class="button primary">Change password</button></form>
@@ -47,7 +47,7 @@
   function dashboard(){
     const c=C(),m=c.member,s=c.summary,h=new Date().getHours(),g=h<12?"Good morning":h<18?"Good afternoon":"Good evening";
     return `${oversightBanner()}<div class="member-portal"><section class="member-welcome"><div><span>${g}</span><h2>${esc(m.fullName)}</h2><p>Member ID: <b>${esc(m.memberNumber)}</b> - Status: <b>${esc(m.status)}</b> - Joined ${date(m.joinedAt)}</p></div><div class="module-actions">${canActOnMember()?`<button class="button primary" data-member-action="deposit">${icons.plus}Submit deposit</button>`:""}<button class="button secondary" data-member-page="member-profile">View profile</button></div></section>
-      <div class="member-summary-grid">${metric("My Savings",money(s.savings),"savings","member-savings","Current carried-forward balance")}${metric("Share Capital",money(s.shares),"building","member-savings","Current share balance")}${metric("Total Member Funds",money(s.totalMemberFunds),"wallet","member-savings","Savings plus share capital")}${metric("Active Loan Balance",money(s.activeLoanBalance),"loans","member-loans")}${metric("Pending Requests",s.pendingRequests,"clock","member-requests","Contributions, loans and support")}${metric("Notifications",s.notifications,"bell","member-notifications")}</div>
+      <div class="member-summary-grid">${metric("My Savings",money(s.savings),"savings","member-savings","Current carried-forward balance")}${metric("Share Capital",money(s.shares),"building","member-savings","Current share balance")}${metric("Total Member Funds",money(s.totalMemberFunds),"wallet","member-savings","Savings plus share capital")}${metric("Active Loan Balance",money(s.activeLoanBalance),"loans","member-loans","Remaining total repayment including interest")}${metric("Pending Requests",s.pendingRequests,"clock","member-requests","Contributions, loans and support")}${metric("Notifications",s.notifications,"bell","member-notifications")}</div>
       <div class="member-target-layout">${financialYearPanel()}${closingPositionPanel()}</div>
       <div class="member-home-grid">${panel("Recent activity","Your latest account events",`<div class="member-list">${c.recentActivity.slice(0,8).map(x=>`<article><span>${icons[x.type==="notification"?"bell":"receipt"]}</span><div><strong>${esc(x.title)}</strong><p>${esc(x.detail)}</p></div><time>${date(x.date)}</time></article>`).join("")||`<div class="member-empty">No activity.</div>`}</div>`)}
       ${panel("Upcoming events","Meetings shared with members",`<div class="member-list">${c.meetings.filter(x=>new Date(x.scheduledAt)>=new Date()).slice(0,6).map(x=>`<article><span>${icons.clock}</span><div><strong>${esc(x.title)}</strong><p>${date(x.scheduledAt)} - ${esc(x.venue||"Venue pending")}</p></div></article>`).join("")||`<div class="member-empty">No upcoming events.</div>`}</div>`)}</div>
@@ -75,23 +75,34 @@
   }
   function loans(){
     const all=C().loans,active=all.filter(x=>["active","overdue"].includes(x.status)),history=all.filter(x=>["completed","closed"].includes(x.status));
+    const payments=(C().transactions||[]).filter(t=>t.type==="Loan repayment");
     const activeCards=active.map(x=>{
       const totalDue=Number(x.totalDue||x.amount||0),totalPaid=Number(x.totalPaid||0),totalInterest=Number(x.totalInterest||Math.max(0,totalDue-Number(x.amount||0)));
+      const fee=Number(x.processingFee||0),netDisbursed=Math.max(0,Number(x.amount||0)-fee);
       const remaining=Math.max(0,totalDue-totalPaid);
       const progressPct=totalDue?Math.min(100,Math.round(totalPaid/totalDue*100)):0;
-      return `<article class="card member-loan-progress"><header><div><small>${esc(x.reference)} - ${esc(x.product)}</small><h3>${money(remaining)} still due</h3></div>${status(x.status)}</header>
+      const lastPaid=x.lastPaidAmount!=null?`<div class="member-next-repayment"><span>Last paid<strong>${money(x.lastPaidAmount)}</strong></span><span>Paid on<strong>${date(x.lastPaidAt)}</strong></span></div>`:`<div class="member-next-repayment"><span>Last paid<strong>None yet</strong></span><span>Receipt<strong>—</strong></span></div>`;
+      return `<article class="card member-loan-progress"><header><div><small>${esc(x.reference)} · ${esc(x.product)}</small><h3>${money(remaining)} still due</h3></div>${status(x.status)}</header>
         <div class="member-loan-progress-bar"><i style="width:${progressPct}%"></i></div>
         <div class="member-loan-progress-meta"><span>${progressPct}% repaid</span><span>${money(totalPaid)} of ${money(totalDue)}</span></div>
-        <div class="member-loan-totals"><span>Borrowed <strong>${money(x.amount)}</strong></span><span>Interest (2%/mo) <strong>${money(totalInterest)}</strong></span><span>Principal left <strong>${money(x.balance)}</strong></span></div>
+        <div class="member-loan-totals">
+          <span>Total repayment <strong>${money(totalDue)}</strong></span>
+          <span>Cash received <strong>${money(netDisbursed)}</strong></span>
+          <span>Interest (2%/mo) <strong>${money(totalInterest)}</strong></span>
+        </div>
         <div class="member-next-repayment"><span>Next repayment<strong>${money(x.nextPaymentAmount||0)}</strong></span><span>Due date<strong>${date(x.nextDueDate)}</strong></span></div>
+        ${lastPaid}
+        <small class="member-loan-fee-note">Cash received is after the ${money(fee)} processing fee. Pay in full clears remaining principal ${money(x.balance)} only.</small>
         ${canActOnMember()?`<div class="member-loan-actions"><button class="button primary" data-member-repay="${x.id}" data-settle="0">${icons.receipt}Pay loan</button><button class="button secondary" data-member-repay="${x.id}" data-settle="1">${icons.check}Pay in full</button></div>`:""}</article>`;
     }).join("");
-    const rows=all.map(x=>`<tr><td><strong>${esc(x.reference)}</strong></td><td>${esc(x.product)}</td><td>${money(x.amount)}</td><td>${money(x.totalDue||x.amount)}</td><td>${money(x.balance)}</td><td>${x.termMonths} months</td><td>${money(x.nextPaymentAmount||0)}</td><td>${date(x.nextDueDate)}</td><td>${status(x.status)}</td></tr>`).join("");
-    const historyRows=history.map(x=>`<tr><td><strong>${esc(x.reference)}</strong></td><td>${esc(x.product)}</td><td>${money(x.amount)}</td><td>${money(x.totalDue||x.amount)}</td><td>${money(x.totalPaid||x.totalDue||x.amount)}</td><td>${x.termMonths} months</td><td>${date(x.dueDate||x.createdAt)}</td><td>${status(x.status)}</td></tr>`).join("");
+    const rows=all.map(x=>`<tr><td><strong>${esc(x.reference)}</strong></td><td>${esc(x.product)}</td><td>${money(x.totalDue||x.amount)}</td><td>${money(Math.max(0,Number(x.amount||0)-Number(x.processingFee||0)))}</td><td>${x.termMonths} months</td><td>${x.lastPaidAmount!=null?`${money(x.lastPaidAmount)}<small class="table-sub">${date(x.lastPaidAt)}${x.lastPaidReceipt?` · ${esc(x.lastPaidReceipt)}`:""}</small>`:"—"}</td><td>${money(x.nextPaymentAmount||0)}</td><td>${date(x.nextDueDate)}</td><td>${status(x.status)}</td></tr>`).join("");
+    const historyRows=history.map(x=>`<tr><td><strong>${esc(x.reference)}</strong></td><td>${esc(x.product)}</td><td>${money(x.totalDue||x.amount)}</td><td>${money(x.totalPaid||x.totalDue||x.amount)}</td><td>${x.lastPaidAmount!=null?`${money(x.lastPaidAmount)}<small class="table-sub">${date(x.lastPaidAt)}</small>`:"—"}</td><td>${x.termMonths} months</td><td>${date(x.dueDate||x.createdAt)}</td><td>${status(x.status)}</td></tr>`).join("");
+    const paymentRows=payments.map(t=>`<tr><td><strong>${esc(t.receiptNumber||t.reference)}</strong><small class="table-sub">${esc(t.externalReference||"")}</small></td><td>${esc(t.loanReference||"—")}</td><td>${money(t.amount)}</td><td>${esc(t.method||"—")}</td><td>${date(t.verifiedAt||t.createdAt)}</td><td>${status(t.status)}</td></tr>`).join("");
     return `${oversightBanner()}<div class="member-module"><div class="module-actions">${readOnlyMember()?"":`<button class="button primary" data-member-action="apply-loan">${icons.plus}Apply for a loan</button>`}<button class="button secondary" data-open-loan-calculator>${icons.reports}Loan calculator</button>${readOnlyMember()?"":`<a class="button secondary" href="/api/member/reports/loans.csv">${icons.download}Loan statement</a>`}</div>
       ${activeCards?`<div class="member-active-loans">${activeCards}</div>`:`<div class="member-empty">No active loans.</div>`}
-      ${panel("My loans","Applications and facilities. Progress uses borrowed amount plus organization interest of 2% every month.",gridTable(["Loan","Product","Borrowed","Total due","Principal left","Term","Next repayment","Next due","Status"],rows))}
-      ${panel("Loan history","Closed and fully repaid facilities",gridTable(["Loan","Product","Borrowed","Contract total","Paid","Term","Closed / due","Status"],historyRows))}</div>`;
+      ${panel("My loans","Applications and facilities. Total repayment includes organization interest of 2% every month.",gridTable(["Loan","Product","Total repayment","Cash received","Term","Last paid","Next repayment","Next due","Status"],rows))}
+      ${panel("Payment history","Verified and pending loan repayments on your facilities",gridTable(["Receipt / Ref","Loan","Amount","Method","Date","Status"],paymentRows))}
+      ${panel("Loan history","Closed and fully repaid facilities",gridTable(["Loan","Product","Total repayment","Paid","Last paid","Term","Closed / due","Status"],historyRows))}</div>`;
   }
   function guarantees(){
     const rows=C().guarantees.map(x=>`<tr><td><strong>${esc(x.reference)}</strong></td><td>${esc(x.borrower)}</td><td>${money(x.amount)}</td><td>${money(x.balance)}</td><td>${status(x.status)}</td><td>${status(x.guaranteeStatus)}</td><td>${x.guaranteeStatus==="pending"?`<div class="table-actions"><button class="button small secondary" data-member-guarantee="${x.loanId}" data-response="reject">Reject</button><button class="button small primary" data-member-guarantee="${x.loanId}" data-response="accept">Accept</button></div>`:"—"}</td></tr>`).join("");
@@ -126,8 +137,9 @@
       const candidates=(await api("/api/loans/guarantor-candidates")).candidates;
       modal("Apply for a loan",`<form class="form" data-member-loan-form enctype="multipart/form-data"><div class="form-grid">
         <label class="field full check-field loan-policy-check"><input type="checkbox" name="borrowerDeclaration" value="accepted" required><span>I have read and understood the Kwagalana loan policy.</span></label>
-        <div class="field"><label>Loan product</label><select name="productId" required>${state.products.map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join("")}</select></div>
-        <div class="field"><label>Amount (UGX)</label><input name="amount" type="number" min="100000" max="25000000" step="50000" required><small>Maximum approved loan: UGX 25,000,000.</small></div>
+        <div class="field"><label>Loan product</label><select name="productId" required data-loan-product>${state.products.map(x=>`<option value="${x.id}" data-product-name="${esc(x.name)}">${esc(x.name)}</option>`).join("")}</select></div>
+        <div class="field full" data-other-loan-fields hidden><label>Specify loan product</label><input name="customProductName" maxlength="120" placeholder="Type the loan product name"><small>Required when Other Loan is selected.</small></div>
+        <div class="field"><label>Amount (UGX)</label><input name="amount" type="number" min="100000" max="25000000" step="50000" required><small>Any member may apply for up to UGX 25,000,000 — not limited by savings balance.</small></div>
         <div class="field"><label>Repayment term</label><select name="termMonths">${Array.from({length:10},(_,i)=>`<option value="${i+1}" ${i===4?"selected":""}>${i+1} month${i?"s":""}</option>`).join("")}</select></div>
         <div class="field"><label>Security offered</label><select name="securityType" required data-loan-security><option value="">Choose security</option><option value="savings_and_shares">Savings and shares</option><option value="collateral">Collateral</option></select></div>
         <div class="field full"><label>Loan purpose (optional)</label><textarea name="purpose" placeholder="You may explain the purpose and repayment plan"></textarea></div>
@@ -136,7 +148,7 @@
           <div class="field"><label>Estimated collateral value (UGX)</label><input name="collateralValue" type="number" min="0" step="1000"></div>
           <div class="field"><label>Collateral owner</label><input name="collateralOwner" placeholder="Borrower or consenting owner"></div>
           <div class="field"><label>Collateral owner phone number</label><input name="collateralOwnerPhone" type="tel" placeholder="e.g. +256 7xx xxx xxx"></div>
-          <label class="field full check-field"><input type="checkbox" name="collateralOwnerConsent" value="accepted"><span>I confirm that the collateral owner has consented to the security.</span></label>
+          <label class="field full check-field"><input type="checkbox" name="collateralOwnerConsent" value="accepted"><span>I consent to use my collateral as security.</span></label>
         </div></div>
         <div class="field full" data-guarantor-fields hidden><label>Choose guarantors</label><div class="group-member-picker">${candidates.map(x=>`<label class="group-member-option"><input type="checkbox" name="guarantorIds" value="${x.id}"><div class="chat-avatar">${initials(x.fullName)}</div><div><strong>${esc(x.fullName)}</strong><span>${esc(x.memberNumber)}</span></div></label>`).join("")||`<div class="member-empty">No eligible guarantor accounts are currently available.</div>`}</div><small>Call the guarantors to accept guaranteeing from their dashboards.</small></div>
         <div class="field full record-file-field"><label>Supporting document (optional)</label><input name="supportingDocument" type="file" accept="image/jpeg,image/png,image/webp,application/pdf,.doc,.docx"><small>Attach a land title, vehicle logbook, collateral evidence, quotation or other relevant document.</small></div>
@@ -148,35 +160,72 @@
   function repayForm(loanId,settleFull=false){
     const loan=C().loans.find(x=>String(x.id)===String(loanId));if(!loan||!["active","overdue"].includes(loan.status))return;
     const totalDue=Number(loan.totalDue||loan.amount||0),totalPaid=Number(loan.totalPaid||0);
-    const remaining=Math.max(0,totalDue-totalPaid);
-    const suggested=settleFull?remaining:Number(loan.nextPaymentAmount||remaining);
-    modal(settleFull?"Pay loan in full":"Pay loan",`<form class="form" data-member-repay-form enctype="multipart/form-data" novalidate><input type="hidden" name="loanId" value="${loan.id}">
+    const remainingContract=Math.max(0,totalDue-totalPaid);
+    const remainingPrincipal=Math.max(0,Number(loan.balance||0));
+    const fee=Number(loan.processingFee||0),netDisbursed=Math.max(0,Number(loan.amount||0)-fee);
+    const suggested=settleFull?remainingPrincipal:Number(loan.nextPaymentAmount||remainingContract);
+    const maxAmount=settleFull?remainingPrincipal:remainingContract;
+    const helpText=settleFull
+      ?`Pay in full clears remaining principal ${money(remainingPrincipal)} only. Contract interest is waived. Cash originally received ${money(netDisbursed)} after the ${money(fee)} processing fee.`
+      :`Total repayment ${money(totalDue)}. Remaining on schedule ${money(remainingContract)}. Cash originally received ${money(netDisbursed)} after the ${money(fee)} processing fee. Credits verifies your payment before the progress bar moves.`;
+    const amountHelp=settleFull
+      ?"Paying the remaining principal closes the loan. Interest is not charged on early settlement."
+      :"Pay one installment or any amount up to the remaining schedule balance.";
+    modal(settleFull?"Pay loan in full":"Pay loan",`<form class="form" data-member-repay-form enctype="multipart/form-data" novalidate action="#" method="post">
+      <input type="hidden" name="loanId" value="${loan.id}">
+      <input type="hidden" name="settleFull" value="${settleFull?"1":"0"}">
+      <input type="hidden" name="maxAmount" value="${Math.ceil(maxAmount)}">
       <div class="form-grid">
-        <div class="field full"><label>Active loan</label><input value="${esc(loan.reference)} - ${esc(loan.product)}" disabled><small>Borrowed ${money(loan.amount)} + interest ${money(loan.totalInterest||0)}. Remaining due ${money(remaining)}. Credits verifies your payment before the progress bar moves.</small></div>
-        <div class="field"><label>Amount (UGX)</label><input name="amount" type="number" min="1000" step="1000" value="${Math.round(suggested)}" max="${Math.ceil(remaining)}" required><small>${settleFull?"Paying the full remaining amount closes the loan immediately.":"Pay one installment or any amount up to the remaining balance."}</small></div>
+        <div class="field full"><label>Active loan</label><input value="${esc(loan.reference)} - ${esc(loan.product)}" disabled><small>${helpText}</small></div>
+        <div class="field"><label>Amount (UGX)</label><input name="amount" type="number" min="1000" step="1000" value="${Math.round(suggested)}" max="${Math.ceil(maxAmount)}" required><small>${amountHelp}</small></div>
         <div class="field"><label>Payment method</label><select name="method" required><option>Mobile Money</option><option>Bank transfer</option><option>Cheque</option><option>Cash</option></select></div>
         <div class="field full"><label>Transaction reference</label><input name="externalReference" minlength="3" required placeholder="Mobile money, bank, cheque or cash reference"><small>Enter the reference printed on the payment message or slip.</small></div>
-        <div class="field full"><label>Notes</label><textarea name="notes" placeholder="Add details that will help Credits confirm the loan payment">${settleFull?"Early full settlement - closing remaining schedule":""}</textarea></div>
+        <div class="field full"><label>Notes</label><textarea name="notes" placeholder="Add details that will help Credits confirm the loan payment">${settleFull?"Early full settlement - remaining principal only":""}</textarea></div>
         <div class="field full record-file-field"><label>Receipt photo or PDF</label><input name="receipt" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" required><small>Credits verifies the evidence before updating your loan progress.</small></div>
-      </div><div class="member-form-message" data-repay-message aria-live="polite"></div><div class="form-actions"><button type="button" class="button secondary" data-close-modal>Cancel</button><button type="submit" class="button primary">${settleFull?"Send full settlement for verification":"Send for verification"}</button></div></form>`);
-    bindMember();
-    document.querySelector("[data-member-repay-form]")?.addEventListener("submit",async e=>{
-      e.preventDefault();const form=e.currentTarget,button=form.querySelector("button[type=submit]"),message=form.querySelector("[data-repay-message]");
-      const amount=form.elements.amount,reference=form.elements.externalReference,file=form.elements.receipt.files[0];
-      const fail=text=>{message.className="member-form-message error";message.textContent=text;};
-      if(!amount.value||Number(amount.value)<1000)return fail("Enter a payment amount of at least UGX 1,000.");
-      if(!reference.value.trim()||reference.value.trim().length<3)return fail("Enter the payment transaction reference.");
-      if(!file)return fail("Choose a receipt photo or PDF before sending.");
-      if(file.size>15*1024*1024)return fail("The receipt is larger than 15 MB.");
-      button.disabled=true;message.textContent="Uploading receipt and sending to Credits...";message.className="member-form-message sending";
-      try{
-        const response=await fetch("/api/credits/repayments",{method:"POST",credentials:"same-origin",body:new FormData(form)}),raw=await response.text();
-        let result={};try{result=raw?JSON.parse(raw):{};}catch{result={error:raw||"Unreadable server response"};}
-        if(!response.ok)throw new Error(result.error||"Loan payment failed");
-        closeModal();
-        await reload(result.status==="pending"?`${result.message||"Loan payment sent to Credits for verification."} Reference ${result.reference}.`:`Loan payment recorded. Receipt ${result.receiptNumber}. Remaining principal ${money(result.balance)}.`);
-      }catch(error){button.disabled=false;fail(error.message);}
-    });
+      </div>
+      <div class="member-form-message" data-repay-message aria-live="polite"></div>
+      <div class="form-actions">
+        <button type="button" class="button secondary" data-close-modal>Cancel</button>
+        <button type="button" class="button primary" data-repay-submit>${settleFull?"Send full settlement for verification":"Send for verification"}</button>
+      </div>
+    </form>`);
+    const form=document.querySelector("[data-member-repay-form]");
+    document.querySelectorAll("#modal-backdrop [data-close-modal], #modal-backdrop [data-close]").forEach(el=>{el.onclick=closeModal;});
+    if(!form){toast("Payment form failed to open.");return;}
+    form.addEventListener("submit",submitMemberRepayment);
+    form.querySelector("[data-repay-submit]")?.addEventListener("click",()=>form.requestSubmit?form.requestSubmit():submitMemberRepayment({preventDefault(){},currentTarget:form,target:form}));
+  }
+  async function submitMemberRepayment(event){
+    event.preventDefault();
+    event.stopPropagation?.();
+    const form=event.currentTarget||document.querySelector("[data-member-repay-form]");
+    if(!form)return;
+    const button=form.querySelector("[data-repay-submit], button[type=submit]");
+    const message=form.querySelector("[data-repay-message]");
+    const amount=form.elements.amount,reference=form.elements.externalReference,file=form.elements.receipt?.files?.[0];
+    const settleFull=String(form.elements.settleFull?.value||"")==="1";
+    const maxAmount=Number(form.elements.maxAmount?.value||0);
+    const fail=text=>{if(message){message.className="member-form-message error";message.textContent=text;}else toast(text);};
+    if(!amount?.value||Number(amount.value)<1000)return fail("Enter a payment amount of at least UGX 1,000.");
+    if(maxAmount>0&&Number(amount.value)>maxAmount+0.005)return fail(settleFull?"Pay in full cannot exceed the remaining principal balance.":"Amount exceeds the remaining schedule balance.");
+    if(!reference?.value?.trim()||reference.value.trim().length<3)return fail("Enter the payment transaction reference.");
+    if(!file)return fail("Choose a receipt photo or PDF before sending.");
+    if(file.size>15*1024*1024)return fail("The receipt is larger than 15 MB.");
+    if(button)button.disabled=true;
+    if(message){message.textContent="Uploading receipt and sending to Credits...";message.className="member-form-message sending";}
+    try{
+      const response=await fetch("/api/credits/repayments",{method:"POST",credentials:"same-origin",body:new FormData(form)});
+      const raw=await response.text();
+      let result={};try{result=raw?JSON.parse(raw):{};}catch{result={error:raw||"Unreadable server response"};}
+      if(!response.ok)throw new Error(result.error||"Loan payment failed");
+      closeModal();
+      await reload(result.status==="pending"
+        ?`${result.message||"Loan payment sent to Credits for verification."} Reference ${result.reference}.`
+        :`Loan payment recorded. Receipt ${result.receiptNumber}. Remaining principal ${money(result.balance)}.`);
+    }catch(error){
+      if(button)button.disabled=false;
+      fail(error.message||"Loan payment failed.");
+    }
   }
   function depositForm(){
     const f=C()?.financialYearProgress,past=C()?.pastYearProgress,currentYear=f?new Date(f.endsOn).getUTCFullYear():new Date().getUTCFullYear(),pastYear=past?new Date(past.periodEnd).getUTCFullYear():currentYear-1;
@@ -233,14 +282,17 @@
     document.querySelector("[data-member-action='apply-loan']")?.addEventListener("click",loanForm);
     document.querySelectorAll("[data-member-repay]").forEach(x=>x.addEventListener("click",()=>repayForm(x.dataset.memberRepay,x.dataset.settle==="1")));
     document.querySelector("[data-loan-security]")?.addEventListener("change",event=>{const form=event.target.form,isCollateral=event.target.value==="collateral";form.querySelector("[data-collateral-fields]").hidden=!isCollateral;form.querySelector("[data-guarantor-fields]").hidden=isCollateral||!event.target.value;form.querySelectorAll("[data-collateral-fields] input,[data-collateral-fields] textarea").forEach(input=>{if(["collateralDescription","collateralValue","collateralOwner","collateralOwnerPhone"].includes(input.name))input.required=isCollateral;});});
+    const syncOtherLoan=()=>{const select=document.querySelector("[data-loan-product]"),box=document.querySelector("[data-other-loan-fields]"),input=document.querySelector("[name=customProductName]");if(!select||!box||!input)return;const option=select.selectedOptions?.[0];const isOther=/^other loan$/i.test(option?.dataset.productName||option?.textContent||"");box.hidden=!isOther;input.required=isOther;if(!isOther)input.value="";};
+    document.querySelector("[data-loan-product]")?.addEventListener("change",syncOtherLoan);syncOtherLoan();
     document.querySelectorAll("[data-member-action='deposit']").forEach(x=>x.addEventListener("click",depositForm));
     document.querySelector("[data-member-action='withdraw']")?.addEventListener("click",withdrawalForm);
     document.querySelector("[data-member-action='welfare-contribution']")?.addEventListener("click",welfareContributionForm);
     document.querySelector("[data-member-action='welfare-request']")?.addEventListener("click",welfareRequestForm);
     document.querySelectorAll("[data-member-invest]").forEach(x=>x.addEventListener("click",()=>investmentForm(x.dataset.memberInvest)));
-    document.querySelector("[data-member-loan-form]")?.addEventListener("submit",async e=>{e.preventDefault();const form=e.currentTarget,data=new FormData(form),message=form.querySelector("[data-loan-message]"),button=form.querySelector("button[type=submit]"),security=data.get("securityType"),guarantors=data.getAll("guarantorIds");if(data.get("borrowerDeclaration")!=="accepted"){message.textContent="You must read and accept the Kwagalana loan policy.";message.className="member-form-message error";return;}if(data.get("overdueDeclaration")!=="accepted"){message.textContent="Accept the overdue repayment declaration before submitting.";message.className="member-form-message error";return;}if(security==="savings_and_shares"&&guarantors.length!==3){message.textContent="Choose three guarantors for savings and shares security.";message.className="member-form-message error";return;}if(security==="collateral"&&(!data.get("collateralDescription")||!data.get("collateralValue")||!data.get("collateralOwner")||!data.get("collateralOwnerPhone")||data.get("collateralOwnerConsent")!=="accepted")){message.textContent="Complete the collateral details, owner phone number and consent.";message.className="member-form-message error";return;}button.disabled=true;message.textContent="Checking the application and policy rules...";message.className="member-form-message sending";try{const response=await fetch("/api/loans",{method:"POST",credentials:"same-origin",body:data}),raw=await response.text();let result={};try{result=raw?JSON.parse(raw):{};}catch{}if(!response.ok)throw new Error(result.error||"Loan submission failed");closeModal();await reload(`Loan ${result.reference} submitted successfully.`);}catch(error){button.disabled=false;message.textContent=error.message;message.className="member-form-message error";}});
+    document.querySelector("[data-member-loan-form]")?.addEventListener("submit",async e=>{e.preventDefault();const form=e.currentTarget,data=new FormData(form),message=form.querySelector("[data-loan-message]"),button=form.querySelector("button[type=submit]"),security=data.get("securityType"),guarantors=data.getAll("guarantorIds");const productOption=form.elements.productId?.selectedOptions?.[0];const isOther=/^other loan$/i.test(productOption?.dataset.productName||productOption?.textContent||"");if(data.get("borrowerDeclaration")!=="accepted"){message.textContent="You must read and accept the Kwagalana loan policy.";message.className="member-form-message error";return;}if(data.get("overdueDeclaration")!=="accepted"){message.textContent="Accept the overdue repayment declaration before submitting.";message.className="member-form-message error";return;}if(isOther&&!String(data.get("customProductName")||"").trim()){message.textContent="Type the loan product name for Other Loan.";message.className="member-form-message error";return;}if(security==="savings_and_shares"&&guarantors.length!==3){message.textContent="Choose three guarantors for savings and shares security.";message.className="member-form-message error";return;}if(security==="collateral"&&(!data.get("collateralDescription")||!data.get("collateralValue")||!data.get("collateralOwner")||!data.get("collateralOwnerPhone")||data.get("collateralOwnerConsent")!=="accepted")){message.textContent="Complete the collateral details, owner phone number and consent.";message.className="member-form-message error";return;}button.disabled=true;message.textContent="Checking the application and policy rules...";message.className="member-form-message sending";try{const response=await fetch("/api/loans",{method:"POST",credentials:"same-origin",body:data}),raw=await response.text();let result={};try{result=raw?JSON.parse(raw):{};}catch{}if(!response.ok)throw new Error(result.error||"Loan submission failed");closeModal();await reload(`Loan ${result.reference} submitted successfully.`);}catch(error){button.disabled=false;message.textContent=error.message;message.className="member-form-message error";}});
     document.querySelector("[data-member-withdrawal]")?.addEventListener("submit",async e=>{e.preventDefault();try{const result=await api("/api/member/withdrawals",{method:"POST",body:JSON.stringify(Object.fromEntries(new FormData(e.currentTarget)))});closeModal();await reload(`Withdrawal ${result.reference} submitted.`);}catch(error){toast(error.message);}});
     document.querySelector("[data-member-deposit]")?.addEventListener("submit",submitMemberDeposit);
+    document.querySelector("[data-member-repay-form]")?.addEventListener("submit",submitMemberRepayment);
     document.querySelector("[data-member-investment]")?.addEventListener("submit",e=>submitMultipart(e,"/api/member/investments","Investment request submitted:"));
     document.querySelector("[data-member-welfare-contribution]")?.addEventListener("submit",e=>submitMultipart(e,"/api/member/welfare/contributions","Welfare contribution submitted:"));
     document.querySelector("[data-member-welfare-request]")?.addEventListener("submit",e=>submitMultipart(e,"/api/member/welfare/requests","Welfare request submitted:"));

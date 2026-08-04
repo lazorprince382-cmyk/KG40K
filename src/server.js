@@ -8,6 +8,12 @@ const crypto = require("crypto");
 const projectRoot = path.resolve(__dirname,"..");
 const { query, one, transaction, audit, initialize, ROLES } = require("./db");
 const { sendReport } = require("./services/report-service");
+const buildLoanApprovalHelpers = require("./loan-approval-helpers");
+let loanApprovals = null;
+const getLoanApprovals = async () => {
+  if (!loanApprovals) loanApprovals = await buildLoanApprovalHelpers({ query, one });
+  return loanApprovals;
+};
 
 const app = express();
 const port = Number(process.env.PORT || 3000);
@@ -235,7 +241,8 @@ app.get("/api/bootstrap",auth,asyncRoute(async(req,res)=>{
       m.id AS "memberId",m.member_number,m.full_name AS member,u.full_name AS "recordedBy"
       FROM transactions t JOIN members m ON m.id=t.member_id JOIN users u ON u.id=t.recorded_by ${memberId?"WHERE m.id=$1":""} ORDER BY t.id DESC LIMIT 250`,args):Promise.resolve(empty),
     canSeeLoans?query(`SELECT l.id AS "databaseId",l.reference AS id,l.amount::float,l.balance::float,l.term_months AS "termMonths",
-      COALESCE((SELECT SUM(s.total_due) FROM loan_repayment_schedule s WHERE s.loan_id=l.id),l.amount)::float AS "totalDue",
+      COALESCE((SELECT SUM(s.total_due) FROM loan_repayment_schedule s WHERE s.loan_id=l.id),
+        ROUND((l.amount+(l.amount*(p.annual_rate/1200.0)*(l.term_months+1)/2.0))::numeric,2))::float AS "totalDue",
       COALESCE((SELECT SUM(s.paid_amount) FROM loan_repayment_schedule s WHERE s.loan_id=l.id),0)::float AS "totalPaid",l.purpose,l.status,l.created_at AS date,l.due_date AS "dueDate",
       m.id AS "memberId",m.full_name AS member,m.member_number,p.name AS product,p.annual_rate::float AS "annualRate",
       gm.full_name AS guarantor,l.officer_comment AS "officerComment",l.committee_comment AS "committeeComment",l.executive_comment AS "executiveComment",
@@ -443,19 +450,51 @@ app.get("/api/executive/command-center",auth,requireExecutive("view"),asyncRoute
       AND a.status IN ('approved','rejected','information_requested') AND a.visibility_level<=$1
       ORDER BY COALESCE(a.decision_at,a.approved_at,a.updated_at) DESC,a.id DESC LIMIT 200`,[level])
   ]);
-  const executiveLoanApprovals=(await query(`SELECT l.id,l.id AS "loanId",l.reference,
+  const executiveLoanApprovalsRaw=(await query(`SELECT l.id,l.id AS "loanId",l.reference,
       'loan' AS "recordType",'large-loan' AS "activityType",
-      ('Loan authorization - '||p.name) AS title,
+      ('Loan authorization - '||CASE WHEN NULLIF(l.custom_product_name,'') IS NOT NULL THEN p.name||' ('||l.custom_product_name||')' ELSE p.name END) AS title,
       (m.full_name||' requested UGX '||to_char(l.amount,'FM999,999,999,990')) AS description,
-      l.amount::float,l.status,l.created_at AS "createdAt",
+      l.amount::float,l.processing_fee::float AS "processingFee",l.status,l.created_at AS "createdAt",
       4 AS "visibilityLevel",'credits' AS "departmentCode",
       'Credits (SACCO)' AS department,creator.full_name AS "createdBy",
-      NULL::text AS "assignedTo"
+      NULL::text AS "assignedTo",l.custom_product_name AS "customProductName",
+      CASE WHEN NULLIF(l.custom_product_name,'') IS NOT NULL THEN p.name||' ('||l.custom_product_name||')' ELSE p.name END AS product
       FROM loans l JOIN members m ON m.id=l.member_id
       JOIN loan_products p ON p.id=l.product_id
       LEFT JOIN users creator ON creator.id=COALESCE(l.recommended_by,l.committee_approved_by)
       WHERE l.status='executive-authorization' ORDER BY l.id DESC LIMIT 30`)).rows;
-  approvals.rows.push(...executiveLoanApprovals);  const finance=financeTotals.rows[0],loans=loanStats.rows[0],investment=investments.rows[0];
+  const executiveLoanHistoryRaw=(await query(`SELECT l.id,l.id AS "loanId",l.reference,
+      'loan' AS "recordType",'large-loan' AS "activityType",
+      ('Loan authorization - '||CASE WHEN NULLIF(l.custom_product_name,'') IS NOT NULL THEN p.name||' ('||l.custom_product_name||')' ELSE p.name END) AS title,
+      (m.full_name||' requested UGX '||to_char(l.amount,'FM999,999,999,990')) AS description,
+      l.amount::float,l.processing_fee::float AS "processingFee",
+      CASE
+        WHEN l.status IN ('ready-disbursement','active','overdue','completed','closed') THEN 'approved'
+        WHEN l.status='rejected' THEN 'rejected'
+        ELSE l.status
+      END AS status,
+      l.created_at AS "createdAt",
+      COALESCE(l.authorized_at,l.disbursed_at,l.created_at) AS "decisionAt",
+      authorizer.full_name AS "decisionBy",
+      l.executive_comment AS "decisionComment",
+      4 AS "visibilityLevel",'credits' AS "departmentCode",
+      'Credits (SACCO)' AS department,creator.full_name AS "createdBy",
+      NULL::text AS "assignedTo",m.full_name AS member,
+      CASE WHEN NULLIF(l.custom_product_name,'') IS NOT NULL THEN p.name||' ('||l.custom_product_name||')' ELSE p.name END AS product
+      FROM loans l JOIN members m ON m.id=l.member_id
+      JOIN loan_products p ON p.id=l.product_id
+      LEFT JOIN users creator ON creator.id=COALESCE(l.recommended_by,l.committee_approved_by)
+      LEFT JOIN users authorizer ON authorizer.id=l.authorized_by
+      WHERE l.status IN ('ready-disbursement','active','overdue','completed','closed','rejected')
+        AND EXISTS (SELECT 1 FROM loan_stage_votes v WHERE v.loan_id=l.id)
+      ORDER BY COALESCE(l.authorized_at,l.disbursed_at,l.created_at) DESC LIMIT 100`)).rows;
+  const helpers=await getLoanApprovals();
+  const executiveLoanApprovals=await helpers.attachLoanApprovalMeta(executiveLoanApprovalsRaw);
+  executiveLoanApprovals.forEach(loan=>{
+    if(loan.nextReviewer&&Number(loan.nextReviewer.userId)===Number(req.user.id))loan.canCurrentUserDecide=true;
+  });
+  approvals.rows.push(...executiveLoanApprovals);
+  approvalHistory.rows.push(...executiveLoanHistoryRaw);  const finance=financeTotals.rows[0],loans=loanStats.rows[0],investment=investments.rows[0];
   const historicalFinance=await one(`SELECT
     MAX(current_amount) FILTER (WHERE line_code='total_income')::float AS income,
     MAX(current_amount) FILTER (WHERE line_code='total_operating_expenses')::float AS expenditure,
@@ -1250,10 +1289,14 @@ app.get("/api/credits/command-center",auth,requireCredits("view"),asyncRoute(asy
       ORDER BY t.created_at DESC,t.id DESC LIMIT 150`),
     query(`SELECT l.id,l.reference,m.id AS "memberId",m.member_number AS "memberNumber",m.full_name AS member,
       CASE WHEN m.provisional THEN NULL ELSE m.phone END AS phone,m.email,m.status AS "memberStatus",
-      p.name AS product,p.annual_rate::float AS "annualRate",l.amount::float,l.balance::float,l.term_months AS "termMonths",
-      COALESCE((SELECT SUM(s.total_due) FROM loan_repayment_schedule s WHERE s.loan_id=l.id),l.amount)::float AS "totalDue",
+      CASE WHEN NULLIF(l.custom_product_name,'') IS NOT NULL THEN p.name||' ('||l.custom_product_name||')' ELSE p.name END AS product,
+      l.custom_product_name AS "customProductName",p.annual_rate::float AS "annualRate",
+      l.amount::float,l.balance::float,l.term_months AS "termMonths",l.processing_fee::float AS "processingFee",
+      COALESCE((SELECT SUM(s.total_due) FROM loan_repayment_schedule s WHERE s.loan_id=l.id),
+        ROUND((l.amount+(l.amount*(p.annual_rate/1200.0)*(l.term_months+1)/2.0))::numeric,2))::float AS "totalDue",
       COALESCE((SELECT SUM(s.paid_amount) FROM loan_repayment_schedule s WHERE s.loan_id=l.id),0)::float AS "totalPaid",
-      COALESCE((SELECT SUM(s.interest) FROM loan_repayment_schedule s WHERE s.loan_id=l.id),0)::float AS "totalInterest",
+      COALESCE((SELECT SUM(s.interest) FROM loan_repayment_schedule s WHERE s.loan_id=l.id),
+        ROUND((l.amount*(p.annual_rate/1200.0)*(l.term_months+1)/2.0)::numeric,2))::float AS "totalInterest",
       COALESCE((SELECT SUM(GREATEST(0,c.amount-c.paid_amount)) FROM loan_charges c WHERE c.loan_id=l.id AND c.status IN ('outstanding','partial') AND c.charge_type <> 'Processing fee'),0)::float AS "outstandingCharges",
       l.purpose,l.status,l.created_at AS "createdAt",l.due_date AS "dueDate",l.verified_amount::float AS "verifiedAmount",
       COALESCE(officer.full_name,'Unassigned') AS "officerHandling",
@@ -1363,7 +1406,13 @@ app.get("/api/credits/command-center",auth,requireCredits("view"),asyncRoute(asy
     verifiedSubscriptions:activeContributionMembers.reduce((sum,member)=>sum+member.currentYearSubscription,0),
     totalMemberFunds:activeContributionMembers.reduce((sum,member)=>sum+member.totalMemberFunds,0)
   }:null;
-  const loanRows=loansResult.rows;
+  const loanRows=await (await getLoanApprovals()).attachLoanApprovalMeta(loansResult.rows.map(loan=>({
+    ...loan,
+    canCurrentUserDecide:false
+  })));
+  loanRows.forEach(loan=>{
+    if(loan.nextReviewer&&Number(loan.nextReviewer.userId)===Number(req.user.id))loan.canCurrentUserDecide=true;
+  });
   const pendingStages=["pending","review","pending-guarantors","officer-review","committee-review","correction","executive-authorization"];
   const underReview=loanRows.filter(l=>pendingStages.includes(l.status));
   const overdueRows=loanRows.filter(l=>l.status==="overdue"||l.daysOverdue>0&&Number(l.balance)>0);
@@ -1457,7 +1506,8 @@ app.post("/api/credits/deposits",auth,requireCredits("create"),asyncRoute(async(
 }));
 const memberLoanActionRoles=new Set(["Executive Officer","Credits Officer","System Admin"]);
 const receiptEvidenceTypes=new Set(["image/jpeg","image/png","image/webp","application/pdf"]);
-async function applyLoanRepayment(client,loanId,amount){
+async function applyLoanRepayment(client,loanId,amount,options={}){
+  const settlePrincipalOnly=!!options.settlePrincipalOnly;
   const loan=(await client.query("SELECT * FROM loans WHERE id=$1 FOR UPDATE",[loanId])).rows[0];
   if(!loan||!["active","overdue"].includes(loan.status)){const error=new Error("Choose an active loan and enter a positive repayment");error.status=400;throw error;}
   let remaining=amount,chargeApplied=0,interestApplied=0,principalApplied=0;
@@ -1474,6 +1524,33 @@ async function applyLoanRepayment(client,loanId,amount){
     chargeApplied+=applied; remaining-=applied;
   }
   const schedules=(await client.query("SELECT * FROM loan_repayment_schedule WHERE loan_id=$1 AND status<>'paid' ORDER BY installment_number FOR UPDATE",[loan.id])).rows;
+  if(settlePrincipalOnly){
+    const principalCap=Math.max(0,Number(loan.balance));
+    if(remaining>principalCap+0.005){const error=new Error("Full settlement cannot exceed the remaining principal balance");error.status=400;throw error;}
+    for(const schedule of schedules){
+      if(remaining<=0)break;
+      const principalDue=Math.max(0,Number(schedule.principal)-Number(schedule.principal_paid||0));
+      const principalPart=Math.min(remaining,principalDue);
+      if(principalPart<=0)continue;
+      remaining-=principalPart; principalApplied+=principalPart;
+      const newPrincipal=Number(schedule.principal_paid||0)+principalPart;
+      const newInterest=Number(schedule.interest_paid||0);
+      const newPaid=newInterest+newPrincipal;
+      const rowPaid=newPrincipal>=Number(schedule.principal)-0.005&&newInterest>=Number(schedule.interest)-0.005;
+      await client.query(`UPDATE loan_repayment_schedule SET interest_paid=$1,principal_paid=$2,paid_amount=$3,status=$4,
+        paid_at=CASE WHEN $4='paid' THEN NOW() ELSE paid_at END WHERE id=$5`,[newInterest,newPrincipal,newPaid,rowPaid?"paid":"partial",schedule.id]);
+    }
+    if(remaining>0.005){const error=new Error("Full settlement exceeds remaining principal");error.status=400;throw error;}
+    const newBalance=Math.max(0,Number(loan.balance)-principalApplied);
+    if(newBalance<0.005){
+      await client.query(`UPDATE loan_repayment_schedule SET interest_paid=interest,principal_paid=principal,paid_amount=total_due,status='paid',paid_at=COALESCE(paid_at,NOW())
+        WHERE loan_id=$1 AND status<>'paid'`,[loan.id]);
+      await client.query("UPDATE loans SET balance=0,status='completed' WHERE id=$1",[loan.id]);
+      return {loan,chargeApplied,interestApplied:0,principalApplied,newBalance:0,settledPrincipalOnly:true};
+    }
+    await client.query("UPDATE loans SET balance=$1,status='active' WHERE id=$2",[newBalance,loan.id]);
+    return {loan,chargeApplied,interestApplied:0,principalApplied,newBalance,settledPrincipalOnly:true};
+  }
   for(const schedule of schedules){
     if(remaining<=0)break;
     const interestDue=Math.max(0,Number(schedule.interest)-Number(schedule.interest_paid||0));
@@ -1496,7 +1573,7 @@ async function applyLoanRepayment(client,loanId,amount){
     COALESCE((SELECT SUM((interest-interest_paid)+(principal-principal_paid)) FROM loan_repayment_schedule WHERE loan_id=$1 AND status<>'paid'),0) AS total`,[loan.id])).rows[0];
   const completed=newBalance<0.005&&Number(outstanding.total)<0.005;
   await client.query("UPDATE loans SET balance=$1,status=$2 WHERE id=$3",[newBalance,completed?"completed":"active",loan.id]);
-  return {loan,chargeApplied,interestApplied,principalApplied,newBalance};
+  return {loan,chargeApplied,interestApplied,principalApplied,newBalance,settledPrincipalOnly:false};
 }
 const optionalReceiptUpload=(req,res,next)=>{
   if(String(req.headers["content-type"]||"").includes("multipart/form-data")) return upload.single("receipt")(req,res,next);
@@ -1530,6 +1607,8 @@ app.post("/api/credits/repayments",auth,optionalReceiptUpload,asyncRoute(async(r
     return res.status(400).json({error:"Enter the payment transaction reference"});
   }
   const txRef=reference("RPY");
+  const settlePrincipalOnly=["1","true","yes","on"].includes(String(b.settleFull||"").toLowerCase());
+  const settlementMarker="[EARLY_SETTLEMENT_PRINCIPAL]";
   if(fromMember){
     let pendingRow;
     try{
@@ -1537,14 +1616,19 @@ app.post("/api/credits/repayments",auth,optionalReceiptUpload,asyncRoute(async(r
         const loan=(await client.query("SELECT * FROM loans WHERE id=$1 FOR UPDATE",[loanId])).rows[0];
         if(!loan||!["active","overdue"].includes(loan.status)){const error=new Error("Choose an active loan and enter a positive repayment");error.status=400;throw error;}
         if(Number(req.user.member_id)!==Number(loan.member_id)){const error=new Error("You can only repay your own loan");error.status=403;throw error;}
-        const scheduleDue=(await client.query(`SELECT COALESCE(SUM((interest-interest_paid)+(principal-principal_paid)),0)::float AS total
-          FROM loan_repayment_schedule WHERE loan_id=$1 AND status<>'paid'`,[loan.id])).rows[0];
-        if(amount>Number(scheduleDue.total)+0.005){const error=new Error("Repayment exceeds outstanding interest and principal");error.status=400;throw error;}
+        if(settlePrincipalOnly){
+          if(amount>Number(loan.balance)+0.005){const error=new Error("Pay in full uses the remaining principal balance only (interest is waived)");error.status=400;throw error;}
+        }else{
+          const scheduleDue=(await client.query(`SELECT COALESCE(SUM((interest-interest_paid)+(principal-principal_paid)),0)::float AS total
+            FROM loan_repayment_schedule WHERE loan_id=$1 AND status<>'paid'`,[loan.id])).rows[0];
+          if(amount>Number(scheduleDue.total)+0.005){const error=new Error("Repayment exceeds outstanding interest and principal");error.status=400;throw error;}
+        }
+        const noteParts=[String(b.notes||"").trim(),settlePrincipalOnly?settlementMarker:""].filter(Boolean);
         const row=(await client.query(`INSERT INTO transactions
           (reference,member_id,loan_id,type,method,amount,status,external_reference,notes,recorded_by,submission_source,
            evidence_stored_name,evidence_original_name,evidence_mime_type)
           VALUES ($1,$2,$3,'Loan repayment',$4,$5,'pending',$6,$7,$8,'member',$9,$10,$11) RETURNING id,reference,status`,
-        [txRef,loan.member_id,loan.id,method,amount,externalReference||null,String(b.notes||"").trim()||null,req.user.id,
+        [txRef,loan.member_id,loan.id,method,amount,externalReference||null,noteParts.join(" ")||null,req.user.id,
           req.file.filename,req.file.originalname,req.file.mimetype])).rows[0];
         await client.query("INSERT INTO notifications (member_id,title,message) VALUES ($1,$2,$3)",
           [loan.member_id,"Loan repayment submitted",`${txRef} is awaiting Credits verification before your loan progress updates.`]);
@@ -1564,13 +1648,15 @@ app.post("/api/credits/repayments",auth,optionalReceiptUpload,asyncRoute(async(r
   let allocation;
   try{
     allocation=await transaction(async client=>{
-      const result=await applyLoanRepayment(client,loanId,amount);
+      const result=await applyLoanRepayment(client,loanId,amount,{settlePrincipalOnly});
+      const noteParts=[String(b.notes||"").trim(),settlePrincipalOnly?settlementMarker:"",
+        `charges=${result.chargeApplied.toFixed(2)}, interest=${result.interestApplied.toFixed(2)}, principal=${result.principalApplied.toFixed(2)}`].filter(Boolean);
       await client.query(`INSERT INTO transactions
         (reference,receipt_number,member_id,loan_id,type,method,amount,status,external_reference,notes,recorded_by,verified_by,verified_at,
          submission_source,evidence_stored_name,evidence_original_name,evidence_mime_type)
         VALUES ($1,$2,$3,$4,'Loan repayment',$5,$6,'completed',$7,$8,$9,$9,NOW(),'staff',$10,$11,$12)`,
       [txRef,receipt,result.loan.member_id,result.loan.id,method,amount,externalReference||null,
-        `${String(b.notes||"").trim()} | charges=${result.chargeApplied.toFixed(2)}, interest=${result.interestApplied.toFixed(2)}, principal=${result.principalApplied.toFixed(2)}`.slice(0,1000),req.user.id,
+        noteParts.join(" | ").slice(0,1000),req.user.id,
         req.file?.filename||null,req.file?.originalname||null,req.file?.mimetype||null]);
       return result;
     });
@@ -2652,8 +2738,9 @@ app.post("/api/transactions/:id/verify",auth,requireCredits("approve"),asyncRout
     let allocationNotes=null;
     if(decision==="approve"&&locked.type==="Loan repayment"){
       if(!locked.loan_id){const error=new Error("Loan repayment is missing its linked loan");error.status=409;throw error;}
-      const allocation=await applyLoanRepayment(client,locked.loan_id,Number(locked.amount));
-      allocationNotes=`charges=${allocation.chargeApplied.toFixed(2)}, interest=${allocation.interestApplied.toFixed(2)}, principal=${allocation.principalApplied.toFixed(2)}`;
+      const settlePrincipalOnly=/\[EARLY_SETTLEMENT_PRINCIPAL\]/i.test(String(locked.notes||""));
+      const allocation=await applyLoanRepayment(client,locked.loan_id,Number(locked.amount),{settlePrincipalOnly});
+      allocationNotes=`charges=${allocation.chargeApplied.toFixed(2)}, interest=${allocation.interestApplied.toFixed(2)}, principal=${allocation.principalApplied.toFixed(2)}${settlePrincipalOnly?" | early settlement (principal only)":""}`;
     }
     const updated=await client.query(`UPDATE transactions SET status=$1,verified_by=$2,verified_at=NOW(),verification_comment=$3,
       receipt_number=$4,notes=CASE WHEN $5::text IS NOT NULL THEN TRIM(BOTH FROM COALESCE(notes,'')||' | '||$5) ELSE notes END WHERE id=$6 AND status='pending' RETURNING id`,
@@ -2690,10 +2777,13 @@ app.post("/api/loans",auth,upload.single("supportingDocument"),(req,res,next)=>{
   const securityType=String(b.securityType||"").trim().toLowerCase().replaceAll(/[^a-z]+/g,"_").replace(/^_|_$/g,""),declaration=String(b.borrowerDeclaration||"")==="accepted",overdueDeclaration=String(b.overdueDeclaration||"")==="accepted";
   const savingsSecurity=securityType==="savings_and_shares",collateralSecurity=securityType==="collateral";
   if(!member||!product||!amount||!term||!declaration||!overdueDeclaration||(!savingsSecurity&&!collateralSecurity))return res.status(400).json({error:"Complete the required loan fields and accept the Kwagalana loan policy"});
+  const customProductName=String(b.customProductName||"").trim().slice(0,120);
+  if(/^other loan$/i.test(product.name)&&!customProductName)return res.status(400).json({error:"Type the loan product name when selecting Other Loan"});
+  const processingFeeRate=Number(product.processing_fee_rate||2);
+  const processingFee=Math.round((amount*processingFeeRate/100+Number.EPSILON)*100)/100;
   const existing=await one(`SELECT COALESCE(SUM(balance),0)::float AS balance,COUNT(*) FILTER (WHERE status='overdue')::int AS overdue FROM loans WHERE member_id=$1 AND status IN ('active','overdue')`,[memberId]);
   if(existing.overdue>0)return res.status(400).json({error:"This member has an overdue loan that must be resolved before applying"});
-  const savingsMaximum=Math.max(0,Number(member.savings_balance)*Number(product.max_multiplier)-Number(existing.balance));
-  const policyMaximum=collateralSecurity?Number(product.max_amount||25000000):Math.min(savingsMaximum,Number(product.max_amount||25000000));
+  const policyMaximum=Number(product.max_amount||25000000);
   if(amount>policyMaximum)return res.status(400).json({error:`Amount exceeds the approved limit of UGX ${policyMaximum.toLocaleString()}`});
   if(term>Number(product.max_term))return res.status(400).json({error:`Maximum term is ${product.max_term} months`});
   const collateralDescription=String(b.collateralDescription||"").trim(),collateralOwner=String(b.collateralOwner||"").trim(),collateralOwnerPhone=String(b.collateralOwnerPhone||"").trim(),collateralValue=Number(b.collateralValue||0),collateralConsent=["accepted","true","on"].includes(String(b.collateralOwnerConsent||"").toLowerCase());
@@ -2703,43 +2793,108 @@ app.post("/api/loans",auth,upload.single("supportingDocument"),(req,res,next)=>{
   if(guarantorIds.includes(Number(memberId)))return res.status(400).json({error:"A member cannot guarantee their own loan"});
   const guarantors=guarantorIds.length?(await query(`SELECT m.id,m.full_name,m.savings_balance::float AS savings,u.id AS user_id,COALESCE((SELECT SUM(active_loan.amount) FROM loan_guarantors active_guarantee JOIN loans active_loan ON active_loan.id=active_guarantee.loan_id WHERE active_guarantee.member_id=m.id AND active_guarantee.status IN ('pending','accepted') AND active_loan.status NOT IN ('rejected','completed')),0)::float AS guaranteed FROM members m JOIN users u ON u.member_id=m.id WHERE m.id=ANY($1::bigint[]) AND m.status='active' AND m.deleted_at IS NULL AND u.active=true`,[guarantorIds])).rows:[];
   if(savingsSecurity&&guarantors.length!==guarantorIds.length)return res.status(400).json({error:"Every guarantor must be an active member with a login account"});
-  const guaranteeShare=guarantors.length?amount/guarantors.length:0,overCapacity=guarantors.find(g=>g.guaranteed+guaranteeShare>g.savings);
-  if(overCapacity)return res.status(400).json({error:`${overCapacity.full_name} does not have enough guarantee capacity`});
+  const guaranteeShare=guarantors.length?amount/guarantors.length:0;
   const ref=reference("LN"),initialStatus=savingsSecurity?"pending-guarantors":"officer-review";
+  const eligibilityNote=`Open to all members up to UGX ${policyMaximum.toLocaleString()} (not limited by savings balance)`;
   const row=await transaction(async client=>{
-    const created=(await client.query(`INSERT INTO loans (reference,member_id,product_id,amount,balance,term_months,purpose,status,savings_at_application,existing_loan_balance,eligibility_result,security_type,collateral_description,collateral_value,collateral_owner,collateral_owner_phone,collateral_owner_consent,borrower_declaration_accepted,supporting_document_stored_name,supporting_document_original_name,supporting_document_mime_type,processing_fee,policy_reference) VALUES ($1,$2,$3,$4,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,true,$17,$18,$19,0,$20) RETURNING id`,[ref,memberId,b.productId,amount,term,String(b.purpose||"").trim(),initialStatus,member.savings_balance,existing.balance,`Eligible up to UGX ${policyMaximum.toLocaleString()}`,securityType,collateralSecurity?collateralDescription:null,collateralSecurity?collateralValue:null,collateralSecurity?collateralOwner:null,collateralSecurity?collateralOwnerPhone:null,collateralSecurity?collateralConsent:false,req.file?.filename||null,req.file?.originalname||null,req.file?.mimetype||null,product.policy_reference||"AGM-2025-LOAN-RESOLUTION"])).rows[0];
+    const created=(await client.query(`INSERT INTO loans (reference,member_id,product_id,amount,balance,term_months,purpose,status,savings_at_application,existing_loan_balance,eligibility_result,security_type,collateral_description,collateral_value,collateral_owner,collateral_owner_phone,collateral_owner_consent,borrower_declaration_accepted,overdue_declaration_accepted,supporting_document_stored_name,supporting_document_original_name,supporting_document_mime_type,processing_fee,custom_product_name,policy_reference) VALUES ($1,$2,$3,$4,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,true,true,$17,$18,$19,$20,$21,$22) RETURNING id`,[ref,memberId,b.productId,amount,term,String(b.purpose||"").trim(),initialStatus,member.savings_balance,existing.balance,eligibilityNote,securityType,collateralSecurity?collateralDescription:null,collateralSecurity?collateralValue:null,collateralSecurity?collateralOwner:null,collateralSecurity?collateralOwnerPhone:null,collateralSecurity?collateralConsent:false,req.file?.filename||null,req.file?.originalname||null,req.file?.mimetype||null,processingFee,customProductName||null,product.policy_reference||"AGM-2025-LOAN-RESOLUTION"])).rows[0];
     for(const guarantor of guarantors){await client.query("INSERT INTO loan_guarantors (loan_id,member_id,guaranteed_amount) VALUES ($1,$2,$3)",[created.id,guarantor.id,guaranteeShare]);await client.query("INSERT INTO notifications (user_id,title,message) VALUES ($1,'Loan guarantee request',$2)",[guarantor.user_id,`${member.full_name} asked you to guarantee loan ${ref} for UGX ${amount.toLocaleString()}.`]);}
-    await client.query("INSERT INTO loan_workflow_events (loan_id,stage,action,actor_id,comment) VALUES ($1,'application','submitted',$2,$3)",[created.id,req.user.id,collateralSecurity?`Collateral offered by ${collateralOwner}; officer appraisal required`:`Savings checked: UGX ${Number(member.savings_balance).toLocaleString()}; three guarantors requested`]);return created;
+    const nextNote=collateralSecurity?`Collateral offered by ${collateralOwner}; Credit Committee appraisal required`:`Three guarantors requested. Amount within the UGX ${policyMaximum.toLocaleString()} organization limit (not savings-linked). Processing fee ${processingFee.toLocaleString()} (2%) deducted at disbursement; full principal plus 2% monthly interest is repayable.`;
+    await client.query("INSERT INTO loan_workflow_events (loan_id,stage,action,actor_id,comment) VALUES ($1,'application','submitted',$2,$3)",[created.id,req.user.id,nextNote]);return created;
   });
   await audit({userId:req.user.id,action:"LOAN_APPLIED",entityType:"loan",entityId:String(row.id),details:`${ref} - UGX ${amount}`,...metadata(req)});
-  res.status(201).json({id:row.id,reference:ref,status:initialStatus,maximumEligible:policyMaximum});
+  res.status(201).json({id:row.id,reference:ref,status:initialStatus,maximumEligible:policyMaximum,processingFee});
 }));app.post("/api/loans/:id/decision",auth,asyncRoute(async(req,res)=>{
   const loan=await one("SELECT * FROM loans WHERE id=$1",[req.params.id]);
   if(!loan) return res.status(404).json({error:"Loan not found"});
-  const d=req.body.decision,comment=String(req.body.comment||"").slice(0,500);
-  const credits=await departmentPermission(req.user,"credits",d==="approve"?"approve":"edit");
-  const executive=await departmentPermission(req.user,"executive","approve");
-  let next,column,commentColumn,isAuthorization=false,isCommitteeApproval=false;
-  if(credits&&Number(credits.authority_level)>=2&&["officer-review","pending","review","correction"].includes(loan.status)&&["recommend","return","reject"].includes(d)){
-    next=d==="recommend"?"committee-review":d==="return"?"correction":"rejected";column="recommended_by";commentColumn="officer_comment";
-  } else if(credits&&Number(credits.authority_level)>=3&&["committee-review","review"].includes(loan.status)&&["approve","return","reject"].includes(d)){
-    next=d==="approve"?"executive-authorization":d==="return"?"correction":"rejected";column="committee_approved_by";commentColumn="committee_comment";isCommitteeApproval=d==="approve";
-  } else if(executive&&loan.status==="executive-authorization"&&["authorize","return","reject"].includes(d)){
-    next=d==="authorize"?"ready-disbursement":d==="return"?"committee-review":"rejected";column="authorized_by";commentColumn="executive_comment";isAuthorization=d==="authorize";
-  } else return res.status(403).json({error:"This decision is not allowed at your department authority level"});
-  await transaction(async client=>{
-    await client.query(`UPDATE loans SET status=$1,${column}=$2,${commentColumn}=$3${isCommitteeApproval?",verified_amount=amount":""}${isAuthorization?",authorized_at=NOW()":""} WHERE id=$4`,[next,req.user.id,comment,loan.id]);
-    if(isAuthorization) {
-      const member=(await client.query("SELECT phone FROM members WHERE id=$1",[loan.member_id])).rows[0];
-      await client.query(`INSERT INTO loan_disbursements (loan_id,amount,method,destination,status,prepared_by,authorized_by,authorized_at)
-        VALUES ($1,$2,$3,$4,'authorized',$5,$6,NOW()) ON CONFLICT (loan_id) DO UPDATE
-        SET amount=EXCLUDED.amount,method=EXCLUDED.method,destination=EXCLUDED.destination,status='authorized',authorized_by=EXCLUDED.authorized_by,authorized_at=NOW()`,
-        [loan.id,loan.verified_amount||loan.amount,req.body.method||"Mobile Money",req.body.destination||member.phone,loan.committee_approved_by||req.user.id,req.user.id]);
-    }
+  let d=String(req.body.decision||"").toLowerCase();
+  if(d==="recommend")d="approve";
+  if(d==="authorize")d="approve";
+  const comment=String(req.body.comment||"").slice(0,500);
+  if(!["approve","return","reject"].includes(d))return res.status(400).json({error:"Choose approve, return or reject"});
+  const helpers=await getLoanApprovals();
+  const creditsAccess=await departmentPermission(req.user,"credits","edit")||await departmentPermission(req.user,"credits","approve");
+  const executiveAccess=await departmentPermission(req.user,"executive","approve")||await departmentPermission(req.user,"executive","edit");
+  const creditsStage=["officer-review","pending","review","correction","committee-review"].includes(loan.status);
+  const executiveStage=loan.status==="executive-authorization";
+  if(creditsStage&&!creditsAccess)return res.status(403).json({error:"Credits department authority is required"});
+  if(executiveStage&&!executiveAccess)return res.status(403).json({error:"Executive committee authority is required"});
+  if(!creditsStage&&!executiveStage)return res.status(403).json({error:"This loan is not awaiting a decision at your stage"});
+  const stage=creditsStage?"credits":"executive";
+  const progress=await helpers.approvalProgress(loan.id,stage);
+  if(!progress.requiredCount)return res.status(409).json({error:`No active ${stage} reviewers are assigned`});
+  if(progress.blockedBy)return res.status(409).json({error:`This loan was already ${progress.blockedBy.decision}ed by ${progress.blockedBy.fullName}`});
+  if(progress.complete)return res.status(409).json({error:"All required reviewers have already approved this stage"});
+  if(!progress.nextReviewer||Number(progress.nextReviewer.userId)!==Number(req.user.id)){
+    return res.status(403).json({error:progress.nextReviewer
+      ?`Next reviewer is ${progress.nextReviewer.fullName}. Wait for your turn in the approval queue.`
+      :"No next reviewer is available for this loan"});
+  }
+  const remainingAfterVote=progress.reviewers.filter(r=>Number(r.userId)!==Number(req.user.id)&&!r.decision);
+  if(d==="reject"&&!comment.trim())return res.status(400).json({error:"Enter a reason for this rejection"});
+  const isFinalReject=d==="reject"&&helpers.isFinalRejectAuthority(progress.nextReviewer);
+  const stageComplete=(d==="approve"||(d==="reject"&&!isFinalReject))&&remainingAfterVote.length===0;
+  const nextReviewerAfter=(d==="approve"||(d==="reject"&&!isFinalReject))?remainingAfterVote[0]||null:null;
+  const result=await transaction(async client=>{
+    await client.query(`INSERT INTO loan_stage_votes (loan_id,stage,user_id,decision,comment)
+      VALUES ($1,$2,$3,$4,$5)
+      ON CONFLICT (loan_id,stage,user_id) DO UPDATE SET decision=EXCLUDED.decision,comment=EXCLUDED.comment,created_at=NOW()`,
+      [loan.id,stage,req.user.id,d,comment]);
+    const eventComment=d==="reject"&&!isFinalReject
+      ?`Advisory rejection recorded; loan continues. ${comment}`
+      :(comment||`${stage} vote by ${req.user.full_name}`);
     await client.query("INSERT INTO loan_workflow_events (loan_id,stage,action,actor_id,comment) VALUES ($1,$2,$3,$4,$5)",
-      [loan.id,loan.status,d,req.user.id,comment]);
+      [loan.id,loan.status,d==="reject"&&!isFinalReject?"advisory-reject":d,req.user.id,eventComment]);
+
+    let next=loan.status;
+    if(d==="reject"&&isFinalReject){
+      next="rejected";
+    } else if(d==="return"){
+      next=stage==="credits"?"correction":"officer-review";
+      if(stage==="executive"){
+        await client.query("DELETE FROM loan_stage_votes WHERE loan_id=$1 AND stage='credits'",[loan.id]);
+      }
+      await client.query("DELETE FROM loan_stage_votes WHERE loan_id=$1 AND stage=$2",[loan.id,stage]);
+    } else if(stageComplete){
+      if(stage==="credits"){
+        next="executive-authorization";
+        await client.query(`UPDATE loans SET recommended_by=$1,officer_comment=$2,committee_approved_by=$1,committee_comment=$2,verified_amount=amount WHERE id=$3`,
+          [req.user.id,comment,loan.id]);
+      } else {
+        next="ready-disbursement";
+        await client.query(`UPDATE loans SET authorized_by=$1,executive_comment=$2,authorized_at=NOW(),verified_amount=COALESCE(verified_amount,amount) WHERE id=$3`,
+          [req.user.id,comment,loan.id]);
+        const member=(await client.query("SELECT phone FROM members WHERE id=$1",[loan.member_id])).rows[0];
+        await client.query(`INSERT INTO loan_disbursements (loan_id,amount,method,destination,status,prepared_by,authorized_by,authorized_at)
+          VALUES ($1,$2,$3,$4,'authorized',$5,$6,NOW()) ON CONFLICT (loan_id) DO UPDATE
+          SET amount=EXCLUDED.amount,method=EXCLUDED.method,destination=EXCLUDED.destination,status='authorized',authorized_by=EXCLUDED.authorized_by,authorized_at=NOW()`,
+          [loan.id,loan.verified_amount||loan.amount,req.body.method||"Mobile Money",req.body.destination||member.phone,loan.committee_approved_by||loan.recommended_by||req.user.id,req.user.id]);
+      }
+    } else {
+      next=stage==="credits"?"officer-review":"executive-authorization";
+      if(stage==="credits"&&!loan.recommended_by){
+        await client.query("UPDATE loans SET recommended_by=$1,officer_comment=$2 WHERE id=$3",[req.user.id,comment,loan.id]);
+      }
+    }
+    if(next!==loan.status)await client.query("UPDATE loans SET status=$1 WHERE id=$2",[next,loan.id]);
+
+    if((d==="approve"||(d==="reject"&&!isFinalReject))&&nextReviewerAfter){
+      await client.query("INSERT INTO notifications (user_id,title,message) VALUES ($1,$2,$3)",
+        [nextReviewerAfter.userId,"Loan awaiting your review",
+          d==="reject"
+            ?`Loan ${loan.reference} continues after an advisory rejection and is waiting for your ${stage} review.`
+            :`Loan ${loan.reference} is now waiting for your ${stage} approval.`]);
+    } else if(next==="executive-authorization"){
+      const execReviewers=await helpers.departmentReviewers("executive");
+      if(execReviewers[0]){
+        await client.query("INSERT INTO notifications (user_id,title,message) VALUES ($1,$2,$3)",
+          [execReviewers[0].id,"Loan awaiting Executive review",`Loan ${loan.reference} has cleared Credits and is waiting for your Executive review.`]);
+      }
+    }
+    return {next,isFinalReject,advisoryReject:d==="reject"&&!isFinalReject};
   });
-  await audit({userId:req.user.id,action:`LOAN_${d.toUpperCase()}`,entityType:"loan",entityId:String(loan.id),details:`${loan.reference} - ${comment}`,...metadata(req)}); res.json({ok:true,status:next});
+  await audit({userId:req.user.id,action:result.advisoryReject?"LOAN_ADVISORY_REJECT":`LOAN_${d.toUpperCase()}`,entityType:"loan",entityId:String(loan.id),details:`${loan.reference} - ${comment}`,...metadata(req)});
+  res.json({ok:true,status:result.next,advisoryReject:Boolean(result.advisoryReject),finalReject:Boolean(result.isFinalReject)});
 }));app.get("/api/loans/guarantor-candidates",auth,asyncRoute(async(req,res)=>{
   if(!req.user.member_id&&!await canAccessLoanRecords(req.user))return res.status(403).json({error:"A linked member account or Credits access is required"});
   const borrowerId=req.query.memberId?Number(req.query.memberId):Number(req.user.member_id);
@@ -2774,6 +2929,7 @@ app.post("/api/loans/:id/guarantor-response",auth,asyncRoute(async(req,res)=>{
 }));
 app.post("/api/loans/:id/finance-verification",auth,(_req,res)=>res.status(410).json({error:"Finance does not approve loans. Credit Committee approval is sent directly to Executive."}));async function createRepaymentSchedule(client,loan,amount) {
   const product=(await client.query("SELECT annual_rate FROM loan_products WHERE id=$1",[loan.product_id])).rows[0];
+  // Equal principal repayments with reducing-balance monthly interest (same as loan calculator).
   const monthlyRate=Number(product.annual_rate)/1200,n=Number(loan.term_months),round=value=>Math.round((value+Number.EPSILON)*100)/100,regularPrincipal=round(amount/n);
   let balance=round(amount);
   for(let installment=1;installment<=n;installment++){
@@ -2792,25 +2948,37 @@ app.post("/api/loans/:id/disburse",auth,asyncRoute(async(req,res)=>{
     if(!loan||loan.status!=="ready-disbursement"||!disbursement||disbursement.status!=="authorized") {
       const error=new Error("Loan is not ready for disbursement or was already disbursed");error.status=409;throw error;
     }
+    const fullAmount=Number(disbursement.amount||loan.verified_amount||loan.amount);
+    const product=(await client.query("SELECT processing_fee_rate FROM loan_products WHERE id=$1",[loan.product_id])).rows[0];
+    const feeRate=Number(product?.processing_fee_rate||2);
+    let processingFee=Number(loan.processing_fee||0);
+    if(!processingFee)processingFee=Math.round((fullAmount*feeRate/100+Number.EPSILON)*100)/100;
+    const netCash=Math.max(0,Math.round((fullAmount-processingFee+Number.EPSILON)*100)/100);
     const disbursed=await client.query(`UPDATE loan_disbursements SET status='disbursed',disbursed_by=$1,transaction_reference=$2,disbursed_at=NOW()
       WHERE id=$3 AND status='authorized' RETURNING id`,[req.user.id,transactionReference,disbursement.id]);
     if(disbursed.rowCount!==1){const error=new Error("Loan was already disbursed");error.status=409;throw error;}
-    const activated=await client.query(`UPDATE loans SET status='active',amount=$1,balance=$1,disbursed_at=NOW(),due_date=(CURRENT_DATE+($2||' months')::interval)::date
-      WHERE id=$3 AND status='ready-disbursement' RETURNING id`,[disbursement.amount,loan.term_months,loan.id]);
+    const activated=await client.query(`UPDATE loans SET status='active',amount=$1,balance=$1,processing_fee=$2,disbursed_at=NOW(),due_date=(CURRENT_DATE+($3||' months')::interval)::date
+      WHERE id=$4 AND status='ready-disbursement' RETURNING id`,[fullAmount,processingFee,loan.term_months,loan.id]);
     if(activated.rowCount!==1){const error=new Error("Loan status changed before disbursement");error.status=409;throw error;}
-    await client.query(`INSERT INTO transactions (reference,member_id,type,method,amount,status,external_reference,recorded_by,verified_by,verified_at)
-      VALUES ($1,$2,'Loan disbursement',$3,$4,'completed',$5,$6,$6,NOW())`,
-      [transactionReference,loan.member_id,disbursement.method,disbursement.amount,disbursement.destination,req.user.id]);
-    await createRepaymentSchedule(client,loan,Number(disbursement.amount));
+    await client.query(`INSERT INTO transactions (reference,member_id,type,method,amount,status,external_reference,notes,recorded_by,verified_by,verified_at)
+      VALUES ($1,$2,'Loan disbursement',$3,$4,'completed',$5,$6,$7,$7,NOW())`,
+      [transactionReference,loan.member_id,disbursement.method,netCash,disbursement.destination,
+        `Net cash after ${feeRate}% processing fee of UGX ${processingFee.toLocaleString()}. Full principal UGX ${fullAmount.toLocaleString()} remains repayable with organization interest.`,req.user.id]);
+    if(processingFee>0){
+      await client.query(`INSERT INTO loan_charges (loan_id,charge_type,amount,paid_amount,status,reason,assessed_by,assessed_at)
+        VALUES ($1,'Processing fee',$2,$2,'paid',$3,$4,NOW())`,
+        [loan.id,processingFee,`${feeRate}% processing fee deducted from disbursed cash`,req.user.id]);
+    }
+    await createRepaymentSchedule(client,loan,fullAmount);
     await client.query("INSERT INTO loan_workflow_events (loan_id,stage,action,actor_id,comment) VALUES ($1,'disbursement','disbursed',$2,$3)",
-      [loan.id,req.user.id,`${disbursement.method} - ${transactionReference}`]);
+      [loan.id,req.user.id,`${disbursement.method} - ${transactionReference}. Net cash UGX ${netCash.toLocaleString()}; processing fee UGX ${processingFee.toLocaleString()}.`]);
     const memberUser=(await client.query("SELECT id FROM users WHERE member_id=$1 AND active=true LIMIT 1",[loan.member_id])).rows[0];
     if(memberUser)await client.query("INSERT INTO notifications (user_id,title,message) VALUES ($1,'Loan disbursed',$2)",
-      [memberUser.id,`Loan ${loan.reference} has been disbursed. Your repayment schedule is now available.`]);
-    return loan;
+      [memberUser.id,`Loan ${loan.reference} has been disbursed. Net cash received UGX ${netCash.toLocaleString()} after a ${feeRate}% processing fee. You repay the full UGX ${fullAmount.toLocaleString()} plus 2% monthly organization interest.`]);
+    return {loan,netCash,processingFee,fullAmount};
   });
-  await audit({userId:req.user.id,action:"LOAN_DISBURSED",entityType:"loan",entityId:String(result.id),details:transactionReference,...metadata(req)});
-  res.json({ok:true,status:"active",transactionReference});
+  await audit({userId:req.user.id,action:"LOAN_DISBURSED",entityType:"loan",entityId:String(result.loan.id),details:transactionReference,...metadata(req)});
+  res.json({ok:true,status:"active",transactionReference,netCash:result.netCash,processingFee:result.processingFee,principal:result.fullAmount});
 }));app.get("/api/loans/:id/supporting-document",auth,asyncRoute(async(req,res)=>{
   const loan=await one("SELECT member_id,supporting_document_stored_name AS stored,supporting_document_original_name AS original,supporting_document_mime_type AS mime FROM loans WHERE id=$1",[req.params.id]);
   if(!loan?.stored)return res.status(404).json({error:"Loan supporting document not found"});
@@ -2819,14 +2987,17 @@ app.post("/api/loans/:id/disburse",auth,asyncRoute(async(req,res)=>{
   const file=path.join(uploadsDir,path.basename(loan.stored));if(!fs.existsSync(file))return res.status(404).json({error:"Stored loan document is missing"});
   res.type(loan.mime||"application/octet-stream");res.set("Content-Disposition",`inline; filename="${String(loan.original||"loan-document").replaceAll('"','')}"`);res.sendFile(file);
 }));app.get("/api/loans/:id/details",auth,asyncRoute(async(req,res)=>{
-  const loan=await one(`SELECT l.*,m.full_name AS member,m.member_number,p.name AS product,p.annual_rate
+  const loan=await one(`SELECT l.*,m.full_name AS member,m.member_number,
+    CASE WHEN NULLIF(l.custom_product_name,'') IS NOT NULL THEN p.name||' ('||l.custom_product_name||')' ELSE p.name END AS product,
+    p.annual_rate,l.custom_product_name,l.processing_fee
     FROM loans l JOIN members m ON m.id=l.member_id JOIN loan_products p ON p.id=l.product_id WHERE l.id=$1`,[req.params.id]);
   if(!loan)return res.status(404).json({error:"Loan not found"});
   const isBorrower=Number(req.user.member_id)===Number(loan.member_id);
   const isGuarantor=req.user.member_id&&await one("SELECT 1 FROM loan_guarantors WHERE loan_id=$1 AND member_id=$2",[loan.id,req.user.member_id]);
   const hasStaffAccess=req.user.role!=="Member"&&await canAccessLoanRecords(req.user);
   if(!isBorrower&&!isGuarantor&&!hasStaffAccess)return res.status(403).json({error:"Loan access denied"});
-  const [guarantors,events,schedule,disbursement]=await Promise.all([
+  const helpers=await getLoanApprovals();
+  const [guarantors,events,schedule,disbursement,creditsProgress,executiveProgress]=await Promise.all([
     query(`SELECT lg.id,m.full_name AS name,m.member_number AS "memberNumber",lg.status,lg.response_note AS note,lg.responded_at AS "respondedAt"
       FROM loan_guarantors lg JOIN members m ON m.id=lg.member_id WHERE lg.loan_id=$1`,[loan.id]),
     query(`SELECT e.id,e.stage,e.action,e.comment,e.created_at AS "createdAt",COALESCE(u.full_name,'System') AS actor
@@ -2835,9 +3006,12 @@ app.post("/api/loans/:id/disburse",auth,asyncRoute(async(req,res)=>{
       principal::float,interest::float,total_due::float AS "totalDue",paid_amount::float AS "paidAmount",status
       FROM loan_repayment_schedule WHERE loan_id=$1 ORDER BY installment_number`,[loan.id]),
     one(`SELECT amount::float,method,destination,status,transaction_reference AS "transactionReference",
-      prepared_at AS "preparedAt",authorized_at AS "authorizedAt",disbursed_at AS "disbursedAt" FROM loan_disbursements WHERE loan_id=$1`,[loan.id])
+      prepared_at AS "preparedAt",authorized_at AS "authorizedAt",disbursed_at AS "disbursedAt" FROM loan_disbursements WHERE loan_id=$1`,[loan.id]),
+    helpers.approvalProgress(loan.id,"credits"),
+    helpers.approvalProgress(loan.id,"executive")
   ]);
-  res.json({loan,guarantors:guarantors.rows,events:events.rows,schedule:schedule.rows,disbursement});
+  res.json({loan,guarantors:guarantors.rows,events:events.rows,schedule:schedule.rows,disbursement,
+    approvalQueues:{credits:creditsProgress,executive:executiveProgress}});
 }));
 
 app.post("/api/withdrawals",auth,permit("withdrawal:create","transaction:create"),asyncRoute(async(req,res)=>{
