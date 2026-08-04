@@ -1,0 +1,17 @@
+{
+  "name": "Kasangati G40 Kwagalana",
+  "short_name": "G40 Kwagalana",
+  "description": "Secure central organization and departmental management platform",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#fbfaf6",
+  "theme_color": "#28632d",
+  "icons": [
+    {
+      "src": "/brand-logo-slogan.png?v=51",
+      "sizes": "1254x1254",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

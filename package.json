@@ -1,0 +1,22 @@
+{
+  "name": "tujenge-sacco",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Secure, database-backed SACCO management system",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "seed": "node scripts/seed.js",
+    "db:import-railway": "node scripts/import-railway-db.js",
+    "test": "node scripts/test-security.js",
+    "test:financial": "node scripts/test-financial-integrity.js",
+    "check": "node scripts/check.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.2",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^2.1.1",
+    "pg": "^8.20.0"
+  }
+}

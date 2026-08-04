@@ -1,0 +1,129 @@
+/* Final Kasangati G40 Kwagalana identity: navy, gold, white and neutral tones only. */
+:root{
+  --brand-navy:#06264a;
+  --brand-navy-2:#0b3b70;
+  --brand-blue:#16558f;
+  --brand-gold:#d89b00;
+  --brand-gold-2:#f0b429;
+  --brand-gold-soft:#fff5d8;
+  --green-950:#041b35!important;
+  --green-900:#06264a!important;
+  --green-800:#0b3b70!important;
+  --green-700:#b77f00!important;
+  --green-100:#eaf1f8!important;
+  --lime:#d89b00!important;
+  --lime-soft:#fff5d8!important;
+}
+
+/* Shared navigation and primary surfaces. */
+.sidebar,.executive-sidebar,.finance-sidebar,.audit-sidebar,.legal-sidebar,.welfare-sidebar{
+  background:radial-gradient(circle at 108% -8%,rgba(216,155,0,.18),transparent 31%),linear-gradient(180deg,#082e57 0%,#06264a 58%,#041b35 100%)!important;
+}
+.nav-item.active,.sidebar .nav-item.active{
+  background:linear-gradient(105deg,#bd8500,#e0a817)!important;
+  color:#fff!important;
+  box-shadow:0 8px 22px rgba(216,155,0,.28)!important;
+}
+.button.primary,.floating-action,.quick-action-button,.send-button,.login-submit{
+  background:linear-gradient(105deg,#082e57,#16558f)!important;
+  border-color:#082e57!important;color:#fff!important;
+  box-shadow:0 8px 20px rgba(6,38,74,.2)!important;
+}
+.button.primary:hover,.floating-action:hover,.quick-action-button:hover,.send-button:hover,.login-submit:hover{
+  background:linear-gradient(105deg,#041b35,#0b3b70)!important;
+}
+
+/* Login: remove all former green lettering and feature circles. */
+.login-brand{background:radial-gradient(circle at 108% -5%,rgba(216,155,0,.2),transparent 35%),linear-gradient(145deg,#041b35,#082e57 65%,#061f3d)!important}
+.login-brand-identity strong{color:#d89b00!important}.login-brand-identity strong span{color:#fff!important}.login-brand-identity small{color:#f0b429!important}
+.login-message h1 em,.login-message h1 span{color:#f0b429!important}.login-message p{color:#e1e9f2!important}
+.login-features i{background:linear-gradient(145deg,#dba000,#b57c00)!important;color:#fff!important;box-shadow:0 8px 18px rgba(0,0,0,.18)!important}
+.login-features span{color:#d9e3ee!important}.login-form-options input{accent-color:#d89b00!important}.login-form-options button{color:#9a6b00!important}
+.login-box h2{color:#06264a!important}.login-box h2::after{background:#d89b00!important}
+
+/* Member dashboard and member-only pages. */
+.member-crest{background:#fff!important;border-color:#d89b00!important}
+.member-welcome{
+  background:radial-gradient(circle at 102% 0,rgba(240,180,41,.3),transparent 34%),linear-gradient(125deg,#041b35,#0b3b70 72%,#b77f00)!important;
+  box-shadow:0 12px 28px rgba(6,38,74,.18)!important;
+}
+.member-welcome span{color:#f0b429!important}.member-welcome p{color:#dbe6f0!important}
+.member-summary-card>span,.member-list article>span,.member-meeting-list time,.account-photo,.member-passport{
+  color:#b77f00!important;background:#eaf1f8!important;
+}
+.member-context-link{color:#f0b429!important;border-color:rgba(240,180,41,.45)!important}
+.account-settings-head{background:linear-gradient(135deg,#edf3f9,#fff)!important}
+
+/* Green-labelled visual variants now use brand navy/gold. */
+.exec-stat-icon.green,.exec-mini-stat>span.green,.finance-stat-card>span.green,.credits-guarantor-summary>div>span.green,
+.welfare-stat-card>span.green,.legal-stat-card>span.green,.audit-stat.green .audit-stat-icon,
+.legal-stat.green>span,.welfare-stat.green>span,.bio-stats .green>span,.sup-stat.green>span{
+  color:#9a6b00!important;background:#fff3cf!important;
+}
+.exec-module-metric.green,.credits-summary-cards .green{border-color:#d89b00!important}
+.exec-report-grid article>span.green{color:#9a6b00!important;background:#fff3cf!important}
+.trend-up,.status.approved,.status.completed,.status.complete,.status.active,.status.verified,.status.success,
+.dept-tag.approved,.dept-tag.active,.dept-tag.completed,.dept-tag.verified{
+  color:#0b3b70!important;background:#eaf1f8!important;
+}
+.mini-btn.approve{color:#0b3b70!important;background:#eaf1f8!important}
+
+/* Charts, progress bars and legend markers. */
+.exec-line-chart.green i,.finance-chart i,.finance-budget-table i,.credits-portfolio-legend i.green,
+.investment-allocation i.green,.welfare-fund-lines i.green,.welfare-status-legend i.green,
+.welfare-category-chart i.green,.welfare-contribution-legend i.green,.audit-stage-grid span.green,
+.bio-completion u,.sup-stat.green>span{
+  background:#d89b00!important;color:#06264a!important;
+}
+.credits-donut{background:radial-gradient(circle at center,#fff 0 52%,transparent 53%),conic-gradient(#d89b00 0 calc(var(--performing)*1%),#c9394f calc(var(--performing)*1%) 100%)!important}
+.investment-project-icon.agriculture{color:#9a6b00!important;background:linear-gradient(135deg,#fff7df,#f8e7ae)!important}
+.investment-card-banner.agriculture{background:linear-gradient(135deg,#082e57,#d89b00)!important}
+.exec-track i,.compliance-bars u,.audit-progress u{background:linear-gradient(90deg,#16558f,#d89b00)!important}
+
+/* Legal, audit, supervisory and messenger remnants. */
+.bio-card.verified{border-top-color:#d89b00!important}.bio-completion u{background:linear-gradient(90deg,#16558f,#d89b00)!important}
+.risk-quadrants .low,.heat-cell.low,.risk-distribution .low,.dept-tag.risk-low{color:#0b3b70!important;background:#eaf1f8!important}
+.clickable-profile:hover{box-shadow:0 0 0 3px rgba(216,155,0,.3)!important}
+.messenger-profile-photo{color:#06264a!important;background:#eaf1f8!important;box-shadow:0 8px 25px rgba(6,38,74,.18)!important}
+.messenger-profile-card>p,.chat-head span,.message-sender,.reply-preview span,.contact-start>svg{color:#9a6b00!important}
+.messenger-profile-departments span,.admin-chip,.reaction-row>button.mine{color:#0b3b70!important;background:#eaf1f8!important;border-color:#c7d7e7!important}
+.message-row.mine .message-bubble{background:#0b3b70!important;border-color:#0b3b70!important}
+
+/* Executive account/history sections that retained old hard-coded green. */
+.executive-readonly-badge,.exec-history-counts span{color:#0b3b70!important;background:#eaf1f8!important}
+.executive-account-grid article{background:linear-gradient(145deg,#fff,#f3f7fb)!important}
+.executive-account-icon{color:#9a6b00!important;background:#fff3cf!important}
+.executive-account-title>span{color:#9a6b00!important}
+
+input[type="checkbox"],input[type="radio"]{accent-color:#d89b00!important}
+a,.link-button,.dept-link{color:#16558f!important}
+
+/* Login spacing, organization slogan and loan workflow presentation. */
+.login-brand-identity{gap:6px!important;transform:translateY(-10px)}
+.login-brand-identity img{height:190px!important;margin-bottom:2px!important}
+.login-brand-identity strong{margin-top:0!important;line-height:1.12!important;position:relative;z-index:2}
+.login-brand-identity small{margin-top:2px!important}
+.login-form-logo{height:108px!important;margin:0 auto 16px!important;display:block}
+.login-box h2{margin-top:0!important}
+.login-trust strong{color:#082e57!important;font-size:16px}.login-trust strong em,.login-trust strong span{color:#d89b00!important;font-style:normal}
+.loan-policy-check{padding:14px 16px;border:1px solid #d7e0ea;border-left:4px solid #d89b00;border-radius:10px;background:#f8fafc}.loan-policy-check span{font-weight:750;color:#082e57}
+.loan-calculator-modal{width:min(940px,calc(100vw - 30px));max-height:92vh;overflow:auto}.loan-calculator-fields{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;padding:20px}.loan-calculator-fields label{display:grid;gap:7px;font-weight:700}.loan-calculator-fields input{min-height:44px;padding:9px 12px;border:1px solid #ccd8e4;border-radius:8px}.loan-calculator-actions{display:flex;gap:10px;padding:0 20px 18px}.loan-calculator-result{padding:0 20px 22px}.loan-calculator-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px}.loan-calculator-summary span{padding:13px;border-radius:10px;background:#f1f5f9;color:#607084}.loan-calculator-summary strong{display:block;margin-top:4px;color:#082e57;font-size:18px}.member-active-loans{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:15px;margin:16px 0}.member-loan-progress header{display:flex;justify-content:space-between;gap:12px}.member-loan-progress h3{margin:5px 0 12px}.member-loan-progress-bar{height:10px;border-radius:99px;background:#e8eef4;overflow:hidden}.member-loan-progress-bar i{display:block;height:100%;background:linear-gradient(90deg,#0b4b86,#d89b00);border-radius:inherit}.member-loan-progress-meta,.member-next-repayment{display:flex;justify-content:space-between;gap:12px;margin-top:8px}.member-next-repayment{margin-top:15px;padding-top:12px;border-top:1px solid #e2e8f0}.member-next-repayment span{color:#708096}.member-next-repayment strong{display:block;margin-top:3px;color:#082e57}
+@media(max-width:720px){.loan-calculator-fields,.loan-calculator-summary{grid-template-columns:1fr}.login-form-logo{height:96px!important;margin-bottom:14px!important}}
+
+.credits-row-progress{margin-top:12px;max-width:430px}.credits-row-progress>div{display:flex;justify-content:space-between;color:#607084}.credits-row-progress>i{display:block;height:8px;margin:5px 0;border-radius:20px;background:#e5ebf1;overflow:hidden}.credits-row-progress>i>u{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#0b4b86,#d89b00)}.credits-row-progress small{color:#082e57!important}
+
+.exec-dept-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}.exec-dept-actions .primary{border:0;background:#082e57;color:#fff;padding:9px 12px;border-radius:8px;font-weight:700;cursor:pointer}.credits-borrower-meta{margin:4px 0 8px;color:#4b5d73}.credits-active-loan .credits-loan-actions{display:flex;flex-wrap:wrap;gap:8px}.member-loan-totals{display:flex;flex-wrap:wrap;gap:12px;margin-top:10px;color:#607084}.member-loan-totals strong{display:block;color:#082e57}.member-loan-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+
+/* Organization heading sits above the login logo — one line, scaled to the brand column. */
+.login-page{grid-template-columns:minmax(420px,50%) minmax(420px,50%)!important}
+.login-brand{container-type:inline-size;container-name:loginbrand;padding-left:clamp(18px,4.5cqi,36px)!important;padding-right:clamp(18px,4.5cqi,36px)!important}
+.login-brand-identity{gap:14px!important;transform:translateY(-8px);width:100%;max-width:100%;justify-items:center;overflow:visible}
+.login-organization-heading{display:flex;flex-wrap:nowrap;align-items:baseline;justify-content:center;gap:.22em;width:100%;max-width:100%;box-sizing:border-box;position:relative;z-index:2;white-space:nowrap;font-size:clamp(15px,6.4cqi,34px)}
+.login-organization-heading strong,.login-organization-heading small{margin:0!important;font-size:1em!important;line-height:1.05!important;letter-spacing:-.03em!important;font-weight:700}
+.login-brand-identity>img{margin:0!important;height:190px!important}
+.login-form-heading{display:flex!important;margin:0 0 10px!important;font-size:clamp(13px,2.1vw,18px)!important}
+.login-form-heading strong{color:#d89b00!important}.login-form-heading strong span{color:#06264a!important}.login-form-heading small{color:#d89b00!important}
+@media(max-width:840px){.login-brand-identity .login-organization-heading{display:none}}
+
+/* Keep member guarantor decision controls readable and aligned. */
+.member-panel .table-actions{display:flex!important;flex-wrap:nowrap!important;align-items:center;gap:8px!important;min-width:158px}.member-panel .table-actions .button{flex:0 0 auto!important;min-width:74px!important;width:auto!important;padding:9px 13px!important;white-space:nowrap!important;word-break:normal!important;overflow-wrap:normal!important;line-height:1.15!important}.member-panel table th:last-child,.member-panel table td:last-child{min-width:178px!important}

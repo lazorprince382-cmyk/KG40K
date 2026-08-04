@@ -1,0 +1,12 @@
+﻿node_modules/
+.env
+data/
+*.log
+storage/uploads/*
+!storage/uploads/.gitkeep
+backups/
+storage/quarantine/*
+private/
+scripts/_patch-*.js
+scripts/_member-*.js
+

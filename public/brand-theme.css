@@ -1,0 +1,32 @@
+/* Kasangati G40 Kwagalana official navy-and-gold identity. */
+:root{
+  --ink:#10243f;--muted:#687789;--line:#dbe3ec;--soft:#f4f7fb;--cream:#f8fafc;
+  --green-950:#061f3f;--green-900:#082a52;--green-800:#0d3b70;--green-700:#b98200;
+  --green-100:#edf3fa;--lime:#d49a00;--lime-soft:#fff7dd;
+  --amber:#d99a00;--amber-soft:#fff4d8;--blue:#164f8e;--blue-soft:#eaf2fb;
+  --shadow:0 10px 30px rgba(6,31,63,.09);
+}
+body{color:var(--ink);background:#f8fafc}
+.sidebar,.executive-sidebar,.audit-sidebar,.legal-sidebar,.welfare-sidebar{
+  background:radial-gradient(circle at 108% -8%,rgba(218,158,0,.18),transparent 31%),linear-gradient(180deg,#082a52 0%,#061f3f 58%,#04172f 100%)!important;
+  color:#f5f8fc!important;
+}
+.nav-item.active,.executive-sidebar .nav-item.active,.audit-sidebar .nav-item.active,.legal-sidebar .nav-item.active,.welfare-sidebar .nav-item.active{
+  background:linear-gradient(105deg,#bd8300,#e2ab19)!important;color:#fff!important;box-shadow:0 8px 22px rgba(207,151,0,.28)!important;
+}
+.nav-item:hover{background:rgba(255,255,255,.09)!important}.nav-item{color:#d3deeb!important}
+.brand-mark,.executive-crest,.audit-crest,.legal-crest,.welfare-crest{background:#fff!important;border:1px solid rgba(213,157,0,.75)!important;box-shadow:0 5px 16px rgba(0,0,0,.18)!important;overflow:hidden}
+.brand-mark::before,.executive-crest::before{background:#fff url('/brand-logo.png?v=51') center/92% auto no-repeat!important;border-radius:50%!important}
+.brand-sub,.nav-label,.user-role{color:#aebed1!important}
+.button.primary,.floating-action,.quick-action-button{background:linear-gradient(105deg,#0b3565,#164f8e)!important;color:#fff!important;border-color:#0b3565!important}
+.button.primary:hover,.floating-action:hover,.quick-action-button:hover{background:linear-gradient(105deg,#061f3f,#0f447f)!important}
+.eyebrow,.dept-eyebrow{color:#9a6d00!important}
+.exec-welcome{background:linear-gradient(115deg,#061f3f,#0d3b70 68%,#b98200)!important;box-shadow:0 10px 25px rgba(6,31,63,.18)!important}
+.exec-track i,.compliance-bars u,.audit-progress u{background:linear-gradient(90deg,#0b4b86,#d49a00)!important}
+.login-brand{background:radial-gradient(circle at 108% -5%,rgba(218,158,0,.22),transparent 34%),linear-gradient(145deg,#061f3f 0%,#082a52 62%,#04172f 100%)!important}
+.login-message .eyebrow,.login-features svg{color:#e2ab19!important}.login-message p,.login-features{color:#d6e0ec!important}
+.login-brand-identity img,.login-form-logo{background:#fff;border-radius:50%;object-fit:contain}
+.login-brand-identity img{padding:4px}.login-form-logo{padding:5px}
+.status.approved,.dept-tag.approved,.dept-tag.active{background:#edf3fa!important;color:#0d4b83!important}
+a,.link-button,.dept-link{color:#15568f}
+@media(max-width:760px){.sidebar,.executive-sidebar,.audit-sidebar,.legal-sidebar,.welfare-sidebar{background:linear-gradient(180deg,#082a52,#04172f)!important}}
