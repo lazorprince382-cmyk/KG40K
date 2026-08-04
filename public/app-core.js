@@ -153,17 +153,40 @@ function normalize(data) {
   data.audit = data.audit.map(a => ({ ...a, id: `AUD-${String(a.id).padStart(5,"0")}`, detail: a.details || `${a.entityType || ""} ${a.entityId || ""}` }));
   return data;
 }
-async function refreshData() {
-  const data = normalize(await api("/api/bootstrap"));
-  state = { ...state, ...data, role: data.user.role, page: state.page || "dashboard" };
-  if(data.user.member_id) {
+async function refreshData(seedUser=null) {
+  const knownRole=seedUser?.role||state.user?.role||null;
+  const centerByRole={
+    "Executive Officer":"/api/executive/command-center",
+    "Finance Officer":"/api/finance/command-center",
+    "Credits Officer":"/api/credits/command-center",
+    "Investment Officer":"/api/investment/command-center"
+  };
+  const centerUrl=centerByRole[knownRole]||null;
+  const memberNeeded=Boolean(seedUser?.member_id||state.user?.member_id);
+  const [data,center,memberCenter]=await Promise.all([
+    api("/api/bootstrap"),
+    centerUrl?api(centerUrl):Promise.resolve(null),
+    memberNeeded?api("/api/member/command-center"):Promise.resolve(null)
+  ]);
+  state={...state,...normalize(data),role:data.user.role,page:state.page||"dashboard"};
+  if(memberCenter){
+    state.memberCenter=memberCenter;
+    if(data.user.role==="Member"&&state.page==="dashboard")state.page="member-dashboard";
+  }else if(data.user.member_id){
     state.memberCenter=await api("/api/member/command-center");
     if(data.user.role==="Member"&&state.page==="dashboard")state.page="member-dashboard";
   }
-  if(data.user.role==="Executive Officer") state.executive=await api("/api/executive/command-center");
-  if(data.user.role==="Finance Officer") state.finance=await api("/api/finance/command-center");
-  if(data.user.role==="Credits Officer") state.credits=await api("/api/credits/command-center");
-  if(data.user.role==="Investment Officer") state.investment=await api("/api/investment/command-center");
+  if(center){
+    if(data.user.role==="Executive Officer")state.executive=center;
+    if(data.user.role==="Finance Officer")state.finance=center;
+    if(data.user.role==="Credits Officer")state.credits=center;
+    if(data.user.role==="Investment Officer")state.investment=center;
+  }else{
+    if(data.user.role==="Executive Officer")state.executive=await api("/api/executive/command-center");
+    if(data.user.role==="Finance Officer")state.finance=await api("/api/finance/command-center");
+    if(data.user.role==="Credits Officer")state.credits=await api("/api/credits/command-center");
+    if(data.user.role==="Investment Officer")state.investment=await api("/api/investment/command-center");
+  }
 }
 function save() {}
 function money(value) { return `UGX ${Math.abs(Number(value)).toLocaleString("en-US")}`; }
@@ -187,7 +210,6 @@ function loginView(error = "") {
       <div class="login-trust">${icons.shield}<div><strong>Together in <em>Love</em>, United in <span>Prosperity.</span></strong></div></div>
     </section>
     <section class="login-panel">
-      <label class="login-language">Language <select aria-label="Language"><option>English</option></select></label>
       <div class="login-box">
         <div class="login-organization-heading login-form-heading"><strong><span>KASANGATI</span> G40</strong><small>KWAGALANA</small></div>
         <img class="login-form-logo" src="/brand-logo-slogan.png?v=51" alt="Kasangati G40 Kwagalana">
@@ -200,24 +222,30 @@ function loginView(error = "") {
           <div class="login-form-options"><label><input name="remember" type="checkbox" value="yes"> Remember me</label><button type="button" id="login-forgot">Forgot password?</button></div>
           <button class="button primary login-submit" type="submit">${icons.lock} Sign in securely</button>
         </form>
-        <div class="login-divider"><span>OR</span></div>
-        <button class="login-sso" id="login-sso" type="button">${icons.shield} Sign in with organization SSO</button>
       </div>
-      <footer class="login-footer"><span>${icons.shield} Secure access &nbsp;?&nbsp; Encrypted connection</span><small>? ${new Date().getFullYear()} Kasangati G40 Kwagalana. All rights reserved.</small></footer>
+      <footer class="login-footer"><span>${icons.shield} Secure access &nbsp;·&nbsp; Encrypted connection</span><small>&copy; ${new Date().getFullYear()} Kasangati G40 Kwagalana. All rights reserved.</small></footer>
     </section></div>`;
   document.getElementById("login-form").addEventListener("submit", login);
   document.getElementById("password-toggle").onclick = () => { const input=document.getElementById("login-password"); input.type=input.type==="password"?"text":"password"; };
   const assistance=document.getElementById("login-assistance");
   document.getElementById("login-forgot").onclick=()=>{assistance.hidden=false;assistance.textContent="Contact the Legal Department or system administrator to reset your password securely.";};
-  document.getElementById("login-sso").onclick=()=>{assistance.hidden=false;assistance.textContent="Organization SSO is ready for configuration. Use your issued email and password for access.";};
 }
 async function login(event) {
   event.preventDefault();
-  const button=event.currentTarget.querySelector("button[type=submit]"); button.disabled=true; button.textContent="Signing in?";
+  const button=event.currentTarget.querySelector("button[type=submit]"); button.disabled=true; button.innerHTML=`${icons.lock} Signing in...`;
   try {
     const values=Object.fromEntries(new FormData(event.currentTarget));
-    await api("/api/auth/login",{method:"POST",body:JSON.stringify(values)});
-    await refreshData(); render();
+    const session=await api("/api/auth/login",{method:"POST",body:JSON.stringify(values)});
+    if(session.user){
+      state.user=session.user; state.role=session.user.role; state.permissions=session.permissions||[];
+      state.page=session.user.role==="Member"?"member-dashboard":"dashboard";
+      document.getElementById("app").innerHTML=`<div class="loading-screen"><div class="loading-mark"><div class="brand-mark">${icons.logo}</div>Opening your workspace<div class="spinner"></div></div></div>`;
+      await refreshData(session.user);
+    }else{
+      document.getElementById("app").innerHTML=`<div class="loading-screen"><div class="loading-mark"><div class="brand-mark">${icons.logo}</div>Opening your workspace<div class="spinner"></div></div></div>`;
+      await refreshData();
+    }
+    render();
   } catch(error) { loginView(error.message); }
 }
 async function init() {
@@ -365,7 +393,7 @@ function executiveSidebar() {
     "executive-legal":"file","executive-audit":"audit","executive-supervisory":"shield","executive-approvals":"approvals",
     "executive-meetings":"clock","executive-projects":"building","executive-reports":"reports","executive-analytics":"reports",
     notifications:"bell","executive-documents":"file"};
-  const pending=state.executive?.stats?.pendingApprovals||0;
+  const pending=state.executive?.stats?.pendingApprovals||((state.executive?.approvals||[]).length+((state.executive?.documents||[]).filter(d=>d.status==="pending_executive").length));
   const sidebarPages=new Set(["dashboard","messages","members","departments","executive-approvals","executive-meetings","executive-projects","executive-reports","executive-analytics","notifications","executive-documents","settings"]);
   return `<aside class="sidebar executive-sidebar" id="sidebar">
     <div class="executive-brand"><div class="executive-crest">${icons.shield}</div><div><strong>KASANGATI G40<br>KWAGALANA</strong><span>Executive Department</span></div></div>
@@ -699,8 +727,13 @@ function executivePerformanceWidget(e) {
     <div class="exec-performance-list">${Object.entries(e.performance).map(([key,value])=>`<div><div><span>${labels[key]||key}</span><strong>${value>0?`${value}%`:"Not scored"}</strong></div><div class="exec-track"><i class="${value>0&&value<80?"low":value>0&&value<88?"watch":""}" style="width:${Math.max(0,value)}%"></i></div></div>`).join("")}</div></section>`;
 }
 function executiveApprovalWidget(items) {
+  const pendingDocuments=(state.executive?.documents||[]).filter(d=>d.status==="pending_executive");
+  const merged=[
+    ...pendingDocuments.map(d=>({id:`doc-${d.id}`,department:d.department||"Legal",title:d.title,amount:null,activityType:"document-publication",documentId:d.id,isDocument:true})),
+    ...items
+  ];
   return `<section class="exec-panel exec-approval-widget"><div class="exec-panel-head"><div><h3>Pending Approvals</h3><p>Major decisions requiring authority</p></div><button data-executive-page="executive-approvals">View all ></button></div>
-    <div class="exec-approval-list">${items.length?items.map(item=>`<div><div class="exec-approval-copy"><span class="exec-type">${item.department}</span><strong>${escapeHtml(item.title)}</strong><small>${item.amount?money(item.amount):item.activityType.replaceAll("-"," ")}</small></div><div><button class="approve" data-exec-decision="${item.id}" data-decision="approve">Approve</button><button class="reject" data-exec-decision="${item.id}" data-decision="reject">Reject</button><button data-exec-details="${item.id}">Details</button></div></div>`).join(""):`<div class="exec-empty">No executive approvals are waiting.</div>`}</div></section>`;
+    <div class="exec-approval-list">${merged.length?merged.slice(0,6).map(item=>item.isDocument?`<div><div class="exec-approval-copy"><span class="exec-type">${escapeHtml(item.department)}</span><strong>${escapeHtml(item.title)}</strong><small>Document publication</small></div><div><button class="approve" data-document-publication="${item.documentId}" data-decision="approve">Publish</button><button class="reject" data-document-publication="${item.documentId}" data-decision="reject">Return</button><button data-executive-page="executive-approvals">Open</button></div></div>`:`<div><div class="exec-approval-copy"><span class="exec-type">${item.department}</span><strong>${escapeHtml(item.title)}</strong><small>${item.amount?money(item.amount):item.activityType.replaceAll("-"," ")}</small></div><div><button class="approve" data-exec-decision="${item.id}" data-decision="approve">Approve</button><button class="reject" data-exec-decision="${item.id}" data-decision="reject">Reject</button><button data-exec-details="${item.id}">Details</button></div></div>`).join(""):`<div class="exec-empty">No executive approvals are waiting.</div>`}</div></section>`;
 }
 function executiveActivityWidget(items) {
   const verbs={finance:"recorded finance activity",credits:"updated the loan portfolio",investment:"updated a project",legal:"reviewed a legal record",welfare:"reviewed welfare support",supervisory:"submitted an assurance update",executive:"updated an executive record"};
@@ -794,9 +827,12 @@ function executiveRecordTable(title,headers,rows) {
 }
 function executiveApprovalsView() {
   const items=state.executive.approvals||[],history=state.executive.approvalHistory||[];
+  const pendingDocuments=(state.executive.documents||[]).filter(d=>d.status==="pending_executive");
+  const waitingCount=items.length+pendingDocuments.length;
   const groups=[["Department Budgets","finance-budget"],["Large Payments","finance-payment"],["Investment Proposals","investment-proposal"],["Major Welfare Requests","welfare-request"],["Contract Signing","legal-contract"],["Large Loans","large-loan"],["Policy Changes","policy"]];
   const row=x=>x.recordType==="loan"?`<div class="exec-approval-row executive-loan-approval"><div><span>${x.reference} - ${x.department}</span><strong>${escapeHtml(x.title)}</strong><p>${escapeHtml(x.description||"")}</p><small>Credit Committee approved this loan. Executive authorization is required before disbursement.</small></div><div>${x.amount?`<b>${money(x.amount)}</b>`:""}${status(x.status)}<button data-exec-details="${x.id}">View details</button><button class="approve" data-exec-loan-decision="${x.loanId}" data-decision="authorize">Authorize loan</button><button class="more" data-exec-loan-decision="${x.loanId}" data-decision="return">Request information</button><button class="reject" data-exec-loan-decision="${x.loanId}" data-decision="reject">Reject</button></div></div>`:`<div class="exec-approval-row"><div><span>${x.reference} - ${x.department}</span><strong>${escapeHtml(x.title)}</strong><p>${escapeHtml(x.description||"")}${x.assignedTo?` - Reviewer: ${escapeHtml(x.assignedTo)}`:""}</p></div><div>${x.amount?`<b>${money(x.amount)}</b>`:""}${status(x.status)}<button data-exec-details="${x.id}">View details</button><button data-exec-reviewer="${x.id}">Assign reviewer</button><button class="approve" data-exec-decision="${x.id}" data-decision="approve">Approve</button><button class="more" data-exec-decision="${x.id}" data-decision="more_information">Request information</button><button class="reject" data-exec-decision="${x.id}" data-decision="reject">Reject</button></div></div>`;
-  return `<div class="exec-approval-summary">${executiveModuleMetric("Waiting now",items.length,"red")}${executiveModuleMetric("High-value requests",items.filter(x=>x.amount>=10000000).length,"orange")}${executiveModuleMetric("Authority level","4 / 5","blue")}${executiveModuleMetric("Decision trail","Fully audited","green")}</div><div class="exec-approval-page">${groups.map(([label,type])=>{const list=items.filter(x=>x.activityType===type);return `<section class="exec-panel"><div class="exec-panel-head"><div><h3>${label}</h3><p>${list.length} item${list.length===1?"":"s"} awaiting executive decision</p></div></div>${list.length?list.map(row).join(""):`<div class="exec-empty">No ${label.toLowerCase()} are waiting.</div>`}</section>`}).join("")}</div>${executiveApprovalHistory(history)}`;
+  const documentRows=pendingDocuments.map(d=>`<div class="exec-approval-row executive-document-approval"><div><span>${escapeHtml(d.reference)} - ${escapeHtml(d.department||"Legal")}</span><strong>${escapeHtml(d.title)}</strong><p>${escapeHtml(d.documentType)} - Version ${escapeHtml(d.version)} awaiting Executive publication approval.</p></div><div>${status(d.status)}${d.hasFile?`<div class="document-actions"><a href="/api/documents/${d.id}/view" target="_blank" title="View document">${icons.eye}<span>View</span></a><a href="/api/documents/${d.id}/download" title="Download document">${icons.download}</a></div>`:`<span class="status pending no-file-badge">No file</span>`}<button class="approve" data-document-publication="${d.id}" data-decision="approve">Publish</button><button class="more" data-document-publication="${d.id}" data-decision="reject">Return</button></div></div>`);
+  return `<div class="exec-approval-summary">${executiveModuleMetric("Waiting now",waitingCount,"red")}${executiveModuleMetric("High-value requests",items.filter(x=>x.amount>=10000000).length,"orange")}${executiveModuleMetric("Document publications",pendingDocuments.length,"violet")}${executiveModuleMetric("Decision trail","Fully audited","green")}</div><div class="exec-approval-page"><section class="exec-panel"><div class="exec-panel-head"><div><h3>Document Publications</h3><p>${pendingDocuments.length} document${pendingDocuments.length===1?"":"s"} awaiting Executive publication</p></div></div>${documentRows.length?documentRows.join(""):`<div class="exec-empty">No document publications are waiting.</div>`}</section>${groups.map(([label,type])=>{const list=items.filter(x=>x.activityType===type);return `<section class="exec-panel"><div class="exec-panel-head"><div><h3>${label}</h3><p>${list.length} item${list.length===1?"":"s"} awaiting executive decision</p></div></div>${list.length?list.map(row).join(""):`<div class="exec-empty">No ${label.toLowerCase()} are waiting.</div>`}</section>`}).join("")}</div>${executiveApprovalHistory(history)}`;
 }function executiveApprovalHistory(history) {
   const approved=history.filter(x=>x.status==="approved").length,rejected=history.filter(x=>x.status==="rejected").length,returned=history.filter(x=>x.status==="information_requested").length;
   return `<section class="exec-panel exec-approval-history"><div class="exec-panel-head"><div><h3>Approval History</h3><p>Permanent record of Executive requests, decisions and responsible officers</p></div><div class="exec-history-counts"><span>${approved} approved</span><span>${rejected} rejected</span><span>${returned} information requests</span></div></div><div class="table-scroll"><table><thead><tr><th>Reference</th><th>Request</th><th>Requested by</th><th>Requested on</th><th>Decision</th><th>Decision by</th><th>Decision date</th><th>Action</th></tr></thead><tbody>${history.length?history.map(item=>`<tr><td><strong>${escapeHtml(item.reference)}</strong><small>${escapeHtml(item.department)}</small></td><td><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.activityType.replaceAll("-"," "))}${item.amount?` - ${money(item.amount)}`:""}</small></td><td>${escapeHtml(item.createdBy)}</td><td>${new Date(item.createdAt).toLocaleString()}</td><td><span class="status ${item.status}">${escapeHtml(item.status.replaceAll("_"," "))}</span></td><td>${escapeHtml(item.decisionBy||"Recorded in audit log")}</td><td>${item.decisionAt?new Date(item.decisionAt).toLocaleString():"?"}</td><td><button class="mini-btn" data-exec-details="${item.id}" title="View approval details">${icons.eye}</button></td></tr>`).join(""):`<tr><td colspan="8">No Executive decisions have been recorded yet.</td></tr>`}</tbody></table></div></section>`;
@@ -846,7 +882,9 @@ function executiveNotificationsView() {
 }
 function executiveDocumentsView() {
   const types=["Constitution","Policies","Minutes","Signed Contracts","Annual Reports","Audit Reports","Legal Documents"];
-  return `<div class="exec-document-groups">${types.map(type=>{const docs=state.executive.documents.filter(d=>type==="Minutes"?["Minutes","Board Minutes","Meeting Minutes"].includes(d.documentType):d.documentType===type);return `<section class="exec-panel"><div class="exec-panel-head"><div><h3>${type}</h3><p>${docs.length} official document${docs.length===1?"":"s"}</p></div></div>${docs.map(d=>`<div class="exec-document-row"><span>${icons.file}</span><div class="exec-document-copy"><strong>${d.title}</strong><small>${d.reference} - Version ${d.version} - ${d.department}</small></div><div class="exec-document-controls">${status(d.status)}${d.hasFile?`<div class="document-actions"><a href="/api/documents/${d.id}/view" target="_blank" title="View document">${icons.eye}<span>View</span></a><a href="/api/documents/${d.id}/download" title="Download document">${icons.download}</a></div>`:`<span class="status pending no-file-badge">No file</span>`}${d.status==="pending_executive"?`<div class="document-publication-actions"><button class="button small primary" data-document-publication="${d.id}" data-decision="approve">Publish</button><button class="button small secondary" data-document-publication="${d.id}" data-decision="reject">Return</button></div>`:""}<button type="button" class="document-delete" data-delete-document="${d.id}" data-document-title="${escapeHtml(d.title)}" title="Delete document">${icons.trash}</button></div></div>`).join("")||`<div class="exec-empty">No documents in this category.</div>`}</section>`}).join("")}</div>`;
+  const libraryDocs=(state.executive.documents||[]).filter(d=>d.status!=="pending_executive");
+  const pendingCount=(state.executive.documents||[]).filter(d=>d.status==="pending_executive").length;
+  return `${pendingCount?`<div class="credits-verification-banner"><div>${icons.info}<span><strong>${pendingCount} document${pendingCount===1?"":"s"} awaiting publication</strong><small>Review and publish them from the Approvals tab.</small></span></div><button class="button small primary" data-executive-page="executive-approvals">Open Approvals</button></div>`:""}<div class="exec-document-groups">${types.map(type=>{const docs=libraryDocs.filter(d=>type==="Minutes"?["Minutes","Board Minutes","Meeting Minutes"].includes(d.documentType):d.documentType===type);return `<section class="exec-panel"><div class="exec-panel-head"><div><h3>${type}</h3><p>${docs.length} official document${docs.length===1?"":"s"}</p></div></div>${docs.map(d=>`<div class="exec-document-row"><span>${icons.file}</span><div class="exec-document-copy"><strong>${escapeHtml(d.title)}</strong><small>${escapeHtml(d.reference)} - Version ${escapeHtml(d.version)} - ${escapeHtml(d.department||"")}</small></div><div class="exec-document-controls">${status(d.status)}${d.hasFile?`<div class="document-actions"><a href="/api/documents/${d.id}/view" target="_blank" title="View document">${icons.eye}<span>View</span></a><a href="/api/documents/${d.id}/download" title="Download document">${icons.download}</a></div>`:`<span class="status pending no-file-badge">No file</span>`}<button type="button" class="document-delete" data-delete-document="${d.id}" data-document-title="${escapeHtml(d.title)}" title="Delete document">${icons.trash}</button></div></div>`).join("")||`<div class="exec-empty">No documents in this category.</div>`}</section>`}).join("")}</div>`;
 }
 function executiveSettingsView() {
   return `<div class="settings-grid"><div class="card setting-card"><div class="card-head" style="padding:0 0 16px"><div><h2 class="card-title">Executive preferences</h2><p class="card-subtitle">Command-center display and alerts</p></div></div>
@@ -1594,17 +1632,18 @@ function creditsMembersView() {
 function creditsTransactionDetails(id) {
   const t=state.credits.transactions.find(item=>String(item.id)===String(id));if(!t)return;
   const pending=t.status==="pending"&&t.submissionSource==="member";
+  const isLoanRepayment=t.type==="Loan repayment";
   const proof=t.hasEvidence?(String(t.evidenceName||"").toLowerCase().endsWith(".pdf")?`<a class="button secondary" href="/api/transactions/${t.id}/evidence" target="_blank">${icons.eye} Open receipt PDF</a>`:`<a class="deposit-proof" href="/api/transactions/${t.id}/evidence" target="_blank"><img src="/api/transactions/${t.id}/evidence" alt="Uploaded payment receipt for ${escapeHtml(t.member)}"></a>`):`<div class="exec-empty">No payment evidence was uploaded.</div>`;
-  document.body.insertAdjacentHTML("beforeend",`<div class="modal-backdrop" id="modal-backdrop"><div class="modal loan-detail-modal"><div class="modal-head"><div><h2>Contribution verification</h2><p>${escapeHtml(t.member)} - ${escapeHtml(t.memberNumber||"")}</p></div><button class="modal-close" data-close>${icons.x}</button></div><div class="form"><div class="transaction-detail-grid"><div><span>Amount claimed</span><strong>${money(t.amount)}</strong></div><div><span>Payment method</span><strong>${escapeHtml(t.method||"?")}</strong></div><div><span>Payment reference</span><strong>${escapeHtml(t.externalReference||"?")}</strong></div><div><span>Submitted by</span><strong>${escapeHtml(t.officer||t.member)}</strong></div><div><span>Submitted</span><strong>${new Date(t.createdAt).toLocaleString()}</strong></div><div><span>Status</span><strong>${status(t.status)}</strong></div><div><span>Official receipt</span><strong>${escapeHtml(t.receiptNumber||"Issued only after approval")}</strong></div><div><span>Verified</span><strong>${t.verifiedAt?new Date(t.verifiedAt).toLocaleString():"Not yet verified"}</strong></div><div class="full"><span>Member notes</span><strong>${escapeHtml(t.notes||"No notes provided")}</strong></div>${t.verificationComment?`<div class="full"><span>Credits decision</span><strong>${escapeHtml(t.verificationComment)}</strong></div>`:""}</div><h3 class="loan-section-title">Payment evidence</h3>${proof}<div class="modal-actions">${pending?`<button class="button danger" data-deposit-decision="reject">Reject submission</button><button class="button primary" data-deposit-decision="approve">Confirm money received & approve</button>`:`<button class="button secondary" data-close-footer>Close</button>`}</div></div></div></div>`);
+  document.body.insertAdjacentHTML("beforeend",`<div class="modal-backdrop" id="modal-backdrop"><div class="modal loan-detail-modal"><div class="modal-head"><div><h2>${isLoanRepayment?"Loan repayment verification":"Contribution verification"}</h2><p>${escapeHtml(t.member)} - ${escapeHtml(t.memberNumber||"")}</p></div><button class="modal-close" data-close>${icons.x}</button></div><div class="form"><div class="transaction-detail-grid"><div><span>Amount claimed</span><strong>${money(t.amount)}</strong></div><div><span>Payment method</span><strong>${escapeHtml(t.method||"?")}</strong></div><div><span>Payment reference</span><strong>${escapeHtml(t.externalReference||"?")}</strong></div>${isLoanRepayment?`<div><span>Loan</span><strong>${escapeHtml(t.loanReference||"?")}</strong></div>`:""}<div><span>Submitted by</span><strong>${escapeHtml(t.officer||t.member)}</strong></div><div><span>Submitted</span><strong>${new Date(t.createdAt).toLocaleString()}</strong></div><div><span>Status</span><strong>${status(t.status)}</strong></div><div><span>Official receipt</span><strong>${escapeHtml(t.receiptNumber||"Issued only after approval")}</strong></div><div><span>Verified</span><strong>${t.verifiedAt?new Date(t.verifiedAt).toLocaleString():"Not yet verified"}</strong></div><div class="full"><span>Member notes</span><strong>${escapeHtml(t.notes||"No notes provided")}</strong></div>${t.verificationComment?`<div class="full"><span>Credits decision</span><strong>${escapeHtml(t.verificationComment)}</strong></div>`:""}</div><h3 class="loan-section-title">Payment evidence</h3>${proof}<div class="modal-actions">${pending?`<button class="button danger" data-deposit-decision="reject">Reject submission</button><button class="button primary" data-deposit-decision="approve">${isLoanRepayment?"Confirm money received & update loan":"Confirm money received & approve"}</button>`:`<button class="button secondary" data-close-footer>Close</button>`}</div></div></div></div>`);
   document.querySelector("[data-close]").onclick=closeModal;const footer=document.querySelector("[data-close-footer]");if(footer)footer.onclick=closeModal;
-  document.querySelectorAll("[data-deposit-decision]").forEach(button=>button.onclick=()=>decideCreditsDeposit(t.id,button.dataset.depositDecision));
+  document.querySelectorAll("[data-deposit-decision]").forEach(button=>button.onclick=()=>decideCreditsDeposit(t.id,button.dataset.depositDecision,isLoanRepayment));
 }
 
-async function decideCreditsDeposit(id,decision) {
-  let comment="Funds received and uploaded receipt evidence matched";
-  if(decision==="reject"){comment=await promptDialog("Reason for rejecting this deposit:","");if(comment===null||!comment.trim())return;}
-  else if(!await confirmDialog("Confirm that the money was received and the uploaded receipt matches this contribution? The correct member obligation will update immediately."))return;
-  try{await api(`/api/transactions/${id}/verify`,{method:"POST",body:JSON.stringify({decision,comment})});closeModal();await refreshCredits();render();toast(decision==="approve"?"Contribution verified. The member record and official receipt are now updated.":"Contribution rejected. The member record was not changed.");}catch(error){toast(error.message);}
+async function decideCreditsDeposit(id,decision,isLoanRepayment=false) {
+  let comment=decision==="approve"?"Funds received and uploaded receipt evidence matched":"";
+  if(decision==="reject"){comment=await promptDialog(`Reason for rejecting this ${isLoanRepayment?"loan payment":"deposit"}:`,"");if(comment===null||!comment.trim())return;}
+  else if(!await confirmDialog(isLoanRepayment?"Confirm that the money was received and the uploaded receipt matches this loan payment? The loan progress and schedule will update immediately.":"Confirm that the money was received and the uploaded receipt matches this contribution? The correct member obligation will update immediately."))return;
+  try{await api(`/api/transactions/${id}/verify`,{method:"POST",body:JSON.stringify({decision,comment})});closeModal();await refreshCredits();render();toast(decision==="approve"?(isLoanRepayment?"Loan repayment verified. The member loan progress and official receipt are now updated.":"Contribution verified. The member record and official receipt are now updated."):(isLoanRepayment?"Loan payment rejected. The loan balance was not changed.":"Contribution rejected. The member record was not changed."));}catch(error){toast(error.message);}
 }
 
 function creditsApplicationsView() {
@@ -1620,7 +1659,7 @@ function creditsApprovalsView() {
 }
 function loanRepaymentProgress(l) {
   const totalDue=Number(l.totalDue||l.amount||0),totalPaid=Number(l.totalPaid||Math.max(0,Number(l.amount||0)-Number(l.balance||0))),totalInterest=Number(l.totalInterest||Math.max(0,totalDue-Number(l.amount||0)));
-  const remaining=Math.max(0,totalDue-totalPaid)+Number(l.outstandingCharges||0);
+  const remaining=Math.max(0,totalDue-totalPaid);
   const progressPct=totalDue?Math.min(100,Math.round(totalPaid/totalDue*100)):0;
   return {totalDue,totalPaid,totalInterest,remaining,progressPct};
 }
@@ -1657,8 +1696,12 @@ function creditsDisbursementView() {
 }
 function creditsRepaymentsView() {
   const c=state.credits,rows=c.transactions.filter(t=>t.type==="Loan repayment");
-  return `<div class="exec-module-metrics">${executiveModuleMetric("Repayments this month",money(rows.filter(t=>new Date(t.createdAt).getMonth()===new Date().getMonth()).reduce((n,t)=>n+t.amount,0)),"green")}${executiveModuleMetric("Outstanding",money(c.portfolio.outstanding),"violet")}${executiveModuleMetric("Recovery rate",`${c.stats.recoveryRate}%`,"blue")}${executiveModuleMetric("Loans in arrears",c.portfolio.arrears,"red")}</div>
-    ${financeDataTable("Loan repayment history",["Receipt","Date","Member","Loan","Method","Reference","Officer","Amount","Status"],rows.map(t=>[t.receiptNumber,new Date(t.createdAt).toLocaleString(),t.member,t.loanReference||"—",t.method,t.externalReference||"—",t.officer,money(t.amount),status(t.status)]))}`;
+  const pendingMember=rows.filter(t=>t.status==="pending"&&t.submissionSource==="member");
+  return `<div class="exec-module-metrics">${executiveModuleMetric("Repayments this month",money(rows.filter(t=>new Date(t.createdAt).getMonth()===new Date().getMonth()&&t.status==="completed").reduce((n,t)=>n+t.amount,0)),"green")}${executiveModuleMetric("Outstanding",money(c.portfolio.outstanding),"violet")}${executiveModuleMetric("Recovery rate",`${c.stats.recoveryRate}%`,"blue")}${executiveModuleMetric("Loans in arrears",c.portfolio.arrears,"red")}</div>
+    ${pendingMember.length?`<div class="credits-verification-banner"><div>${icons.info}<span><strong>${pendingMember.length} member loan payment${pendingMember.length===1?"":"s"} awaiting verification</strong><small>Open each submission, compare its payment reference and uploaded receipt, then confirm that funds were received before the loan progress updates.</small></span></div></div>`:""}
+    ${financeDataTable("Loan repayment history",["Receipt","Date","Member","Loan","Method","Reference","Submitted by","Amount","Evidence","Status","Review"],rows.map(t=>[
+      t.receiptNumber||`<span class="pending-receipt">Pending verification</span>`,new Date(t.createdAt).toLocaleString(),`${t.member}<small class="table-sub">${t.memberNumber||""}</small>`,t.loanReference||"—",t.method,t.externalReference||"—",`${t.officer}<small class="table-sub">${t.submissionSource==="member"?"Member submission":"Credits entry"}</small>`,money(t.amount),t.hasEvidence?`<a class="mini-btn" href="/api/transactions/${t.id}/evidence" target="_blank" title="View receipt evidence">${icons.eye}</a>`:"—",status(t.status),`<button class="button small ${t.status==="pending"&&t.submissionSource==="member"?"primary":"secondary"}" data-credits-transaction="${t.id}">${t.status==="pending"&&t.submissionSource==="member"?"Review":"Details"}</button>`
+    ]))}`;
 }
 function creditsGuarantorsView() {
   const c=state.credits;

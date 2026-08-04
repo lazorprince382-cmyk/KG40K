@@ -196,9 +196,10 @@ app.post("/api/auth/login",loginLimiter,asyncRoute(async(req,res)=>{
     return res.status(401).json({error:attempts>=5?"Account locked for 15 minutes":"Invalid email or password"});
   }
   await query("UPDATE users SET failed_attempts=0,locked_until=NULL,last_login=NOW() WHERE id=$1",[user.id]);
-  await audit({userId:user.id,action:"LOGIN",details:"Successful login",...metadata(req)});
+  audit({userId:user.id,action:"LOGIN",details:"Successful login",...metadata(req)}).catch(()=>{});
+  const safeUser={id:user.id,email:user.email,full_name:user.full_name,role:user.role,member_id:user.member_id,must_change_password:user.must_change_password,has_profile_photo:Boolean(user.profile_photo_stored_name)};
   res.cookie("sacco_session",token(user),{httpOnly:true,sameSite:"strict",secure:production,maxAge:8*60*60*1000,path:"/"});
-  res.json({ok:true});
+  res.json({ok:true,user:safeUser,permissions:permissions[user.role]||[]});
 }));
 app.post("/api/auth/logout",auth,asyncRoute(async(req,res)=>{
   await audit({userId:req.user.id,action:"LOGOUT",details:"User signed out",...metadata(req)});
@@ -218,14 +219,22 @@ app.post("/api/auth/change-password",auth,asyncRoute(async(req,res)=>{
 app.get("/api/bootstrap",auth,asyncRoute(async(req,res)=>{
   const memberId=req.user.role==="Member"?req.user.member_id:null;
   const memberFilter=memberId?"WHERE m.id=$1 AND m.deleted_at IS NULL":"WHERE m.deleted_at IS NULL", args=memberId?[memberId]:[];
+  const userPermissions=permissions[req.user.role]||[];
+  const allowed=p=>userPermissions.includes(p);
+  const canSeeTransactions=req.user.role==="Finance Officer"?false:req.user.role==="Member"||
+    ["finance:read","transaction:read","transaction:create","transaction:verify","accounting:manage","receipt:print"].some(allowed);
+  const canSeeLoans=req.user.role==="Member"||userPermissions.some(p=>p.startsWith("loan:"))||["approval:high","approval:delegated"].some(allowed);
+  const canSeeWithdrawals=req.user.role==="Member"||userPermissions.some(p=>p.startsWith("withdrawal:"))||allowed("finance:read");
+  const needsMemberDirectory=["Executive Officer","Credits Officer","Finance Officer","System Admin","Investment Officer"].includes(req.user.role)||req.user.role==="Member";
+  const empty={rows:[]};
   const [membersResult,txResult,loansResult,withdrawalsResult,productsResult,settingsResult,announcementsResult,notificationsResult,unreadResult,guarantorRequestsResult]=await Promise.all([
-    query(`SELECT m.id AS "databaseId",m.member_number AS id,m.full_name AS name,m.email,CASE WHEN m.provisional THEN NULL ELSE m.phone END AS phone,CASE WHEN m.provisional THEN NULL ELSE m.national_id END AS national_id,m.occupation,m.employer,m.address,m.next_of_kin,
+    needsMemberDirectory?query(`SELECT m.id AS "databaseId",m.member_number AS id,m.full_name AS name,m.email,CASE WHEN m.provisional THEN NULL ELSE m.phone END AS phone,CASE WHEN m.provisional THEN NULL ELSE m.national_id END AS national_id,m.occupation,m.employer,m.address,m.next_of_kin,
       m.savings_balance::float AS savings,m.share_capital::float AS shares,m.dividends::float,m.fines::float,m.status,m.joined_at AS joined,b.name AS branch
-      FROM members m LEFT JOIN branches b ON b.id=m.branch_id ${memberFilter} ORDER BY m.id DESC`,args),
-    query(`SELECT t.id AS "databaseId",t.reference AS id,t.type,t.method,t.amount::float,t.status,t.external_reference,t.created_at AS date,
+      FROM members m LEFT JOIN branches b ON b.id=m.branch_id ${memberFilter} ORDER BY m.id DESC`,args):Promise.resolve(empty),
+    canSeeTransactions?query(`SELECT t.id AS "databaseId",t.reference AS id,t.type,t.method,t.amount::float,t.status,t.external_reference,t.created_at AS date,
       m.id AS "memberId",m.member_number,m.full_name AS member,u.full_name AS "recordedBy"
-      FROM transactions t JOIN members m ON m.id=t.member_id JOIN users u ON u.id=t.recorded_by ${memberId?"WHERE m.id=$1":""} ORDER BY t.id DESC LIMIT 250`,args),
-    query(`SELECT l.id AS "databaseId",l.reference AS id,l.amount::float,l.balance::float,l.term_months AS "termMonths",
+      FROM transactions t JOIN members m ON m.id=t.member_id JOIN users u ON u.id=t.recorded_by ${memberId?"WHERE m.id=$1":""} ORDER BY t.id DESC LIMIT 250`,args):Promise.resolve(empty),
+    canSeeLoans?query(`SELECT l.id AS "databaseId",l.reference AS id,l.amount::float,l.balance::float,l.term_months AS "termMonths",
       COALESCE((SELECT SUM(s.total_due) FROM loan_repayment_schedule s WHERE s.loan_id=l.id),l.amount)::float AS "totalDue",
       COALESCE((SELECT SUM(s.paid_amount) FROM loan_repayment_schedule s WHERE s.loan_id=l.id),0)::float AS "totalPaid",l.purpose,l.status,l.created_at AS date,l.due_date AS "dueDate",
       m.id AS "memberId",m.full_name AS member,m.member_number,p.name AS product,p.annual_rate::float AS "annualRate",
@@ -238,9 +247,9 @@ app.get("/api/bootstrap",auth,asyncRoute(async(req,res)=>{
         FROM loan_guarantors lg JOIN members guarantor ON guarantor.id=lg.member_id WHERE lg.loan_id=l.id),'[]') AS guarantors
       FROM loans l JOIN members m ON m.id=l.member_id JOIN loan_products p ON p.id=l.product_id LEFT JOIN members gm ON gm.id=l.guarantor_member_id
       LEFT JOIN loan_disbursements d ON d.loan_id=l.id
-      ${memberId?"WHERE m.id=$1":""} ORDER BY l.id DESC`,args),
-    query(`SELECT w.id AS "databaseId",w.reference AS id,w.amount::float,w.method,w.reason,w.status,w.created_at AS date,m.id AS "memberId",m.full_name AS member,m.member_number
-      FROM withdrawals w JOIN members m ON m.id=w.member_id ${memberId?"WHERE m.id=$1":""} ORDER BY w.id DESC`,args),
+      ${memberId?"WHERE m.id=$1":""} ORDER BY l.id DESC`,args):Promise.resolve(empty),
+    canSeeWithdrawals?query(`SELECT w.id AS "databaseId",w.reference AS id,w.amount::float,w.method,w.reason,w.status,w.created_at AS date,m.id AS "memberId",m.full_name AS member,m.member_number
+      FROM withdrawals w JOIN members m ON m.id=w.member_id ${memberId?"WHERE m.id=$1":""} ORDER BY w.id DESC`,args):Promise.resolve(empty),
     query(`SELECT id,name,annual_rate::float AS "annualRate",max_term AS "maxTerm",max_multiplier::float AS "maxMultiplier",
       max_amount::float AS "maxAmount",processing_fee_rate::float AS "processingFeeRate",late_penalty_rate::float AS "latePenaltyRate",
       minimum_guarantors AS "minimumGuarantors",maximum_guarantors AS "maximumGuarantors",interest_method AS "interestMethod",policy_reference AS "policyReference"
@@ -256,17 +265,8 @@ app.get("/api/bootstrap",auth,asyncRoute(async(req,res)=>{
       l.purpose,l.status,p.name AS product,borrower.full_name AS member,borrower.savings_balance::float AS "borrowerSavings",
       lg.id AS "guarantorRequestId",lg.status AS "guarantorStatus",lg.response_note AS "responseNote"
       FROM loan_guarantors lg JOIN loans l ON l.id=lg.loan_id JOIN members borrower ON borrower.id=l.member_id
-      JOIN loan_products p ON p.id=l.product_id WHERE lg.member_id=$1 ORDER BY lg.id DESC`,[req.user.member_id]):Promise.resolve({rows:[]})
+      JOIN loan_products p ON p.id=l.product_id WHERE lg.member_id=$1 ORDER BY lg.id DESC`,[req.user.member_id]):Promise.resolve(empty)
   ]);
-  const userPermissions=permissions[req.user.role]||[];
-  const allowed=p=>userPermissions.includes(p);
-  const canSeeTransactions=req.user.role==="Finance Officer"?false:req.user.role==="Member"||
-    ["finance:read","transaction:read","transaction:create","transaction:verify","accounting:manage","receipt:print"].some(allowed);
-  const canSeeLoans=req.user.role==="Member"||userPermissions.some(p=>p.startsWith("loan:"))||["approval:high","approval:delegated"].some(allowed);
-  const canSeeWithdrawals=req.user.role==="Member"||userPermissions.some(p=>p.startsWith("withdrawal:"))||allowed("finance:read");
-  if(!canSeeTransactions) txResult.rows=[];
-  if(!canSeeLoans) loansResult.rows=[];
-  if(!canSeeWithdrawals) withdrawalsResult.rows=[];
   const canSeeMemberFinancials=memberFinancialRoles.has(req.user.role);
   const canSeeMemberIdentity=memberIdentityRoles.has(req.user.role);
   const canSeeMemberExtended=memberFinancialRoles.has(req.user.role)||memberIdentityRoles.has(req.user.role);
@@ -540,13 +540,15 @@ app.get("/api/executive/command-center",auth,requireExecutive("view"),asyncRoute
   const welfareBalance=welfareOpeningBalance+Number(welfareLedger.contributed||0)-Number(welfareLedger.paid||0);
   const notifications=[
     ...approvals.rows.slice(0,5).map(item=>({type:"approval",title:item.title,detail:`${item.department} approval required`,time:item.createdAt})),
+    ...documents.rows.filter(d=>d.status==="pending_executive").slice(0,3).map(item=>({type:"approval",title:item.title,detail:`${item.department||"Legal"} document publication required`,time:item.updatedAt})),
     ...meetings.rows.slice(0,3).map(item=>({type:"meeting",title:item.title,detail:item.venue||item.meetingType,time:item.scheduledAt})),
     ...activities.rows.filter(item=>!approvals.rows.some(approval=>approval.id===item.id)).slice(0,4).map(item=>({type:item.activityType,title:item.title,detail:item.department,time:item.createdAt}))
   ];
+  const pendingDocumentCount=documents.rows.filter(d=>d.status==="pending_executive").length;
   res.json({
     selectedFiscalYear,availableFiscalYears,historicalPeriod:selectedFiscalYear!==defaultFiscalYear,
     stats:{totalMembers:memberStats.rows[0].total,activeMembers:memberStats.rows[0].active,newMembers:memberStats.rows[0].new_this_month,
-      totalDepartments:departments.rows.length,pendingApprovals:approvals.rows.length,organizationIncome:finance.income,
+      totalDepartments:departments.rows.length,pendingApprovals:approvals.rows.length+pendingDocumentCount,organizationIncome:finance.income,
       organizationExpenditure:finance.expenditure,netBalance:finance.income-finance.expenditure,totalSavings:savings.rows[0].total,
       outstandingLoans:loans.outstanding,activeInvestments:investment.running,welfareFundBalance:welfareBalance,
       legalCases:legal.rows[0].open_cases,auditIssues:auditIssues.rows[0].open,
@@ -1252,7 +1254,7 @@ app.get("/api/credits/command-center",auth,requireCredits("view"),asyncRoute(asy
       COALESCE((SELECT SUM(s.total_due) FROM loan_repayment_schedule s WHERE s.loan_id=l.id),l.amount)::float AS "totalDue",
       COALESCE((SELECT SUM(s.paid_amount) FROM loan_repayment_schedule s WHERE s.loan_id=l.id),0)::float AS "totalPaid",
       COALESCE((SELECT SUM(s.interest) FROM loan_repayment_schedule s WHERE s.loan_id=l.id),0)::float AS "totalInterest",
-      COALESCE((SELECT SUM(GREATEST(0,c.amount-c.paid_amount)) FROM loan_charges c WHERE c.loan_id=l.id AND c.status IN ('outstanding','partial')),0)::float AS "outstandingCharges",
+      COALESCE((SELECT SUM(GREATEST(0,c.amount-c.paid_amount)) FROM loan_charges c WHERE c.loan_id=l.id AND c.status IN ('outstanding','partial') AND c.charge_type <> 'Processing fee'),0)::float AS "outstandingCharges",
       l.purpose,l.status,l.created_at AS "createdAt",l.due_date AS "dueDate",l.verified_amount::float AS "verifiedAmount",
       COALESCE(officer.full_name,'Unassigned') AS "officerHandling",
       COALESCE((SELECT MIN(s.due_date) FROM loan_repayment_schedule s WHERE s.loan_id=l.id AND s.status<>'paid'),l.due_date) AS "nextDueDate",
@@ -1454,6 +1456,48 @@ app.post("/api/credits/deposits",auth,requireCredits("create"),asyncRoute(async(
   res.status(201).json(row);
 }));
 const memberLoanActionRoles=new Set(["Executive Officer","Credits Officer","System Admin"]);
+const receiptEvidenceTypes=new Set(["image/jpeg","image/png","image/webp","application/pdf"]);
+async function applyLoanRepayment(client,loanId,amount){
+  const loan=(await client.query("SELECT * FROM loans WHERE id=$1 FOR UPDATE",[loanId])).rows[0];
+  if(!loan||!["active","overdue"].includes(loan.status)){const error=new Error("Choose an active loan and enter a positive repayment");error.status=400;throw error;}
+  let remaining=amount,chargeApplied=0,interestApplied=0,principalApplied=0;
+  const charges=(await client.query(`SELECT * FROM loan_charges WHERE loan_id=$1 AND status IN ('outstanding','partial')
+    AND charge_type <> 'Processing fee' ORDER BY assessed_at,id FOR UPDATE`,[loan.id])).rows;
+  for(const charge of charges){
+    if(remaining<=0)break;
+    const due=Math.max(0,Number(charge.amount)-Number(charge.paid_amount||0));
+    const applied=Math.min(remaining,due);
+    if(applied<=0)continue;
+    const paid=Number(charge.paid_amount||0)+applied;
+    await client.query("UPDATE loan_charges SET paid_amount=$1,status=$2,settled_at=CASE WHEN $2='settled' THEN NOW() ELSE NULL END WHERE id=$3",
+      [paid,paid>=Number(charge.amount)-0.005?"settled":"partial",charge.id]);
+    chargeApplied+=applied; remaining-=applied;
+  }
+  const schedules=(await client.query("SELECT * FROM loan_repayment_schedule WHERE loan_id=$1 AND status<>'paid' ORDER BY installment_number FOR UPDATE",[loan.id])).rows;
+  for(const schedule of schedules){
+    if(remaining<=0)break;
+    const interestDue=Math.max(0,Number(schedule.interest)-Number(schedule.interest_paid||0));
+    const interestPart=Math.min(remaining,interestDue);
+    remaining-=interestPart; interestApplied+=interestPart;
+    const principalDue=Math.max(0,Number(schedule.principal)-Number(schedule.principal_paid||0));
+    const principalPart=Math.min(remaining,principalDue);
+    remaining-=principalPart; principalApplied+=principalPart;
+    const newInterest=Number(schedule.interest_paid||0)+interestPart;
+    const newPrincipal=Number(schedule.principal_paid||0)+principalPart;
+    const newPaid=newInterest+newPrincipal;
+    const paid=newInterest>=Number(schedule.interest)-0.005&&newPrincipal>=Number(schedule.principal)-0.005;
+    await client.query(`UPDATE loan_repayment_schedule SET interest_paid=$1,principal_paid=$2,paid_amount=$3,status=$4,
+      paid_at=CASE WHEN $4='paid' THEN NOW() ELSE paid_at END WHERE id=$5`,[newInterest,newPrincipal,newPaid,paid?"paid":"partial",schedule.id]);
+  }
+  if(remaining>0.005){const error=new Error("Repayment exceeds outstanding interest and principal");error.status=400;throw error;}
+  const newBalance=Math.max(0,Number(loan.balance)-principalApplied);
+  const outstanding=(await client.query(`SELECT
+    COALESCE((SELECT SUM(amount-paid_amount) FROM loan_charges WHERE loan_id=$1 AND status IN ('outstanding','partial') AND charge_type <> 'Processing fee'),0)+
+    COALESCE((SELECT SUM((interest-interest_paid)+(principal-principal_paid)) FROM loan_repayment_schedule WHERE loan_id=$1 AND status<>'paid'),0) AS total`,[loan.id])).rows[0];
+  const completed=newBalance<0.005&&Number(outstanding.total)<0.005;
+  await client.query("UPDATE loans SET balance=$1,status=$2 WHERE id=$3",[newBalance,completed?"completed":"active",loan.id]);
+  return {loan,chargeApplied,interestApplied,principalApplied,newBalance};
+}
 const optionalReceiptUpload=(req,res,next)=>{
   if(String(req.headers["content-type"]||"").includes("multipart/form-data")) return upload.single("receipt")(req,res,next);
   next();
@@ -1476,61 +1520,59 @@ app.post("/api/credits/repayments",auth,optionalReceiptUpload,asyncRoute(async(r
     return res.status(400).json({error:"Choose a valid payment method"});
   }
   const externalReference=String(b.externalReference||"").trim();
-  if((req.file||(!creditAccess&&!oversightAccess))&&externalReference.length<3){
+  const fromMember=!creditAccess&&!oversightAccess;
+  if(fromMember){
+    if(!req.file){return res.status(400).json({error:"Upload a receipt photo or PDF showing the loan payment"});}
+    if(!receiptEvidenceTypes.has(req.file.mimetype)){fs.unlink(path.join(uploadsDir,req.file.filename),()=>{});return res.status(400).json({error:"Payment evidence must be a JPG, PNG, WebP or PDF file"});}
+  }
+  if((fromMember||req.file)&&externalReference.length<3){
     if(req.file) fs.unlink(path.join(uploadsDir,req.file.filename),()=>{});
     return res.status(400).json({error:"Enter the payment transaction reference"});
   }
-  const txRef=reference("RPY"),receipt=receiptReference("RCPT");
+  const txRef=reference("RPY");
+  if(fromMember){
+    let pendingRow;
+    try{
+      pendingRow=await transaction(async client=>{
+        const loan=(await client.query("SELECT * FROM loans WHERE id=$1 FOR UPDATE",[loanId])).rows[0];
+        if(!loan||!["active","overdue"].includes(loan.status)){const error=new Error("Choose an active loan and enter a positive repayment");error.status=400;throw error;}
+        if(Number(req.user.member_id)!==Number(loan.member_id)){const error=new Error("You can only repay your own loan");error.status=403;throw error;}
+        const scheduleDue=(await client.query(`SELECT COALESCE(SUM((interest-interest_paid)+(principal-principal_paid)),0)::float AS total
+          FROM loan_repayment_schedule WHERE loan_id=$1 AND status<>'paid'`,[loan.id])).rows[0];
+        if(amount>Number(scheduleDue.total)+0.005){const error=new Error("Repayment exceeds outstanding interest and principal");error.status=400;throw error;}
+        const row=(await client.query(`INSERT INTO transactions
+          (reference,member_id,loan_id,type,method,amount,status,external_reference,notes,recorded_by,submission_source,
+           evidence_stored_name,evidence_original_name,evidence_mime_type)
+          VALUES ($1,$2,$3,'Loan repayment',$4,$5,'pending',$6,$7,$8,'member',$9,$10,$11) RETURNING id,reference,status`,
+        [txRef,loan.member_id,loan.id,method,amount,externalReference||null,String(b.notes||"").trim()||null,req.user.id,
+          req.file.filename,req.file.originalname,req.file.mimetype])).rows[0];
+        await client.query("INSERT INTO notifications (member_id,title,message) VALUES ($1,$2,$3)",
+          [loan.member_id,"Loan repayment submitted",`${txRef} is awaiting Credits verification before your loan progress updates.`]);
+        await client.query(`INSERT INTO notifications (user_id,title,message) SELECT DISTINCT u.id,'Member loan repayment awaiting verification',$1
+          FROM departments d JOIN department_assignments da ON da.department_id=d.id AND da.active=true AND da.can_view=true
+          JOIN users u ON u.id=da.user_id AND u.active=true WHERE d.code='credits'`,[`${txRef} has payment evidence ready for review.`]);
+        return row;
+      });
+    }catch(error){
+      if(req.file) fs.unlink(path.join(uploadsDir,req.file.filename),()=>{});
+      throw error;
+    }
+    await audit({userId:req.user.id,action:"MEMBER_LOAN_REPAYMENT_SUBMITTED",entityType:"transaction",entityId:String(pendingRow.id),details:`${txRef} - UGX ${amount}`,...metadata(req)});
+    return res.status(201).json({ok:true,reference:txRef,status:"pending",message:"Loan payment sent to Credits for verification. Your progress will update after approval."});
+  }
+  const receipt=receiptReference("RCPT");
   let allocation;
   try{
     allocation=await transaction(async client=>{
-      const loan=(await client.query("SELECT * FROM loans WHERE id=$1 FOR UPDATE",[loanId])).rows[0];
-      if(!loan||!["active","overdue"].includes(loan.status)) { const error=new Error("Choose an active loan and enter a positive repayment"); error.status=400; throw error; }
-      if(!creditAccess&&!oversightAccess&&Number(req.user.member_id)!==Number(loan.member_id)) { const error=new Error("You can only repay your own loan"); error.status=403; throw error; }
-      let remaining=amount,chargeApplied=0,interestApplied=0,principalApplied=0;
-      const charges=(await client.query("SELECT * FROM loan_charges WHERE loan_id=$1 AND status IN ('outstanding','partial') ORDER BY assessed_at,id FOR UPDATE",[loan.id])).rows;
-      for(const charge of charges) {
-        if(remaining<=0)break;
-        const due=Math.max(0,Number(charge.amount)-Number(charge.paid_amount||0));
-        const applied=Math.min(remaining,due);
-        if(applied<=0)continue;
-        const paid=Number(charge.paid_amount||0)+applied;
-        await client.query("UPDATE loan_charges SET paid_amount=$1,status=$2,settled_at=CASE WHEN $2='settled' THEN NOW() ELSE NULL END WHERE id=$3",
-          [paid,paid>=Number(charge.amount)-0.005?"settled":"partial",charge.id]);
-        chargeApplied+=applied; remaining-=applied;
-      }
-      const schedules=(await client.query("SELECT * FROM loan_repayment_schedule WHERE loan_id=$1 AND status<>'paid' ORDER BY installment_number FOR UPDATE",[loan.id])).rows;
-      for(const schedule of schedules) {
-        if(remaining<=0)break;
-        const interestDue=Math.max(0,Number(schedule.interest)-Number(schedule.interest_paid||0));
-        const interestPart=Math.min(remaining,interestDue);
-        remaining-=interestPart; interestApplied+=interestPart;
-        const principalDue=Math.max(0,Number(schedule.principal)-Number(schedule.principal_paid||0));
-        const principalPart=Math.min(remaining,principalDue);
-        remaining-=principalPart; principalApplied+=principalPart;
-        const newInterest=Number(schedule.interest_paid||0)+interestPart;
-        const newPrincipal=Number(schedule.principal_paid||0)+principalPart;
-        const newPaid=newInterest+newPrincipal;
-        const paid=newInterest>=Number(schedule.interest)-0.005&&newPrincipal>=Number(schedule.principal)-0.005;
-        await client.query(`UPDATE loan_repayment_schedule SET interest_paid=$1,principal_paid=$2,paid_amount=$3,status=$4,
-          paid_at=CASE WHEN $4='paid' THEN NOW() ELSE paid_at END WHERE id=$5`,[newInterest,newPrincipal,newPaid,paid?"paid":"partial",schedule.id]);
-      }
-      if(remaining>0.005) { const error=new Error("Repayment exceeds outstanding charges, interest and principal"); error.status=400; throw error; }
-      const newBalance=Math.max(0,Number(loan.balance)-principalApplied);
-      const outstanding=(await client.query(`SELECT
-        COALESCE((SELECT SUM(amount-paid_amount) FROM loan_charges WHERE loan_id=$1 AND status IN ('outstanding','partial')),0)+
-        COALESCE((SELECT SUM((interest-interest_paid)+(principal-principal_paid)) FROM loan_repayment_schedule WHERE loan_id=$1 AND status<>'paid'),0) AS total`,[loan.id])).rows[0];
-      const completed=newBalance<0.005&&Number(outstanding.total)<0.005;
-      await client.query("UPDATE loans SET balance=$1,status=$2 WHERE id=$3",[newBalance,completed?"completed":"active",loan.id]);
-      const fromMember=!creditAccess&&!oversightAccess;
+      const result=await applyLoanRepayment(client,loanId,amount);
       await client.query(`INSERT INTO transactions
         (reference,receipt_number,member_id,loan_id,type,method,amount,status,external_reference,notes,recorded_by,verified_by,verified_at,
          submission_source,evidence_stored_name,evidence_original_name,evidence_mime_type)
-        VALUES ($1,$2,$3,$4,'Loan repayment',$5,$6,'completed',$7,$8,$9,$9,NOW(),$10,$11,$12,$13)`,
-      [txRef,receipt,loan.member_id,loan.id,method,amount,externalReference||null,
-        `${String(b.notes||"").trim()} | charges=${chargeApplied.toFixed(2)}, interest=${interestApplied.toFixed(2)}, principal=${principalApplied.toFixed(2)}`.slice(0,1000),req.user.id,
-        fromMember?"member":"staff",req.file?.filename||null,req.file?.originalname||null,req.file?.mimetype||null]);
-      return {loan,chargeApplied,interestApplied,principalApplied,newBalance};
+        VALUES ($1,$2,$3,$4,'Loan repayment',$5,$6,'completed',$7,$8,$9,$9,NOW(),'staff',$10,$11,$12)`,
+      [txRef,receipt,result.loan.member_id,result.loan.id,method,amount,externalReference||null,
+        `${String(b.notes||"").trim()} | charges=${result.chargeApplied.toFixed(2)}, interest=${result.interestApplied.toFixed(2)}, principal=${result.principalApplied.toFixed(2)}`.slice(0,1000),req.user.id,
+        req.file?.filename||null,req.file?.originalname||null,req.file?.mimetype||null]);
+      return result;
     });
   }catch(error){
     if(req.file) fs.unlink(path.join(uploadsDir,req.file.filename),()=>{});
@@ -2597,19 +2639,25 @@ app.get("/api/transactions/:id/evidence",auth,asyncRoute(async(req,res)=>{
 app.post("/api/transactions/:id/verify",auth,requireCredits("approve"),asyncRoute(async(req,res)=>{
   const decision=String(req.body.decision||"approve").toLowerCase(),comment=String(req.body.comment||"").trim();
   if(!["approve","reject"].includes(decision))return res.status(400).json({error:"Choose approve or reject"});
-  if(decision==="reject"&&comment.length<3)return res.status(400).json({error:"Enter a reason for rejecting this deposit"});
+  if(decision==="reject"&&comment.length<3)return res.status(400).json({error:"Enter a reason for rejecting this submission"});
   const tx=await transaction(async client=>{
     const locked=(await client.query("SELECT * FROM transactions WHERE id=$1 FOR UPDATE",[req.params.id])).rows[0];
     if(!locked) { const error=new Error("Transaction not found"); error.status=404; throw error; }
     if(locked.status!=="pending") { const error=new Error("Transaction has already been processed"); error.status=409; throw error; }
     if(Number(locked.recorded_by)===Number(req.user.id)) { const error=new Error("Maker-checker rule: you cannot verify your own transaction"); error.status=409; throw error; }
-    if(decision==="approve"&&locked.submission_source==="member"&&!locked.evidence_stored_name){const error=new Error("Member deposit evidence must be reviewed before approval");error.status=409;throw error;}
+    if(decision==="approve"&&locked.submission_source==="member"&&!locked.evidence_stored_name){const error=new Error("Member payment evidence must be reviewed before approval");error.status=409;throw error;}
     const needsFinance=decision==="approve"&&locked.type==="Annual subscription fee";
     const statusValue=decision==="approve"?(needsFinance?"pending_finance_review":"completed"):"rejected";
-    const receipt=decision==="approve"&&!needsFinance?(locked.receipt_number||receiptReference("RCPT")):locked.receipt_number;
+    let receipt=decision==="approve"&&!needsFinance?(locked.receipt_number||receiptReference("RCPT")):locked.receipt_number;
+    let allocationNotes=null;
+    if(decision==="approve"&&locked.type==="Loan repayment"){
+      if(!locked.loan_id){const error=new Error("Loan repayment is missing its linked loan");error.status=409;throw error;}
+      const allocation=await applyLoanRepayment(client,locked.loan_id,Number(locked.amount));
+      allocationNotes=`charges=${allocation.chargeApplied.toFixed(2)}, interest=${allocation.interestApplied.toFixed(2)}, principal=${allocation.principalApplied.toFixed(2)}`;
+    }
     const updated=await client.query(`UPDATE transactions SET status=$1,verified_by=$2,verified_at=NOW(),verification_comment=$3,
-      receipt_number=$4 WHERE id=$5 AND status='pending' RETURNING id`,
-    [statusValue,req.user.id,comment||(decision==="approve"?"Funds received and evidence verified":null),receipt,locked.id]);
+      receipt_number=$4,notes=CASE WHEN $5::text IS NOT NULL THEN TRIM(BOTH FROM COALESCE(notes,'')||' | '||$5) ELSE notes END WHERE id=$6 AND status='pending' RETURNING id`,
+    [statusValue,req.user.id,comment||(decision==="approve"?"Funds received and evidence verified":null),receipt,allocationNotes,locked.id]);
     if(updated.rowCount!==1) { const error=new Error("Transaction has already been processed"); error.status=409; throw error; }
     if(decision==="approve"&&locked.type==="Savings deposit") await client.query("UPDATE members SET savings_balance=savings_balance+$1 WHERE id=$2",[locked.amount,locked.member_id]);
     if(decision==="approve"&&locked.type==="Share purchase") await client.query("UPDATE members SET share_capital=share_capital+$1 WHERE id=$2",[locked.amount,locked.member_id]);
@@ -2659,7 +2707,7 @@ app.post("/api/loans",auth,upload.single("supportingDocument"),(req,res,next)=>{
   if(overCapacity)return res.status(400).json({error:`${overCapacity.full_name} does not have enough guarantee capacity`});
   const ref=reference("LN"),initialStatus=savingsSecurity?"pending-guarantors":"officer-review";
   const row=await transaction(async client=>{
-    const created=(await client.query(`INSERT INTO loans (reference,member_id,product_id,amount,balance,term_months,purpose,status,savings_at_application,existing_loan_balance,eligibility_result,security_type,collateral_description,collateral_value,collateral_owner,collateral_owner_phone,collateral_owner_consent,borrower_declaration_accepted,supporting_document_stored_name,supporting_document_original_name,supporting_document_mime_type,processing_fee,policy_reference) VALUES ($1,$2,$3,$4,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,true,$17,$18,$19,$20,$21) RETURNING id`,[ref,memberId,b.productId,amount,term,String(b.purpose||"").trim(),initialStatus,member.savings_balance,existing.balance,`Eligible up to UGX ${policyMaximum.toLocaleString()}`,securityType,collateralSecurity?collateralDescription:null,collateralSecurity?collateralValue:null,collateralSecurity?collateralOwner:null,collateralSecurity?collateralOwnerPhone:null,collateralSecurity?collateralConsent:false,req.file?.filename||null,req.file?.originalname||null,req.file?.mimetype||null,amount*Number(product.processing_fee_rate||2)/100,product.policy_reference||"AGM-2025-LOAN-RESOLUTION"])).rows[0];
+    const created=(await client.query(`INSERT INTO loans (reference,member_id,product_id,amount,balance,term_months,purpose,status,savings_at_application,existing_loan_balance,eligibility_result,security_type,collateral_description,collateral_value,collateral_owner,collateral_owner_phone,collateral_owner_consent,borrower_declaration_accepted,supporting_document_stored_name,supporting_document_original_name,supporting_document_mime_type,processing_fee,policy_reference) VALUES ($1,$2,$3,$4,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,true,$17,$18,$19,0,$20) RETURNING id`,[ref,memberId,b.productId,amount,term,String(b.purpose||"").trim(),initialStatus,member.savings_balance,existing.balance,`Eligible up to UGX ${policyMaximum.toLocaleString()}`,securityType,collateralSecurity?collateralDescription:null,collateralSecurity?collateralValue:null,collateralSecurity?collateralOwner:null,collateralSecurity?collateralOwnerPhone:null,collateralSecurity?collateralConsent:false,req.file?.filename||null,req.file?.originalname||null,req.file?.mimetype||null,product.policy_reference||"AGM-2025-LOAN-RESOLUTION"])).rows[0];
     for(const guarantor of guarantors){await client.query("INSERT INTO loan_guarantors (loan_id,member_id,guaranteed_amount) VALUES ($1,$2,$3)",[created.id,guarantor.id,guaranteeShare]);await client.query("INSERT INTO notifications (user_id,title,message) VALUES ($1,'Loan guarantee request',$2)",[guarantor.user_id,`${member.full_name} asked you to guarantee loan ${ref} for UGX ${amount.toLocaleString()}.`]);}
     await client.query("INSERT INTO loan_workflow_events (loan_id,stage,action,actor_id,comment) VALUES ($1,'application','submitted',$2,$3)",[created.id,req.user.id,collateralSecurity?`Collateral offered by ${collateralOwner}; officer appraisal required`:`Savings checked: UGX ${Number(member.savings_balance).toLocaleString()}; three guarantors requested`]);return created;
   });
@@ -2754,8 +2802,6 @@ app.post("/api/loans/:id/disburse",auth,asyncRoute(async(req,res)=>{
       VALUES ($1,$2,'Loan disbursement',$3,$4,'completed',$5,$6,$6,NOW())`,
       [transactionReference,loan.member_id,disbursement.method,disbursement.amount,disbursement.destination,req.user.id]);
     await createRepaymentSchedule(client,loan,Number(disbursement.amount));
-    if(Number(loan.processing_fee||0)>0) await client.query(`INSERT INTO loan_charges (loan_id,charge_type,amount,status,reason,assessed_by)
-      VALUES ($1,'Processing fee',$2,'outstanding','Approved 2% loan processing fee',$3)`,[loan.id,loan.processing_fee,req.user.id]);
     await client.query("INSERT INTO loan_workflow_events (loan_id,stage,action,actor_id,comment) VALUES ($1,'disbursement','disbursed',$2,$3)",
       [loan.id,req.user.id,`${disbursement.method} - ${transactionReference}`]);
     const memberUser=(await client.query("SELECT id FROM users WHERE member_id=$1 AND active=true LIMIT 1",[loan.member_id])).rows[0];
@@ -2944,7 +2990,7 @@ app.post("/api/documents/:id/publication-decision",auth,asyncRoute(async(req,res
   if(!["approve","reject"].includes(decision))return res.status(400).json({error:"Choose approve or reject"});
   const next=decision==="approve"?"published":"draft";
   await query(`UPDATE organization_documents SET status=$1,visibility_level=CASE WHEN $1='draft' THEN 4 ELSE visibility_level END,
-    approved_by=CASE WHEN $1='published' THEN $3 ELSE NULL END,updated_at=NOW() WHERE id=$2`,[next,document.id,req.user.id]);
+    approved_by=CASE WHEN $1='published' THEN $3::bigint ELSE NULL::bigint END,updated_at=NOW() WHERE id=$2`,[next,document.id,req.user.id]);
   await audit({userId:req.user.id,action:decision==="approve"?"DOCUMENT_PUBLICATION_APPROVED":"DOCUMENT_PUBLICATION_RETURNED",
     entityType:"organization_document",entityId:String(document.id),details:`${document.reference}${comment?` - ${comment}`:""}`,...metadata(req)});
   res.json({ok:true,status:next});

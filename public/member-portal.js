@@ -65,23 +65,24 @@
   }
   function requests(){
     const c=C(),pendingTransactions=c.transactions.filter(x=>["pending","pending_finance_review"].includes(x.status)),pendingLoans=c.loans.filter(x=>!["active","completed","rejected","closed"].includes(x.status)),pendingGuarantees=c.guarantees.filter(x=>x.guaranteeStatus==="pending"),pendingWelfare=c.welfare.requests.filter(x=>!["paid","closed","rejected"].includes(x.status));
-    const deposits=pendingTransactions.map(x=>`<tr><td><strong>${esc(x.reference)}</strong><small>${esc(x.externalReference||"")}</small></td><td>${esc(x.type)}</td><td>${money(x.amount)}</td><td>${date(x.createdAt)}</td><td>${status(x.status)}</td><td><button class="button small secondary" data-member-transaction="${x.id}">${icons.eye}Details</button></td></tr>`).join("");
+    const deposits=pendingTransactions.filter(x=>x.type!=="Loan repayment").map(x=>`<tr><td><strong>${esc(x.reference)}</strong><small>${esc(x.externalReference||"")}</small></td><td>${esc(x.type)}</td><td>${money(x.amount)}</td><td>${date(x.createdAt)}</td><td>${status(x.status)}</td><td><button class="button small secondary" data-member-transaction="${x.id}">${icons.eye}Details</button></td></tr>`).join("");
+    const loanRepayments=pendingTransactions.filter(x=>x.type==="Loan repayment").map(x=>`<tr><td><strong>${esc(x.reference)}</strong><small>${esc(x.externalReference||"")}</small></td><td>${esc(x.type)}</td><td>${money(x.amount)}</td><td>${date(x.createdAt)}</td><td>${status(x.status)}</td><td><button class="button small secondary" data-member-transaction="${x.id}">${icons.eye}Details</button></td></tr>`).join("");
     const loans=pendingLoans.map(x=>`<tr><td><strong>${esc(x.reference)}</strong></td><td>${esc(x.product)}</td><td>${money(x.amount)}</td><td>${date(x.createdAt)}</td><td>${status(x.status)}</td></tr>`).join("");
     const guarantees=pendingGuarantees.map(x=>`<tr><td><strong>${esc(x.reference)}</strong></td><td>${esc(x.borrower)}</td><td>${money(x.amount)}</td><td>${status(x.guaranteeStatus)}</td><td><div class="table-actions"><button class="button small secondary" data-member-guarantee="${x.loanId}" data-response="reject">Reject</button><button class="button small primary" data-member-guarantee="${x.loanId}" data-response="accept">Accept</button></div></td></tr>`).join("");
     const welfare=pendingWelfare.map(x=>`<tr><td><strong>${esc(x.reference)}</strong></td><td>${esc(x.category)}</td><td>${money(x.amount)}</td><td>${status(x.urgency)}</td><td>${status(x.status)}</td></tr>`).join("");
     const contributions=c.welfare.contributions.filter(x=>["pending","pending_finance_review"].includes(x.status)).map(x=>`<tr><td><strong>${esc(x.reference)}</strong></td><td>${esc(x.type)}</td><td>${money(x.amount)}</td><td>${date(x.contributionDate)}</td><td>${status(x.status)}</td></tr>`).join("");
-    return `<div class="member-stack">${panel("Pending savings transactions","Deposits awaiting Credits verification",gridTable(["Reference","Type","Amount","Submitted","Status","Actions"],deposits))}${panel("Pending welfare contributions","Payment evidence awaiting Finance verification",gridTable(["Reference","Type","Amount","Submitted","Status"],contributions))}${panel("Pending loan applications","Applications still moving through approval",gridTable(["Loan","Product","Amount","Submitted","Stage"],loans))}${panel("Guarantee requests","Loan guarantees awaiting your response",gridTable(["Loan","Borrower","Amount","Status","Actions"],guarantees))}${panel("Welfare requests","Support requests awaiting a final decision",gridTable(["Request","Category","Amount","Urgency","Status"],welfare))}</div>`;
+    return `<div class="member-stack">${panel("Pending savings transactions","Deposits awaiting Credits verification",gridTable(["Reference","Type","Amount","Submitted","Status","Actions"],deposits))}${loanRepayments?panel("Pending loan repayments","Loan payments awaiting Credits verification before progress updates",gridTable(["Reference","Type","Amount","Submitted","Status","Actions"],loanRepayments)):""}${panel("Pending welfare contributions","Payment evidence awaiting Finance verification",gridTable(["Reference","Type","Amount","Submitted","Status"],contributions))}${panel("Pending loan applications","Applications still moving through approval",gridTable(["Loan","Product","Amount","Submitted","Stage"],loans))}${panel("Guarantee requests","Loan guarantees awaiting your response",gridTable(["Loan","Borrower","Amount","Status","Actions"],guarantees))}${panel("Welfare requests","Support requests awaiting a final decision",gridTable(["Request","Category","Amount","Urgency","Status"],welfare))}</div>`;
   }
   function loans(){
     const all=C().loans,active=all.filter(x=>["active","overdue"].includes(x.status)),history=all.filter(x=>["completed","closed"].includes(x.status));
     const activeCards=active.map(x=>{
       const totalDue=Number(x.totalDue||x.amount||0),totalPaid=Number(x.totalPaid||0),totalInterest=Number(x.totalInterest||Math.max(0,totalDue-Number(x.amount||0)));
-      const charges=Number(x.outstandingCharges||0),obligation=totalDue+charges,remaining=Math.max(0,obligation-totalPaid);
-      const progressPct=obligation?Math.min(100,Math.round(totalPaid/obligation*100)):0;
+      const remaining=Math.max(0,totalDue-totalPaid);
+      const progressPct=totalDue?Math.min(100,Math.round(totalPaid/totalDue*100)):0;
       return `<article class="card member-loan-progress"><header><div><small>${esc(x.reference)} - ${esc(x.product)}</small><h3>${money(remaining)} still due</h3></div>${status(x.status)}</header>
         <div class="member-loan-progress-bar"><i style="width:${progressPct}%"></i></div>
-        <div class="member-loan-progress-meta"><span>${progressPct}% repaid</span><span>${money(totalPaid)} of ${money(obligation)}</span></div>
-        <div class="member-loan-totals"><span>Borrowed <strong>${money(x.amount)}</strong></span><span>Interest (2%/mo) <strong>${money(totalInterest)}</strong></span><span>Charges <strong>${money(charges)}</strong></span><span>Principal left <strong>${money(x.balance)}</strong></span></div>
+        <div class="member-loan-progress-meta"><span>${progressPct}% repaid</span><span>${money(totalPaid)} of ${money(totalDue)}</span></div>
+        <div class="member-loan-totals"><span>Borrowed <strong>${money(x.amount)}</strong></span><span>Interest (2%/mo) <strong>${money(totalInterest)}</strong></span><span>Principal left <strong>${money(x.balance)}</strong></span></div>
         <div class="member-next-repayment"><span>Next repayment<strong>${money(x.nextPaymentAmount||0)}</strong></span><span>Due date<strong>${date(x.nextDueDate)}</strong></span></div>
         ${canActOnMember()?`<div class="member-loan-actions"><button class="button primary" data-member-repay="${x.id}" data-settle="0">${icons.receipt}Pay loan</button><button class="button secondary" data-member-repay="${x.id}" data-settle="1">${icons.check}Pay in full</button></div>`:""}</article>`;
     }).join("");
@@ -146,18 +147,18 @@
   function withdrawalForm(){modal("Request savings withdrawal",`<form class="form" data-member-withdrawal><div class="field"><label>Amount</label><input name="amount" type="number" min="10000" step="10000" required></div><div class="field"><label>Payment method</label><select name="method"><option>Mobile Money</option><option>Bank transfer</option><option>Cash</option></select></div><div class="field"><label>Reason</label><textarea name="reason" required></textarea></div><div class="form-actions"><button type="button" class="button secondary" data-close-modal>Cancel</button><button class="button primary">Submit request</button></div></form>`);bindMember();}
   function repayForm(loanId,settleFull=false){
     const loan=C().loans.find(x=>String(x.id)===String(loanId));if(!loan||!["active","overdue"].includes(loan.status))return;
-    const totalDue=Number(loan.totalDue||loan.amount||0),totalPaid=Number(loan.totalPaid||0),charges=Number(loan.outstandingCharges||0);
-    const remaining=Math.max(0,totalDue+charges-totalPaid);
+    const totalDue=Number(loan.totalDue||loan.amount||0),totalPaid=Number(loan.totalPaid||0);
+    const remaining=Math.max(0,totalDue-totalPaid);
     const suggested=settleFull?remaining:Number(loan.nextPaymentAmount||remaining);
     modal(settleFull?"Pay loan in full":"Pay loan",`<form class="form" data-member-repay-form enctype="multipart/form-data" novalidate><input type="hidden" name="loanId" value="${loan.id}">
       <div class="form-grid">
-        <div class="field full"><label>Active loan</label><input value="${esc(loan.reference)} - ${esc(loan.product)}" disabled><small>Borrowed ${money(loan.amount)} + interest ${money(loan.totalInterest||0)}${charges?` + charges ${money(charges)}`:""}. Remaining due ${money(remaining)}.</small></div>
+        <div class="field full"><label>Active loan</label><input value="${esc(loan.reference)} - ${esc(loan.product)}" disabled><small>Borrowed ${money(loan.amount)} + interest ${money(loan.totalInterest||0)}. Remaining due ${money(remaining)}. Credits verifies your payment before the progress bar moves.</small></div>
         <div class="field"><label>Amount (UGX)</label><input name="amount" type="number" min="1000" step="1000" value="${Math.round(suggested)}" max="${Math.ceil(remaining)}" required><small>${settleFull?"Paying the full remaining amount closes the loan immediately.":"Pay one installment or any amount up to the remaining balance."}</small></div>
         <div class="field"><label>Payment method</label><select name="method" required><option>Mobile Money</option><option>Bank transfer</option><option>Cheque</option><option>Cash</option></select></div>
         <div class="field full"><label>Transaction reference</label><input name="externalReference" minlength="3" required placeholder="Mobile money, bank, cheque or cash reference"><small>Enter the reference printed on the payment message or slip.</small></div>
         <div class="field full"><label>Notes</label><textarea name="notes" placeholder="Add details that will help Credits confirm the loan payment">${settleFull?"Early full settlement - closing remaining schedule":""}</textarea></div>
-        <div class="field full record-file-field"><label>Receipt photo or PDF</label><input name="receipt" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" required><small>Attach payment evidence the same way you submit a deposit.</small></div>
-      </div><div class="member-form-message" data-repay-message aria-live="polite"></div><div class="form-actions"><button type="button" class="button secondary" data-close-modal>Cancel</button><button type="submit" class="button primary">${settleFull?"Pay in full and close loan":"Submit loan payment"}</button></div></form>`);
+        <div class="field full record-file-field"><label>Receipt photo or PDF</label><input name="receipt" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" required><small>Credits verifies the evidence before updating your loan progress.</small></div>
+      </div><div class="member-form-message" data-repay-message aria-live="polite"></div><div class="form-actions"><button type="button" class="button secondary" data-close-modal>Cancel</button><button type="submit" class="button primary">${settleFull?"Send full settlement for verification":"Send for verification"}</button></div></form>`);
     bindMember();
     document.querySelector("[data-member-repay-form]")?.addEventListener("submit",async e=>{
       e.preventDefault();const form=e.currentTarget,button=form.querySelector("button[type=submit]"),message=form.querySelector("[data-repay-message]");
@@ -167,13 +168,13 @@
       if(!reference.value.trim()||reference.value.trim().length<3)return fail("Enter the payment transaction reference.");
       if(!file)return fail("Choose a receipt photo or PDF before sending.");
       if(file.size>15*1024*1024)return fail("The receipt is larger than 15 MB.");
-      button.disabled=true;message.textContent="Uploading receipt and posting loan payment...";message.className="member-form-message sending";
+      button.disabled=true;message.textContent="Uploading receipt and sending to Credits...";message.className="member-form-message sending";
       try{
         const response=await fetch("/api/credits/repayments",{method:"POST",credentials:"same-origin",body:new FormData(form)}),raw=await response.text();
         let result={};try{result=raw?JSON.parse(raw):{};}catch{result={error:raw||"Unreadable server response"};}
         if(!response.ok)throw new Error(result.error||"Loan payment failed");
         closeModal();
-        await reload(Number(result.balance||0)<0.005?`Loan closed. Receipt ${result.receiptNumber}.`:`Loan payment recorded. Receipt ${result.receiptNumber}. Remaining principal ${money(result.balance)}.`);
+        await reload(result.status==="pending"?`${result.message||"Loan payment sent to Credits for verification."} Reference ${result.reference}.`:`Loan payment recorded. Receipt ${result.receiptNumber}. Remaining principal ${money(result.balance)}.`);
       }catch(error){button.disabled=false;fail(error.message);}
     });
   }

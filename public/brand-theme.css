@@ -25,8 +25,8 @@ body{color:var(--ink);background:#f8fafc}
 .exec-track i,.compliance-bars u,.audit-progress u{background:linear-gradient(90deg,#0b4b86,#d49a00)!important}
 .login-brand{background:radial-gradient(circle at 108% -5%,rgba(218,158,0,.22),transparent 34%),linear-gradient(145deg,#061f3f 0%,#082a52 62%,#04172f 100%)!important}
 .login-message .eyebrow,.login-features svg{color:#e2ab19!important}.login-message p,.login-features{color:#d6e0ec!important}
-.login-brand-identity img,.login-form-logo{background:#fff;border-radius:50%;object-fit:contain}
-.login-brand-identity img{padding:4px}.login-form-logo{padding:5px}
+.login-brand-identity img,.login-form-logo{background:#fff;border-radius:50%;object-fit:contain;aspect-ratio:1 / 1}
+.login-brand-identity img{padding:10px;width:min(220px,52%);height:auto}.login-form-logo{padding:8px}
 .status.approved,.dept-tag.approved,.dept-tag.active{background:#edf3fa!important;color:#0d4b83!important}
 a,.link-button,.dept-link{color:#15568f}
 @media(max-width:760px){.sidebar,.executive-sidebar,.audit-sidebar,.legal-sidebar,.welfare-sidebar{background:linear-gradient(180deg,#082a52,#04172f)!important}}
