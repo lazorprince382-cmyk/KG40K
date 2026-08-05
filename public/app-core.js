@@ -212,6 +212,17 @@ function status(value) {
 function displayRef(value) {
   return String(value || "").replace(/^([A-Za-z0-9]+)-/, (_, prefix) => `${prefix}\u2011`);
 }
+function shortRef(value) {
+  const raw = String(value || "");
+  if (raw.length <= 14) return displayRef(raw);
+  const prefix = raw.match(/^([A-Za-z0-9]+)-/)?.[1] || "REF";
+  return `${prefix}\u2011${raw.slice(prefix.length + 1, prefix.length + 5)}\u2026${raw.slice(-4)}`;
+}
+function chartBarHeight(value, max) {
+  const amount = Number(value) || 0;
+  if (!max || amount <= 0) return 0;
+  return Math.max(8, Math.round((amount / max) * 100));
+}
 function actor() { return state.user?.full_name || "Organization User"; }
 function canWrite() { return state.role!=="Auditor"; }
 function addAudit() {}
@@ -1642,7 +1653,7 @@ function creditsDashboardView() {
 function creditsApprovalQueueWidget(c,rows=[]) {
   if(!rows.length)return "";
   return `<section class="finance-panel credits-approval-queue"><div class="finance-panel-head"><div><h3>Payments awaiting approval</h3><p>${c.primaryCreditsOfficer?`Routed to ${c.primaryCreditsOfficer} (Credits Officer)`:"Credits Officer verification queue"}</p></div><button data-credits-page="credits-repayments">Open repayments ></button></div>
-    <div class="credits-application-list">${rows.map(t=>`<article class="credits-queue-row"><div class="credits-row-main"><strong>${escapeHtml(t.member)}</strong><small><span class="credits-ref" title="${escapeHtml(t.reference)}">${escapeHtml(displayRef(t.reference))}</span>${t.loanReference?`<span class="credits-ref" title="${escapeHtml(t.loanReference)}">${escapeHtml(displayRef(t.loanReference))}</span>`:""}<span>${escapeHtml(t.type)}</span></small></div><div class="credits-row-actions"><b>${money(t.amount)}</b>${status("pending")}<button type="button" class="credits-review-btn" data-credits-transaction="${t.id}">${icons.eye}<span>Review</span></button></div></article>`).join("")}</div></section>`;
+    <div class="credits-application-list">${rows.map(t=>`<article class="credits-app-card"><div class="credits-app-top"><strong title="${escapeHtml(t.member)}">${escapeHtml(t.member)}</strong><b>${money(t.amount)}</b></div><div class="credits-app-bottom"><small><span class="credits-ref" title="${escapeHtml(t.reference)}">${escapeHtml(shortRef(t.reference))}</span>${t.loanReference?`<span class="credits-ref" title="${escapeHtml(t.loanReference)}">${escapeHtml(shortRef(t.loanReference))}</span>`:""}<span>${escapeHtml(t.type)}</span></small><div class="credits-row-actions">${status("pending")}<button type="button" class="credits-review-btn" data-credits-transaction="${t.id}">${icons.eye}<span>Review</span></button></div></div></article>`).join("")}</div></section>`;
 }
 function creditsStatCard(label,value,icon,target,note,index) {
   const colors=["blue","green","violet","red","orange","violet","red","teal","green","blue","violet","orange"];
@@ -1658,23 +1669,31 @@ function creditsContributionProgress(c) {
       ${p?`<article class="credits-year-card current"><header><span>${p.fiscalYear}</span><strong>Current-year target</strong></header><div class="credits-year-metrics"><div><span>Expected to date</span><strong>${money(p.expectedSavingsToDate)}</strong></div><div><span>Verified savings</span><strong>${money(p.verifiedSavings)}</strong></div><div><span>Annual shares</span><strong>${money(p.verifiedShares)} / ${money(p.expectedShares)}</strong></div><div><span>Subscriptions</span><strong>${money(p.verifiedSubscriptions)} / ${money(p.expectedSubscriptions)}</strong></div></div>${progress("Current-year collection",`${rate}%`,Math.min(100,rate),variance<0?"orange":"lime")}<small class="${variance<0?"negative":"positive"}">${variance<0?`Short by ${money(Math.abs(variance))}`:`Ahead by ${money(variance)}`}</small></article>`:""}
     </div><div class="credits-lifetime-total"><span>Total lifetime member funds</span><strong>${money(p?.totalMemberFunds||0)}</strong><small>All verified savings since joining plus share capital</small></div></section>`;
 }function creditsSavingsLoanChart(c) {
-  const max=Math.max(...c.monthly.flatMap(x=>[x.savings,x.loans]),1);
+  const max=Math.max(...(c.monthly||[]).flatMap(x=>[Number(x.savings)||0,Number(x.loans)||0]),1);
   return `<section class="finance-panel credits-chart-panel"><div class="finance-panel-head"><div><h3>Savings vs Loan Portfolio</h3><p>Six-month SACCO position</p></div><button data-credits-page="credits-analytics">Analytics ></button></div>
     <div class="finance-summary-row"><span>Total savings<strong class="positive">${money(c.savings.totalSavings)}</strong></span><span>Outstanding loans<strong>${money(c.portfolio.outstanding)}</strong></span><span>Available to lend<strong>${money(c.stats.availableFunds)}</strong></span></div>
-    <div class="credits-combo-chart">${c.monthly.map(x=>`<div><div><i style="height:${x.savings/max*100}%"></i><i class="loan" style="height:${x.loans/max*100}%"></i></div><span>${x.month}</span></div>`).join("")}</div>
+    <div class="credits-combo-chart">${(c.monthly||[]).map(x=>`<div><div><i style="height:${chartBarHeight(x.savings,max)}%" title="Savings ${money(x.savings)}"></i><i class="loan" style="height:${chartBarHeight(x.loans,max)}%" title="Loans ${money(x.loans)}"></i></div><span>${escapeHtml(x.month)}</span></div>`).join("")||`<div class="exec-empty">No monthly history yet.</div>`}</div>
     <div class="exec-legend"><span><i class="saving"></i>Savings</span><span><i class="loan"></i>Loans</span></div></section>`;
 }
 function creditsPortfolioWidget(c) {
-  const total=Math.max(1,c.portfolio.active+c.portfolio.completed+c.portfolio.pending+c.portfolio.rejected);
-  const performing=Math.max(0,c.portfolio.active-c.portfolio.arrears),performingPct=Math.round(performing/Math.max(c.portfolio.active,1)*100);
-  return `<section class="finance-panel"><div class="finance-panel-head"><div><h3>Loan Portfolio Overview</h3><p>Status and portfolio quality</p></div><button data-credits-page="credits-approvals">View loans ></button></div>
-    <div class="credits-portfolio"><div class="credits-donut" style="--performing:${performingPct}"><strong>${c.portfolio.active}</strong><span>Active loans</span></div><div class="credits-portfolio-legend">
-      ${[["Performing",performing,"green"],["In arrears",c.portfolio.arrears,"red"],["Pending",c.portfolio.pending,"orange"],["Completed",c.portfolio.completed,"blue"],["Rejected",c.portfolio.rejected,"violet"]].map(([label,value,color])=>`<div><i class="${color}"></i><span>${label}</span><strong>${value} - ${Math.round(value/total*100)}%</strong></div>`).join("")}</div></div></section>`;
+  const active=Number(c.portfolio.active)||0,arrears=Number(c.portfolio.arrears)||0,pending=Number(c.portfolio.pending)||0;
+  const completed=Number(c.portfolio.completed)||0,rejected=Number(c.portfolio.rejected)||0;
+  const performing=Math.max(0,active-arrears);
+  const slices=[["Performing",performing,"#d89b00"],["In arrears",arrears,"#ef334a"],["Pending",pending,"#f09a0a"],["Completed",completed,"#2173df"],["Rejected",rejected,"#7548e5"]];
+  const total=Math.max(1,slices.reduce((sum,[,value])=>sum+value,0));
+  let cursor=0;
+  const gradient=slices.filter(([,value])=>value>0).map(([,value,color])=>{
+    const start=cursor,end=cursor+(value/total*100);cursor=end;
+    return `${color} ${start}% ${end}%`;
+  }).join(",")||`#edf1f5 0% 100%`;
+  return `<section class="finance-panel credits-portfolio-panel"><div class="finance-panel-head"><div><h3>Loan Portfolio Overview</h3><p>Status and portfolio quality</p></div><button data-credits-page="credits-approvals">View loans ></button></div>
+    <div class="credits-portfolio"><div class="credits-donut" style="background:radial-gradient(circle at center,#fff 0 52%,transparent 53%),conic-gradient(${gradient})"><strong>${total}</strong><span>Total loans</span></div><div class="credits-portfolio-legend">
+      ${slices.map(([label,value,color])=>`<div><i style="background:${color}"></i><span>${label}</span><strong>${value} - ${Math.round(value/total*100)}%</strong></div>`).join("")}</div></div></section>`;
 }
 function creditsPendingApplicationsWidget(c) {
   const rows=c.loans.filter(l=>["pending","review","pending-guarantors","officer-review","committee-review","correction","finance-verification","executive-authorization"].includes(l.status)).slice(0,5);
   return `<section class="finance-panel credits-pending-apps"><div class="finance-panel-head"><div><h3>Pending Loan Applications</h3><p>Applications requiring progress</p></div><button data-credits-page="credits-applications">View all ></button></div>
-    <div class="credits-application-list">${rows.map(l=>`<article class="credits-queue-row"><div class="credits-row-main"><strong>${escapeHtml(l.member)}</strong><small><span class="credits-ref" title="${escapeHtml(l.reference)}">${escapeHtml(displayRef(l.reference))}</span><span>${new Date(l.createdAt).toLocaleDateString()}</span></small></div><div class="credits-row-actions"><b>${money(l.amount)}</b>${status(l.status)}<button type="button" class="credits-icon-btn" data-loan-detail-id="${l.id}" title="View full process">${icons.eye}</button></div></article>`).join("")||`<div class="exec-empty">No pending applications.</div>`}</div></section>`;
+    <div class="credits-application-list">${rows.map(l=>`<article class="credits-app-card"><div class="credits-app-top"><strong title="${escapeHtml(l.member)}">${escapeHtml(l.member)}</strong><b>${money(l.amount)}</b></div><div class="credits-app-bottom"><small><span class="credits-ref" title="${escapeHtml(l.reference)}">${escapeHtml(shortRef(l.reference))}</span><span>${new Date(l.createdAt).toLocaleDateString()}</span></small><div class="credits-row-actions">${status(l.status)}<button type="button" class="credits-icon-btn" data-loan-detail-id="${l.id}" title="View full process">${icons.eye}</button></div></div></article>`).join("")||`<div class="exec-empty">No pending applications.</div>`}</div></section>`;
 }
 function creditsSavingsOverviewWidget(c) {
   const s=c.savings;

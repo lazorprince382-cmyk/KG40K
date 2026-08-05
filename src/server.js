@@ -1422,7 +1422,7 @@ app.get("/api/credits/command-center",auth,requireCredits("view"),asyncRoute(asy
     query(`SELECT
       COUNT(*) FILTER (WHERE status IN ('active','overdue'))::int AS active,
       COUNT(*) FILTER (WHERE status='completed')::int AS completed,
-      COUNT(*) FILTER (WHERE status IN ('pending','review','pending-guarantors','officer-review','committee-review','correction'))::int AS pending,
+      COUNT(*) FILTER (WHERE status IN ('pending','review','pending-guarantors','officer-review','committee-review','correction','finance-verification','executive-authorization'))::int AS pending,
       COUNT(*) FILTER (WHERE status='rejected')::int AS rejected,
       COUNT(*) FILTER (WHERE status='overdue' OR (balance>0 AND due_date<CURRENT_DATE))::int AS overdue,
       COUNT(*) FILTER (WHERE status='ready-disbursement')::int AS awaiting_disbursement,
@@ -1511,8 +1511,12 @@ app.get("/api/credits/command-center",auth,requireCredits("view"),asyncRoute(asy
   const monthly=(await query(`WITH months AS (
       SELECT generate_series(date_trunc('month',CURRENT_DATE)-INTERVAL '5 months',date_trunc('month',CURRENT_DATE),INTERVAL '1 month') AS start_date)
     SELECT to_char(start_date,'Mon') AS month,
-      COALESCE((SELECT SUM(amount) FROM transactions WHERE type='Savings deposit' AND status='completed' AND created_at>=start_date AND created_at<start_date+INTERVAL '1 month'),0)::float AS savings,
-      COALESCE((SELECT SUM(balance) FROM loans WHERE created_at<start_date+INTERVAL '1 month' AND status IN ('active','overdue')),0)::float AS loans,
+      COALESCE((SELECT SUM(m.savings_balance) FROM members m
+        WHERE m.deleted_at IS NULL AND m.status='active'
+          AND m.joined_at < start_date + INTERVAL '1 month'),0)::float AS savings,
+      COALESCE((SELECT SUM(l.balance) FROM loans l
+        WHERE l.status IN ('active','overdue')
+          AND l.created_at < start_date + INTERVAL '1 month'),0)::float AS loans,
       COALESCE((SELECT SUM(amount) FROM loan_disbursements WHERE disbursed_at>=start_date AND disbursed_at<start_date+INTERVAL '1 month'),0)::float AS disbursed,
       COALESCE((SELECT SUM(GREATEST(0,LEAST(paid_amount,total_due)-LEAST(paid_amount,principal))) FROM loan_repayment_schedule WHERE paid_at>=start_date AND paid_at<start_date+INTERVAL '1 month'),0)::float AS interest
     FROM months ORDER BY start_date`)).rows;
