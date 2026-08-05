@@ -1880,7 +1880,7 @@ function creditsReceiptsView() {
   const totalCash=rows.reduce((n,t)=>n+Number(t.amount||0),0);
   return `<div class="exec-module-metrics">${executiveModuleMetric("Receipts",rows.length,"blue")}${executiveModuleMetric("Cash given out",money(totalCash),"green")}${executiveModuleMetric("This month",money(rows.filter(t=>new Date(t.verifiedAt||t.createdAt).getMonth()===new Date().getMonth()).reduce((n,t)=>n+Number(t.amount||0),0)),"orange")}</div>
     <div class="notice"><div>${icons.wallet}</div><div><strong>Net cash after processing fee</strong><p>Each receipt shows the money actually sent to the member. The processing fee stays with the organization and is not part of this cash figure.</p></div></div>
-    ${financeDataTable("Loan disbursement receipts",["Receipt / Ref","Date","Member","Loan","Method","Destination / notes","Cash given","Status"],rows.map(t=>[
+    ${financeDataTable("Loan disbursement receipts",["Receipt / Ref","Date","Member","Loan","Method","Destination / notes","Net paid","Status"],rows.map(t=>[
       t.receiptNumber||t.reference,new Date(t.verifiedAt||t.createdAt).toLocaleString(),`${escapeHtml(t.member)}<small class="table-sub">${escapeHtml(t.memberNumber||"")}</small>`,
       escapeHtml(t.loanReference||"—"),escapeHtml(t.method||"—"),escapeHtml(t.externalReference||t.notes||"—"),money(t.amount),status(t.status)
     ]))}`;
@@ -2044,8 +2044,93 @@ async function creditsDisburse(id) {
   const loan=state.credits.loans.find(l=>String(l.id)===String(id));if(!loan)return;
   const fee=Number(loan.processingFee||Math.round(Number(loan.verifiedAmount||loan.amount)*0.02));
   const net=Math.max(0,Number(loan.verifiedAmount||loan.amount)-fee);
-  if(!await confirmDialog(`Disburse net ${money(net)} to ${loan.member}? Full principal ${money(loan.verifiedAmount||loan.amount)} remains repayable after the ${money(fee)} processing fee deduction.`))return;
-  try{const result=await api(`/api/loans/${id}/disburse`,{method:"POST",body:"{}"});await refreshCredits();render();toast(`Loan disbursed. Net cash ${money(result.netCash)}. Transaction ${result.transactionReference}.`);}catch(error){toast(error.message);}
+  const phone=escapeHtml(loan.phone||"");
+  document.body.insertAdjacentHTML("beforeend",`<div class="modal-backdrop" id="modal-backdrop"><div class="modal"><div class="modal-head"><div><h2>Disburse loan</h2><p>${escapeHtml(loan.member)} · ${escapeHtml(loan.reference)} · Net ${money(net)} after ${money(fee)} processing fee</p></div><button class="modal-close" data-close>${icons.x}</button></div>
+    <form class="form" data-disburse-form>
+      <div class="form-grid">
+        <div class="field full"><label>How will the money be given?</label>
+          <select name="method" required data-disburse-method>
+            <option value="">Select method</option>
+            <option value="Cash">Cash</option>
+            <option value="Mobile Money">Mobile Money</option>
+            <option value="Bank transfer">Bank transfer</option>
+          </select>
+        </div>
+        <div class="field full" data-disburse-destination-wrap>
+          <label data-disburse-destination-label>Destination</label>
+          <input name="destination" data-disburse-destination placeholder="Choose a method first">
+          <small data-disburse-destination-help>For cash, destination is not needed.</small>
+        </div>
+        <div class="field full"><p class="page-subtitle">Full principal ${money(loan.verifiedAmount||loan.amount)} remains repayable. Only the net ${money(net)} is paid out now.</p></div>
+      </div>
+      <div class="form-actions"><button type="button" class="button secondary" data-close-2>Cancel</button><button type="submit" class="button primary">Confirm disbursement</button></div>
+    </form></div></div>`);
+  const form=document.querySelector("[data-disburse-form]");
+  const methodSelect=form.querySelector("[data-disburse-method]");
+  const destInput=form.querySelector("[data-disburse-destination]");
+  const destLabel=form.querySelector("[data-disburse-destination-label]");
+  const destHelp=form.querySelector("[data-disburse-destination-help]");
+  const syncDestination=()=>{
+    const method=methodSelect.value;
+    if(method==="Cash"){
+      destLabel.textContent="Cash note (optional)";
+      destInput.required=false;
+      destInput.value=destInput.value&&destInput.value!==phone?"Handed to member":"Handed to member";
+      destInput.placeholder="Handed to member";
+      destHelp.textContent="Cash is recorded as handed directly to the member.";
+    }else if(method==="Mobile Money"){
+      destLabel.textContent="Mobile money number";
+      destInput.required=true;
+      if(!destInput.value||destInput.value==="Handed to member") destInput.value=loan.phone||"";
+      destInput.placeholder="07XXXXXXXX";
+      destHelp.textContent="Enter the number that will receive the disbursement.";
+    }else if(method==="Bank transfer"){
+      destLabel.textContent="Bank account details";
+      destInput.required=true;
+      if(destInput.value==="Handed to member"||destInput.value===phone) destInput.value="";
+      destInput.placeholder="Bank name · account name · account number";
+      destHelp.textContent="Enter the receiving bank account.";
+    }else{
+      destLabel.textContent="Destination";
+      destInput.required=false;
+      destInput.value="";
+      destInput.placeholder="Choose a method first";
+      destHelp.textContent="Select Cash, Mobile Money, or Bank transfer.";
+    }
+  };
+  methodSelect.addEventListener("change",syncDestination);
+  syncDestination();
+  document.querySelector("[data-close]").onclick=closeModal;
+  document.querySelector("[data-close-2]").onclick=closeModal;
+  form.onsubmit=async event=>{
+    event.preventDefault();
+    const method=methodSelect.value;
+    const destination=String(destInput.value||"").trim();
+    if(!method)return toast("Choose how the money will be given.");
+    if(method!=="Cash"&&!destination)return toast(method==="Mobile Money"?"Enter the mobile money number.":"Enter the bank account details.");
+    const button=form.querySelector("button[type=submit]");button.disabled=true;button.textContent="Disbursing…";
+    try{
+      const result=await api(`/api/loans/${id}/disburse`,{method:"POST",body:JSON.stringify({method,destination})});
+      closeModal();await refreshCredits();render();
+      toast(method==="Cash"
+        ?`Cash ${money(result.netCash)} handed to ${loan.member}. Ref ${result.transactionReference}.`
+        :`${method} ${money(result.netCash)} sent to ${result.destination||destination}. Ref ${result.transactionReference}.`);
+    }catch(error){button.disabled=false;button.textContent="Confirm disbursement";toast(error.message);}
+  };
+}
+function disbursementMethodLine(d) {
+  const method=String(d?.method||"").trim();
+  const destination=String(d?.destination||"").trim();
+  if(!method||/^pending/i.test(method)) return "Method to be selected when Credits Officer disburses";
+  if(/^cash$/i.test(method)) return destination&&!/^to be confirmed/i.test(destination)?`Cash · ${destination}`:"Cash · Handed to member";
+  if(!destination||/^to be confirmed/i.test(destination)||/^pending/i.test(destination)) return method;
+  return `${method} to ${destination}`;
+}
+function disbursementNetLabel(method) {
+  if(/^cash$/i.test(String(method||""))) return "Cash handed to member";
+  if(/mobile/i.test(String(method||""))) return "Net amount sent to member";
+  if(/bank/i.test(String(method||""))) return "Net amount transferred to member";
+  return "Net amount paid to member";
 }
 async function waiveCreditCharge(id) {
   const reason=await promptDialog("Approved reason for waiving this charge:","");if(reason===null||!reason.trim())return;
@@ -3123,9 +3208,8 @@ async function handleLoanAction(action,loanReference) {
       toast("Amount verified and sent to the Executive Department for authorization.");
     }
     if(action==="disburse") {
-      if(!await confirmDialog(`Confirm that ${money(loan.verifiedAmount||loan.amount)} is being sent to ${loan.member}? This creates the repayment schedule.`))return;
-      const result=await api(`/api/loans/${loan.databaseId}/disburse`,{method:"POST",body:"{}"});
-      toast(`Loan disbursed successfully. Reference ${result.transactionReference}.`);
+      closeModal();
+      return creditsDisburse(loan.databaseId);
     }
     await refreshData();render();
   } catch(error){toast(error.message);}
@@ -3203,7 +3287,7 @@ async function openLoanDetails(referenceOrId) {
       ${loanApprovalQueue({approvalProgress:executiveQueue})||`<p class="page-subtitle">Executive Committee queue not started.</p>`}
       ${details.canCurrentUserDecide?.executive?`<div class="form-actions loan-decision-actions"><button type="button" class="button primary" data-exec-loan-decision="${loan.id}" data-decision="authorize">Approve loan</button><button type="button" class="button secondary" data-exec-loan-decision="${loan.id}" data-decision="return">Request information</button><button type="button" class="button secondary" data-exec-loan-decision="${loan.id}" data-decision="reject">Reject</button></div>`:""}
       ${details.canCurrentUserDecide?.credits&&["officer-review","pending","review","correction","committee-review"].includes(loan.status)?`<div class="form-actions loan-decision-actions"><button type="button" class="button primary" data-credits-loan="${loan.id}" data-credit-decision="approve">Approve (Credits)</button><button type="button" class="button secondary" data-credits-loan="${loan.id}" data-credit-decision="return">Request information</button><button type="button" class="button secondary" data-credits-loan="${loan.id}" data-credit-decision="reject">Reject</button></div>`:""}
-      ${details.disbursement?`<h3 class="loan-section-title">Disbursement</h3><div class="notice ${details.disbursement.status==="disbursed"?"":"warning"}">${icons.wallet}<div><strong>${money(details.disbursement.amount)} · ${escapeHtml(details.disbursement.status)}</strong><p>${escapeHtml(details.disbursement.method||"")} to ${escapeHtml(details.disbursement.destination||"")}${details.disbursement.transactionReference?` · ${escapeHtml(details.disbursement.transactionReference)}`:""}</p><p>Processing fee ${money(loan.processing_fee||0)} · Cash given to member ${money(Math.max(0,Number(details.disbursement.amount||loan.amount||0)-Number(loan.processing_fee||0)))}</p></div></div>`:""}
+      ${details.disbursement?`<h3 class="loan-section-title">Disbursement</h3><div class="notice ${details.disbursement.status==="disbursed"?"":"warning"}">${icons.wallet}<div><strong>${money(details.disbursement.amount)} · ${escapeHtml(details.disbursement.status)}</strong><p>${escapeHtml(disbursementMethodLine(details.disbursement))}${details.disbursement.transactionReference?` · ${escapeHtml(details.disbursement.transactionReference)}`:""}</p>${details.disbursement.status==="disbursed"?`<p>Processing fee ${money(loan.processing_fee||0)} · ${escapeHtml(disbursementNetLabel(details.disbursement.method))} ${money(Math.max(0,Number(details.disbursement.amount||loan.amount||0)-Number(loan.processing_fee||0)))}</p>`:`<p>Credits Officer must choose Cash, Mobile Money, or Bank transfer before paying the member.</p>`}</div></div>`:""}
       ${details.schedule.length?`<h3 class="loan-section-title">Repayment schedule</h3><div class="table-scroll repayment-scroll"><table><thead><tr><th>#</th><th>Due date</th><th>Opening balance</th><th>Principal</th><th>Interest</th><th>Total due</th><th>Status</th></tr></thead><tbody>${details.schedule.map(row=>`<tr><td>${row.installment}</td><td>${new Date(row.dueDate).toLocaleDateString()}</td><td>${money(row.openingBalance)}</td><td>${money(row.principal)}</td><td>${money(row.interest)}</td><td class="cell-main">${money(row.totalDue)}</td><td>${status(row.status)}</td></tr>`).join("")}</tbody></table></div>`:""}
       <div class="form-actions"><button class="button primary" data-close-2>Done</button></div></div></div></div>`);
     document.querySelector("[data-close]").onclick=closeModal;document.querySelector("[data-close-2]").onclick=closeModal;

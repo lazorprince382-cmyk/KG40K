@@ -1,6 +1,6 @@
 /* Ordered application loader. */
 [
-  "app-core.js?v=106",
+  "app-core.js?v=107",
   "department-theme.js?v=63",
   "department-core.js?v=65",
   "audit-dashboard.js?v=63",

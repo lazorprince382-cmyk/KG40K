@@ -3106,11 +3106,10 @@ app.post("/api/loans",auth,upload.single("supportingDocument"),(req,res,next)=>{
         next="ready-disbursement";
         await client.query(`UPDATE loans SET authorized_by=$1,executive_comment=$2,authorized_at=NOW(),verified_amount=COALESCE(verified_amount,amount) WHERE id=$3`,
           [req.user.id,comment,loan.id]);
-        const member=(await client.query("SELECT phone FROM members WHERE id=$1",[loan.member_id])).rows[0];
         await client.query(`INSERT INTO loan_disbursements (loan_id,amount,method,destination,status,prepared_by,authorized_by,authorized_at)
           VALUES ($1,$2,$3,$4,'authorized',$5,$6,NOW()) ON CONFLICT (loan_id) DO UPDATE
           SET amount=EXCLUDED.amount,method=EXCLUDED.method,destination=EXCLUDED.destination,status='authorized',authorized_by=EXCLUDED.authorized_by,authorized_at=NOW()`,
-          [loan.id,loan.verified_amount||loan.amount,req.body.method||"Mobile Money",req.body.destination||member.phone,loan.committee_approved_by||loan.recommended_by||req.user.id,req.user.id]);
+          [loan.id,loan.verified_amount||loan.amount,"Pending selection","To be confirmed at disbursement",loan.committee_approved_by||loan.recommended_by||req.user.id,req.user.id]);
       }
     } else {
       next=stage==="credits"?"officer-review":"executive-authorization";
@@ -3247,6 +3246,19 @@ app.post("/api/loans/:id/disburse",auth,asyncRoute(async(req,res)=>{
     return res.status(403).json({error:"Only the Credits Officer can disburse an approved loan"});
   if(!await departmentPermission(req.user,"credits","edit"))
     return res.status(403).json({error:"Credits disbursement authority is required"});
+  const allowedMethods=new Set(["Cash","Mobile Money","Bank transfer"]);
+  const method=String(req.body.method||"").trim();
+  if(!allowedMethods.has(method))
+    return res.status(400).json({error:"Choose how the money will be given: Cash, Mobile Money, or Bank transfer."});
+  const member=await one("SELECT phone FROM members WHERE id=(SELECT member_id FROM loans WHERE id=$1)",[req.params.id]);
+  let destination=String(req.body.destination||"").trim();
+  if(method==="Cash") destination=destination||"Handed to member";
+  else if(method==="Mobile Money") {
+    destination=destination||String(member?.phone||"").trim();
+    if(!destination) return res.status(400).json({error:"Enter the mobile money number receiving the disbursement."});
+  } else if(method==="Bank transfer") {
+    if(!destination) return res.status(400).json({error:"Enter the bank account details receiving the disbursement."});
+  }
   const transactionReference=reference("DSB");
   const result=await transaction(async client=>{
     const loan=(await client.query("SELECT * FROM loans WHERE id=$1 FOR UPDATE",[req.params.id])).rows[0];
@@ -3260,31 +3272,34 @@ app.post("/api/loans/:id/disburse",auth,asyncRoute(async(req,res)=>{
     let processingFee=Number(loan.processing_fee||0);
     if(!processingFee)processingFee=Math.round((fullAmount*feeRate/100+Number.EPSILON)*100)/100;
     const netCash=Math.max(0,Math.round((fullAmount-processingFee+Number.EPSILON)*100)/100);
-    const disbursed=await client.query(`UPDATE loan_disbursements SET status='disbursed',disbursed_by=$1,transaction_reference=$2,disbursed_at=NOW()
-      WHERE id=$3 AND status='authorized' RETURNING id`,[req.user.id,transactionReference,disbursement.id]);
+    const disbursed=await client.query(`UPDATE loan_disbursements
+      SET status='disbursed',method=$1,destination=$2,disbursed_by=$3,transaction_reference=$4,disbursed_at=NOW()
+      WHERE id=$5 AND status='authorized' RETURNING id`,[method,destination,req.user.id,transactionReference,disbursement.id]);
     if(disbursed.rowCount!==1){const error=new Error("Loan was already disbursed");error.status=409;throw error;}
     const activated=await client.query(`UPDATE loans SET status='active',amount=$1,balance=$1,processing_fee=$2,disbursed_at=NOW(),due_date=(CURRENT_DATE+($3||' months')::interval)::date
       WHERE id=$4 AND status='ready-disbursement' RETURNING id`,[fullAmount,processingFee,loan.term_months,loan.id]);
     if(activated.rowCount!==1){const error=new Error("Loan status changed before disbursement");error.status=409;throw error;}
+    const payoutNote=method==="Cash"
+      ?`Cash handed to member after ${feeRate}% processing fee of UGX ${processingFee.toLocaleString()}. Full principal UGX ${fullAmount.toLocaleString()} remains repayable with organization interest.`
+      :`Net amount paid by ${method} to ${destination} after ${feeRate}% processing fee of UGX ${processingFee.toLocaleString()}. Full principal UGX ${fullAmount.toLocaleString()} remains repayable with organization interest.`;
     await client.query(`INSERT INTO transactions (reference,member_id,type,method,amount,status,external_reference,notes,recorded_by,verified_by,verified_at)
       VALUES ($1,$2,'Loan disbursement',$3,$4,'completed',$5,$6,$7,$7,NOW())`,
-      [transactionReference,loan.member_id,disbursement.method,netCash,disbursement.destination,
-        `Net cash after ${feeRate}% processing fee of UGX ${processingFee.toLocaleString()}. Full principal UGX ${fullAmount.toLocaleString()} remains repayable with organization interest.`,req.user.id]);
+      [transactionReference,loan.member_id,method,netCash,destination,payoutNote,req.user.id]);
     if(processingFee>0){
       await client.query(`INSERT INTO loan_charges (loan_id,charge_type,amount,paid_amount,status,reason,assessed_by,assessed_at)
         VALUES ($1,'Processing fee',$2,$2,'paid',$3,$4,NOW())`,
-        [loan.id,processingFee,`${feeRate}% processing fee deducted from disbursed cash`,req.user.id]);
+        [loan.id,processingFee,`${feeRate}% processing fee deducted from disbursed amount`,req.user.id]);
     }
     await createRepaymentSchedule(client,loan,fullAmount);
     await client.query("INSERT INTO loan_workflow_events (loan_id,stage,action,actor_id,comment) VALUES ($1,'disbursement','disbursed',$2,$3)",
-      [loan.id,req.user.id,`${disbursement.method} - ${transactionReference}. Net cash UGX ${netCash.toLocaleString()}; processing fee UGX ${processingFee.toLocaleString()}.`]);
+      [loan.id,req.user.id,`${method}${method==="Cash"?"":` to ${destination}`} - ${transactionReference}. Net UGX ${netCash.toLocaleString()}; processing fee UGX ${processingFee.toLocaleString()}.`]);
     const memberUser=(await client.query("SELECT id FROM users WHERE member_id=$1 AND active=true LIMIT 1",[loan.member_id])).rows[0];
     if(memberUser)await client.query("INSERT INTO notifications (user_id,title,message) VALUES ($1,'Loan disbursed',$2)",
-      [memberUser.id,`Loan ${loan.reference} has been disbursed. Net cash received UGX ${netCash.toLocaleString()} after a ${feeRate}% processing fee. You repay the full UGX ${fullAmount.toLocaleString()} plus 2% monthly organization interest.`]);
-    return {loan,netCash,processingFee,fullAmount};
+      [memberUser.id,`Loan ${loan.reference} has been disbursed by ${method}${method==="Cash"?"":` to ${destination}`}. Net received UGX ${netCash.toLocaleString()} after a ${feeRate}% processing fee. You repay the full UGX ${fullAmount.toLocaleString()} plus 2% monthly organization interest.`]);
+    return {loan,netCash,processingFee,fullAmount,method,destination};
   });
-  await audit({userId:req.user.id,action:"LOAN_DISBURSED",entityType:"loan",entityId:String(result.loan.id),details:transactionReference,...metadata(req)});
-  res.json({ok:true,status:"active",transactionReference,netCash:result.netCash,processingFee:result.processingFee,principal:result.fullAmount});
+  await audit({userId:req.user.id,action:"LOAN_DISBURSED",entityType:"loan",entityId:String(result.loan.id),details:`${transactionReference} · ${result.method}`,...metadata(req)});
+  res.json({ok:true,status:"active",transactionReference,netCash:result.netCash,processingFee:result.processingFee,principal:result.fullAmount,method:result.method,destination:result.destination});
 }));app.get("/api/loans/:id/supporting-document",auth,asyncRoute(async(req,res)=>{
   const loan=await one("SELECT member_id,supporting_document_stored_name AS stored,supporting_document_original_name AS original,supporting_document_mime_type AS mime FROM loans WHERE id=$1",[req.params.id]);
   if(!loan?.stored)return res.status(404).json({error:"Loan supporting document not found"});
