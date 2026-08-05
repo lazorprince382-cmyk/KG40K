@@ -81,7 +81,8 @@ async function buildLoanApprovalHelpers({ query, one }) {
         advisoryReject: vote?.decision === "reject" && !finalRejector
       };
     });
-    const next = queue.find(r => !r.decision) || null;
+    const pendingReviewers = queue.filter(r => !r.decision);
+    const next = pendingReviewers[0] || null;
     const approvedCount = queue.filter(r => r.decision === "approve").length;
     const advisoryRejects = queue.filter(r => r.advisoryReject);
     const finalReject = queue.find(r => r.decision === "reject" && r.isFinalRejector);
@@ -91,6 +92,8 @@ async function buildLoanApprovalHelpers({ query, one }) {
       stage,
       body: stage === "credits" ? "Credit Committee" : "Executive Committee",
       reviewers: queue,
+      pendingReviewers,
+      // Kept for compatibility; any pending reviewer may decide (no turn order).
       nextReviewer: next,
       approvedCount,
       requiredCount: queue.length,
@@ -102,7 +105,19 @@ async function buildLoanApprovalHelpers({ query, one }) {
     };
   }
 
-  async function attachLoanApprovalMeta(loans) {
+  function canUserDecide(progress, userId) {
+    if (!progress?.reviewers?.length || progress.complete || progress.blockedBy) return false;
+    const me = progress.reviewers.find(r => Number(r.userId) === Number(userId) && !r.decision);
+    if (!me) return false;
+    // Executive Chairperson Tabula Robert decides last — after all other EXCO members have voted.
+    if (progress.stage === "executive" && me.isFinalRejector) {
+      const othersPending = progress.reviewers.some(r => !r.isFinalRejector && !r.decision);
+      if (othersPending) return false;
+    }
+    return true;
+  }
+
+  async function attachLoanApprovalMeta(loans, currentUserId = null) {
     if (!loans?.length) return loans || [];
     return Promise.all(loans.map(async loan => {
       const status = loan.status;
@@ -122,7 +137,8 @@ async function buildLoanApprovalHelpers({ query, one }) {
         processingFee: Number(loan.processingFee ?? loan.processing_fee ?? 0),
         approvalProgress: progress,
         nextReviewer: progress?.nextReviewer || null,
-        canCurrentUserDecide: false
+        pendingReviewers: progress?.pendingReviewers || [],
+        canCurrentUserDecide: currentUserId != null ? canUserDecide(progress, currentUserId) : false
       };
     }));
   }
@@ -133,6 +149,7 @@ async function buildLoanApprovalHelpers({ query, one }) {
     stageVotes,
     approvalProgress,
     attachLoanApprovalMeta,
+    canUserDecide,
     isFinalRejectAuthority
   };
 }

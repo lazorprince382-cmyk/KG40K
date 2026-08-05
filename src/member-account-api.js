@@ -1,6 +1,7 @@
 module.exports = function registerMemberAccountApi({
   app, auth, asyncRoute, query, one, transaction, audit, metadata, upload, fs, path, uploadsDir
 }) {
+  const { notifyCreditsVerificationQueue } = require("./credits-queue");
   const imageTypes = new Set(["image/jpeg","image/png","image/webp"]);
   const receiptTypes = new Set(["image/jpeg","image/png","image/webp","application/pdf"]);
   const removeStoredFile = storedName => {
@@ -22,28 +23,30 @@ module.exports = function registerMemberAccountApi({
       await transaction(async client=>{
         await client.query("UPDATE users SET full_name=$1,email=$2,phone=$3 WHERE id=$4",[fullName,email,phone,req.user.id]);
         if(!req.user.member_id)return;
-        const membershipStatus=["active","suspended","inactive"].includes(b.membershipStatus)?b.membershipStatus:"active";
+        // Members cannot self-change membership status — keep existing status
         await client.query(`UPDATE members SET full_name=$1,email=$2,phone=$3,national_id=NULLIF($4,''),
           provisional=CASE WHEN NULLIF($4,'') IS NOT NULL THEN false ELSE provisional END,
           occupation=NULLIF($5,''),employer=NULLIF($6,''),address=NULLIF($7,''),next_of_kin=NULLIF($8,''),
-          beneficiaries=NULLIF($9,''),status=$10 WHERE id=$11`,
+          beneficiaries=NULLIF($9,'') WHERE id=$10`,
         [fullName,email,phone,String(b.nationalId||"").trim(),String(b.occupation||"").trim(),
           String(b.employer||"").trim(),String(b.address||"").trim(),String(b.nextOfKin||"").trim(),
-          String(b.beneficiaries||"").trim(),membershipStatus,req.user.member_id]);
+          String(b.beneficiaries||"").trim(),req.user.member_id]);
         await client.query(`INSERT INTO member_bio_data
           (member_id,date_of_birth,gender,marital_status,nationality,home_district,subcounty,parish,village,
            emergency_contact_name,emergency_contact_phone,emergency_contact_relationship,blood_group,
            bio_status,created_by,updated_at)
           VALUES ($1,NULLIF($2,'')::date,NULLIF($3,''),NULLIF($4,''),NULLIF($5,''),NULLIF($6,''),
             NULLIF($7,''),NULLIF($8,''),NULLIF($9,''),NULLIF($10,''),NULLIF($11,''),NULLIF($12,''),
-            NULLIF($13,''),'complete',$14,NOW())
+            NULLIF($13,''),'draft',$14,NOW())
           ON CONFLICT (member_id) DO UPDATE SET date_of_birth=EXCLUDED.date_of_birth,gender=EXCLUDED.gender,
             marital_status=EXCLUDED.marital_status,nationality=EXCLUDED.nationality,
             home_district=EXCLUDED.home_district,subcounty=EXCLUDED.subcounty,parish=EXCLUDED.parish,
             village=EXCLUDED.village,emergency_contact_name=EXCLUDED.emergency_contact_name,
             emergency_contact_phone=EXCLUDED.emergency_contact_phone,
             emergency_contact_relationship=EXCLUDED.emergency_contact_relationship,
-            blood_group=EXCLUDED.blood_group,updated_at=NOW()`,
+            blood_group=EXCLUDED.blood_group,
+            bio_status=CASE WHEN member_bio_data.bio_status IN ('verified','complete') THEN member_bio_data.bio_status ELSE 'draft' END,
+            updated_at=NOW()`,
         [req.user.member_id,b.dateOfBirth||"",b.gender||"",b.maritalStatus||"",String(b.nationality||"").trim(),
           String(b.homeDistrict||"").trim(),String(b.subcounty||"").trim(),String(b.parish||"").trim(),
           String(b.village||"").trim(),String(b.emergencyContactName||"").trim(),
@@ -157,10 +160,12 @@ module.exports = function registerMemberAccountApi({
       [reference,req.user.member_id,transactionType,method,amount,externalReference,String(req.body.notes||"").trim()||null,req.user.id,
         req.file.filename,req.file.originalname,req.file.mimetype,targetFiscalYear]);
       await query("INSERT INTO notifications (member_id,title,message) VALUES ($1,$2,$3)",
-        [req.user.member_id,`${transactionType} submitted`,`${reference} is awaiting Credits verification.`]);
-      await query(`INSERT INTO notifications (user_id,title,message) SELECT DISTINCT u.id,'Member contribution awaiting verification',$1
-        FROM departments d JOIN department_assignments da ON da.department_id=d.id AND da.active=true AND da.can_view=true
-        JOIN users u ON u.id=da.user_id AND u.active=true WHERE d.code='credits'`,[`${reference} has payment evidence ready for review.`]);
+        [req.user.member_id,`${transactionType} submitted`,`${reference} is awaiting Credits Officer verification.`]);
+      await notifyCreditsVerificationQueue({query},{
+        title:"Member contribution awaiting verification",
+        message:`${reference} — UGX ${Number(amount).toLocaleString()} ${transactionType.toLowerCase()} with receipt evidence.`,
+        kind:"contribution"
+      });
       await audit({userId:req.user.id,action:"MEMBER_DEPOSIT_SUBMITTED",entityType:"transaction",entityId:String(row.id),
         details:`${reference} - ${method} - UGX ${amount}`,...metadata(req)});
       res.status(201).json(row);
@@ -201,6 +206,19 @@ module.exports = function registerMemberAccountApi({
         COALESCE((SELECT (total_due-paid_amount)::float FROM loan_repayment_schedule WHERE loan_id=l.id AND status<>'paid' ORDER BY installment_number LIMIT 1),0)::float AS "nextPaymentAmount",
         (SELECT COUNT(*)::int FROM loan_repayment_schedule WHERE loan_id=l.id) AS "totalInstallments",
         (SELECT COUNT(*)::int FROM loan_repayment_schedule WHERE loan_id=l.id AND status='paid') AS "paidInstallments",
+        COALESCE((SELECT ROUND(GREATEST(0,s.interest-COALESCE(s.interest_paid,0))::numeric,2)::float
+          FROM loan_repayment_schedule s WHERE s.loan_id=l.id AND s.installment_number=1),0)::float AS "firstMonthInterestRemaining",
+        ROUND((l.balance+COALESCE((
+          SELECT GREATEST(0,s.interest-COALESCE(s.interest_paid,0))
+          FROM loan_repayment_schedule s WHERE s.loan_id=l.id AND s.installment_number=1
+        ),0))::numeric,2)::float AS "earlySettlementAmount",
+        EXISTS (
+          SELECT 1 FROM loan_repayment_schedule s
+          WHERE s.loan_id=l.id AND s.status IN ('due','partial')
+            AND s.due_date<=CURRENT_DATE AND s.due_date+5>=CURRENT_DATE
+        ) AS "inDangerPeriod",
+        GREATEST(0,CURRENT_DATE-(COALESCE((SELECT MIN(s.due_date) FROM loan_repayment_schedule s
+          WHERE s.loan_id=l.id AND s.status<>'paid' AND s.due_date+5<CURRENT_DATE),CURRENT_DATE)))::int AS "daysOverdue",
         (SELECT t.amount::float FROM transactions t
           WHERE t.loan_id=l.id AND t.type='Loan repayment' AND t.status='completed'
           ORDER BY COALESCE(t.verified_at,t.created_at) DESC,t.id DESC LIMIT 1) AS "lastPaidAmount",
@@ -300,7 +318,17 @@ module.exports = function registerMemberAccountApi({
       transactions: transactions.rows, loans: loans.rows, guarantees: guarantees.rows, investments: investments.rows,
       welfare: { requests: welfareRequests.rows, contributions: welfareContributions.rows }, meetings: meetings.rows,
       documents: documents.rows, notifications: notifications.rows, announcements: announcements.rows, support: support.rows, recentActivity,
-      financialYearProgress, pastYearProgress, closingPosition
+      financialYearProgress, pastYearProgress, closingPosition,
+      loanEligibility:{
+        pastYearTargetCompleted:Boolean(pastYearProgress)&&Number(pastYearProgress.variance)>=0,
+        hasRunningLoan:activeLoans.length>0,
+        canApplyForLoan:activeLoans.length===0,
+        note:activeLoans.length
+          ?"You have a running loan — settle it before applying again or guaranteeing another member"
+          :(Boolean(pastYearProgress)&&Number(pastYearProgress.variance)>=0
+            ?"FY 25/26 savings target completed — you can apply for a loan"
+            :"Complete the FY 25/26 savings target (or current-year progress if you have no closing record) to apply for a loan")
+      }
     };
   }
 

@@ -68,7 +68,8 @@ async function runMigrations() {
   )`);
   const files=fs.readdirSync(migrationsDir).filter(file=>file.endsWith(".sql")).sort();
   for(const file of files) {
-    const sql=fs.readFileSync(path.join(migrationsDir,file),"utf8");
+    // Normalize CRLF from Windows checkouts so checksums match Linux/Railway applies.
+    const sql=fs.readFileSync(path.join(migrationsDir,file),"utf8").replace(/\r\n/g,"\n").replace(/\r/g,"\n");
     const checksum=crypto.createHash("sha256").update(sql).digest("hex");
     const applied=await one("SELECT checksum FROM schema_migrations WHERE name=$1",[file]);
     if(applied) {

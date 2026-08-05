@@ -21,7 +21,7 @@ Repo: https://github.com/lazorprince382-cmyk/KG40K
 
 ## 3. Load your local data into Railway Postgres
 
-A full dump of your local `tujenge_sacco` database is in `db/railway-seed.sql`.
+A full dump of your local `tujenge_sacco` database is in `database/dumps/railway-seed.sql`.
 
 ### Option A — Railway dashboard / local `psql`
 
@@ -37,7 +37,7 @@ npm run db:import-railway
 
 ```bash
 railway link
-railway run psql $DATABASE_URL -f db/railway-seed.sql
+railway run psql $DATABASE_URL -f database/dumps/railway-seed.sql
 ```
 
 After import, redeploy or restart the web service and sign in with your existing accounts.

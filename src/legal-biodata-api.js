@@ -9,24 +9,7 @@ module.exports = function registerLegalBioDataApi({
     });
   }
   // Official Executive Memo committees → department filter codes (Board is not a department roster).
-  const officialDeptSql=`CASE gb.code
-      WHEN 'exco' THEN 'executive'
-      WHEN 'credit-committee' THEN 'credits'
-      WHEN 'investment-committee' THEN 'investment'
-      WHEN 'legal-committee' THEN 'legal'
-      WHEN 'finance-committee' THEN 'finance'
-      WHEN 'welfare-committee' THEN 'welfare'
-      WHEN 'supervisory-committee' THEN 'supervisory'
-      WHEN 'audit-committee' THEN 'audit'
-      ELSE NULL END`;
-  const officialMemberDepts=`SELECT ga.linked_member_id AS member_id, ${officialDeptSql} AS dept_code,
-      d.name AS dept_name, gb.name AS body_name, ga.position_title
-    FROM governance_appointments ga
-    JOIN governance_bodies gb ON gb.id=ga.body_id
-    JOIN departments d ON d.code=${officialDeptSql}
-    WHERE ga.status='active' AND ga.linked_member_id IS NOT NULL
-      AND gb.code IN ('exco','credit-committee','investment-committee','legal-committee',
-        'finance-committee','welfare-committee','supervisory-committee','audit-committee')`;
+  const { officialDeptSql, officialMemberDepts } = require("./official-department-roster");
   const selectBio=`SELECT m.id AS "memberId",m.member_number AS "memberNumber",m.full_name AS "fullName",
     m.email,CASE WHEN m.provisional THEN NULL ELSE m.phone END AS phone,CASE WHEN m.provisional THEN NULL ELSE m.national_id END AS "nationalId",m.occupation,m.employer,m.address,m.next_of_kin AS "nextOfKin",
     m.beneficiaries,m.status AS "membershipStatus",m.joined_at AS "joinedAt",br.name AS branch,

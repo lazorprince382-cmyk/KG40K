@@ -17,3 +17,25 @@
 @media(max-width:760px){.bio-grid{grid-template-columns:1fr}.bio-card{padding:14px}}
 
 .bio-login-summary{display:flex;align-items:center;gap:9px;margin:10px 0;padding:9px 10px;border:1px solid #dfe6df;border-radius:9px;background:#f8faf8;min-width:0}.bio-login-summary>span{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;background:#e8f5ea;color:#0b3b70;flex:none}.bio-login-summary>span svg{width:15px}.bio-login-summary>div{display:flex;flex-direction:column;min-width:0;gap:1px}.bio-login-summary small,.bio-login-summary em{font-size:12px;color:#6d7d72;font-style:normal}.bio-login-summary strong{font-size:13px;color:#0b3b70;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.bio-login-summary.inactive>span{background:#fff0e7;color:#bd5a17}.bio-card footer{flex-wrap:wrap}.bio-card footer button{min-width:95px}.bio-account-toggle{display:flex!important;align-items:center;gap:8px;min-height:43px;padding:0 11px;border:1px solid #d9e0e9;border-radius:8px;background:#fff;font-weight:600}.bio-account-toggle input{width:auto!important}.bio-password-result{display:grid;gap:16px}.bio-password-result p{margin:0;color:#526274;line-height:1.55}.bio-password-result code{display:block;padding:16px;border-radius:10px;background:#0b3b70;color:#fff;font:700 18px/1.4 Consolas,monospace;overflow-wrap:anywhere;user-select:all}
+
+/* Executive System accounts — clickable summary cards */
+.bio-stats .bio-stat-btn{display:flex;align-items:center;gap:11px;background:#fff;border:1px solid #e2e6ed;border-radius:12px;padding:14px;text-align:left;cursor:pointer;transition:transform .15s ease,border-color .15s ease,box-shadow .15s ease;width:100%}
+.bio-stats .bio-stat-btn:hover{transform:translateY(-2px);box-shadow:0 8px 18px rgba(22,42,68,.08)}
+.bio-stats .bio-stat-btn.active{border-color:#55319f;box-shadow:0 0 0 2px rgba(85,49,159,.14)}
+.bio-stats .bio-stat-btn>span{width:39px;height:39px;border-radius:10px;display:grid;place-items:center;color:#fff;flex:none}
+.bio-stats .bio-stat-btn svg{width:19px}
+.bio-stats .bio-stat-btn.dark>span,.bio-stats .bio-stat-btn.dark.active>span{background:#0b3b70}
+.bio-stats .bio-stat-btn.blue>span{background:#2575df}
+.bio-stats .bio-stat-btn.green>span{background:#d89b00}
+.bio-stats .bio-stat-btn.orange>span{background:#ef8c16}
+.bio-stats .bio-stat-btn small,.bio-stats .bio-stat-btn strong,.bio-stats .bio-stat-btn em{display:block;font-style:normal}
+.bio-stats .bio-stat-btn small{font-size:14px;color:#728093}
+.bio-stats .bio-stat-btn strong{font-size:22px;color:#152946;margin-top:3px}
+.bio-stats .bio-stat-btn em{font-size:12px;color:#8a97a8;margin-top:2px}
+.bio-card.active-user{border-top-color:#2575df}
+.bio-card.inactive{border-top-color:#c8d0da;opacity:.92}
+.bio-card footer button.danger-action{border-color:#edb8b8;background:#fff5f5;color:#b4232f}
+.bio-card footer button.danger-action:hover{background:#b4232f;border-color:#b4232f;color:#fff}
+.system-accounts-page .exec-empty{grid-column:1/-1}
+@media(max-width:760px){.bio-stats .bio-stat-btn{padding:12px}.bio-stats .bio-stat-btn strong{font-size:18px}}
+@media(max-width:440px){.bio-stats{grid-template-columns:1fr}}

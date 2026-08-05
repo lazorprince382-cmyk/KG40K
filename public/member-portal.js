@@ -91,22 +91,48 @@
           <span>Interest (2%/mo) <strong>${money(totalInterest)}</strong></span>
         </div>
         <div class="member-next-repayment"><span>Next repayment<strong>${money(x.nextPaymentAmount||0)}</strong></span><span>Due date<strong>${date(x.nextDueDate)}</strong></span></div>
+        ${x.inDangerPeriod?`<div class="member-loan-danger">Danger period — pay before grace ends or a 5% penalty applies on principal only.</div>`:""}
         ${lastPaid}
-        <small class="member-loan-fee-note">Cash received is after the ${money(fee)} processing fee. Pay in full clears remaining principal ${money(x.balance)} only.</small>
+        <small class="member-loan-fee-note">Pay in full: principal ${money(x.balance)} + first-month interest ${money(x.firstMonthInterestRemaining||0)}.</small>
         ${canActOnMember()?`<div class="member-loan-actions"><button class="button primary" data-member-repay="${x.id}" data-settle="0">${icons.receipt}Pay loan</button><button class="button secondary" data-member-repay="${x.id}" data-settle="1">${icons.check}Pay in full</button></div>`:""}</article>`;
     }).join("");
     const rows=all.map(x=>`<tr><td><strong>${esc(x.reference)}</strong></td><td>${esc(x.product)}</td><td>${money(x.totalDue||x.amount)}</td><td>${money(Math.max(0,Number(x.amount||0)-Number(x.processingFee||0)))}</td><td>${x.termMonths} months</td><td>${x.lastPaidAmount!=null?`${money(x.lastPaidAmount)}<small class="table-sub">${date(x.lastPaidAt)}${x.lastPaidReceipt?` · ${esc(x.lastPaidReceipt)}`:""}</small>`:"—"}</td><td>${money(x.nextPaymentAmount||0)}</td><td>${date(x.nextDueDate)}</td><td>${status(x.status)}</td></tr>`).join("");
     const historyRows=history.map(x=>`<tr><td><strong>${esc(x.reference)}</strong></td><td>${esc(x.product)}</td><td>${money(x.totalDue||x.amount)}</td><td>${money(x.totalPaid||x.totalDue||x.amount)}</td><td>${x.lastPaidAmount!=null?`${money(x.lastPaidAmount)}<small class="table-sub">${date(x.lastPaidAt)}</small>`:"—"}</td><td>${x.termMonths} months</td><td>${date(x.dueDate||x.createdAt)}</td><td>${status(x.status)}</td></tr>`).join("");
     const paymentRows=payments.map(t=>`<tr><td><strong>${esc(t.receiptNumber||t.reference)}</strong><small class="table-sub">${esc(t.externalReference||"")}</small></td><td>${esc(t.loanReference||"—")}</td><td>${money(t.amount)}</td><td>${esc(t.method||"—")}</td><td>${date(t.verifiedAt||t.createdAt)}</td><td>${status(t.status)}</td></tr>`).join("");
+    const pastMet=Boolean(C()?.loanEligibility?.pastYearTargetCompleted)||(Boolean(C()?.pastYearProgress)&&Number(C().pastYearProgress.variance)>=0);
+    const runningLoans=(C()?.loans||[]).filter(l=>["active","overdue"].includes(l.status));
+    const openGuarantees=(C()?.guarantees||[]).filter(g=>["pending","accepted"].includes(g.guaranteeStatus)&&!["rejected","completed","closed"].includes(g.status));
+    const eligibilityNote=runningLoans.length
+      ?`<div class="notice warning"><div>${icons.info}</div><div><strong>Running loan in progress</strong><p>Settle ${esc(runningLoans[0].reference)} fully before applying for another loan or guaranteeing another member.</p></div></div>`
+      :(openGuarantees.length
+      ?`<div class="notice warning"><div>${icons.info}</div><div><strong>Active guarantorship</strong><p>You are guaranteeing ${esc(openGuarantees[0].borrower)} (${esc(openGuarantees[0].reference)}). Settle that loan before applying for your own.</p></div></div>`
+      :(pastMet
+      ?`<div class="notice success member-loan-eligible"><div>${icons.check}</div><div><strong>${esc(C()?.pastYearProgress?.fiscalYear||"FY 25/26")} savings target completed</strong><p>You can apply for a loan. Current-year savings progress is not required once the closing target is met.</p></div></div>`
+      :(C()?.pastYearProgress&&Number(C().pastYearProgress.variance)<0
+        ?`<div class="notice warning"><div>${icons.info}</div><div><strong>Complete ${esc(C().pastYearProgress.fiscalYear)} savings first</strong><p>Amount remaining: ${money(Math.abs(Number(C().pastYearProgress.variance)))}. Finish this target to unlock loan applications.</p></div></div>`
+        :"")));
     return `${oversightBanner()}<div class="member-module"><div class="module-actions">${readOnlyMember()?"":`<button class="button primary" data-member-action="apply-loan">${icons.plus}Apply for a loan</button>`}<button class="button secondary" data-open-loan-calculator>${icons.reports}Loan calculator</button>${readOnlyMember()?"":`<a class="button secondary" href="/api/member/reports/loans.csv">${icons.download}Loan statement</a>`}</div>
+      ${eligibilityNote}
       ${activeCards?`<div class="member-active-loans">${activeCards}</div>`:`<div class="member-empty">No active loans.</div>`}
       ${panel("My loans","Applications and facilities. Total repayment includes organization interest of 2% every month.",gridTable(["Loan","Product","Total repayment","Cash received","Term","Last paid","Next repayment","Next due","Status"],rows))}
       ${panel("Payment history","Verified and pending loan repayments on your facilities",gridTable(["Receipt / Ref","Loan","Amount","Method","Date","Status"],paymentRows))}
       ${panel("Loan history","Closed and fully repaid facilities",gridTable(["Loan","Product","Total repayment","Paid","Last paid","Term","Closed / due","Status"],historyRows))}</div>`;
   }
   function guarantees(){
-    const rows=C().guarantees.map(x=>`<tr><td><strong>${esc(x.reference)}</strong></td><td>${esc(x.borrower)}</td><td>${money(x.amount)}</td><td>${money(x.balance)}</td><td>${status(x.status)}</td><td>${status(x.guaranteeStatus)}</td><td>${x.guaranteeStatus==="pending"?`<div class="table-actions"><button class="button small secondary" data-member-guarantee="${x.loanId}" data-response="reject">Reject</button><button class="button small primary" data-member-guarantee="${x.loanId}" data-response="accept">Accept</button></div>`:"—"}</td></tr>`).join("");
-    return panel("My guarantorship","Requests and loans secured with your savings capacity",gridTable(["Loan","Borrower","Amount","Outstanding","Loan status","My response","Actions"],rows));
+    const running=(C()?.loans||[]).filter(l=>["active","overdue"].includes(l.status));
+    const past=C()?.pastYearProgress;
+    const fy=C()?.financialYearProgress;
+    const pastBehind=past&&Number(past.variance)<0;
+    const pastOk=Boolean(past)&&Number(past.variance)>=0;
+    const currentBehind=!pastOk&&fy&&Number(fy.expectedSavingsToDate||0)-Number(fy.savingsPaid||0)>0.005;
+    const notice=running.length
+      ?`<div class="notice warning"><div>${icons.info}</div><div><strong>Cannot guarantee while you have a running loan</strong><p>Settle ${esc(running[0].reference)} fully before accepting or offering a guarantee.</p></div></div>`
+      :(pastBehind||currentBehind
+        ?`<div class="notice warning"><div>${icons.info}</div><div><strong>Savings must be up to date to guarantee</strong><p>${pastBehind?`Complete ${esc(past.fiscalYear)} first (${money(Math.abs(Number(past.variance)))} remaining).`:`Bring ${esc(fy.fiscalYear)} savings up to date before guaranteeing.`}</p></div></div>`
+        :"");
+    const canAccept=!running.length&&!pastBehind&&!currentBehind;
+    const rows=C().guarantees.map(x=>`<tr><td><strong>${esc(x.reference)}</strong></td><td>${esc(x.borrower)}</td><td>${money(x.amount)}</td><td>${money(x.balance)}</td><td>${status(x.status)}</td><td>${status(x.guaranteeStatus)}</td><td>${x.guaranteeStatus==="pending"?`<div class="table-actions"><button class="button small secondary" data-member-guarantee="${x.loanId}" data-response="reject">Reject</button><button class="button small primary" data-member-guarantee="${x.loanId}" data-response="accept" ${canAccept?"":"disabled title=\"Not eligible to accept guarantees\""}>Accept</button></div>`:"—"}</td></tr>`).join("");
+    return `${notice}${panel("My guarantorship","Requests and loans secured with your savings capacity",gridTable(["Loan","Borrower","Amount","Outstanding","Loan status","My response","Actions"],rows))}`;
   }
   function investments(){
     const service=S(),portfolio=C().investments.map(x=>`<tr><td><strong>${esc(x.project)}</strong><small>${esc(x.reference)}</small></td><td>${money(x.amountInvested)}</td><td>${x.ownershipPercentage}%</td><td>${money(x.expectedReturns)}</td><td>${money(x.paymentsReceived)}</td><td>${date(x.investmentDate)}</td><td>${status(x.status)}</td></tr>`).join("");
@@ -132,16 +158,111 @@
       "member-documents":documents,"member-meetings":meetings,"member-notifications":notifications,"member-support":support}[state.page]||dashboard)();
   }
   function modal(title,form){document.body.insertAdjacentHTML("beforeend",`<div class="modal-backdrop" id="modal-backdrop"><div class="modal"><div class="modal-head"><h2>${title}</h2><button class="modal-close" data-close>${icons.x}</button></div>${form}</div></div>`);document.querySelector("[data-close]").onclick=closeModal;}
+  function loanEligibilityCheck(){
+    const past=C()?.pastYearProgress,fy=C()?.financialYearProgress;
+    const running=(C()?.loans||[]).filter(l=>["active","overdue"].includes(l.status));
+    if(running.length){
+      const loan=running[0];
+      return {blocked:true,type:"running-loan",reference:loan.reference,amount:Number(loan.amount||0),balance:Number(loan.balance||0)};
+    }
+    // Incomplete FY 25/26 closing target still blocks loan apply
+    if(past&&Number(past.variance)<0){
+      const remaining=Math.abs(Number(past.variance));
+      return {blocked:true,type:"savings",fiscalYear:past.fiscalYear,remaining,expected:Number(past.expected||0),paid:Number(past.totalPaid||0),label:"closing-target"};
+    }
+    // Completed FY 25/26 unlocks loan apply — do not also require current-year to-date progress
+    const pastYearCompleted=Boolean(past)&&Number(past.variance)>=0;
+    if(!pastYearCompleted&&fy){
+      const expected=Number(fy.expectedSavingsToDate||0),paid=Number(fy.savingsPaid||0);
+      const shortfall=Math.max(0,expected-paid);
+      if(shortfall>0.005)return {blocked:true,type:"savings",fiscalYear:fy.fiscalYear,remaining:shortfall,expected,paid,label:"current-year"};
+    }
+    const openGuarantees=(C()?.guarantees||[]).filter(g=>["pending","accepted"].includes(g.guaranteeStatus)&&!["rejected","completed","closed"].includes(g.status));
+    if(openGuarantees.length){
+      const g=openGuarantees[0];
+      return {blocked:true,type:"guarantor",borrower:g.borrower,reference:g.reference,amount:Number(g.amount||0),balance:Number(g.balance||0)};
+    }
+    return {blocked:false};
+  }
+  function showLoanEligibilityCard(info){
+    if(!info?.blocked)return;
+    const isSavings=info.type==="savings";
+    const isRunning=info.type==="running-loan";
+    const progressPct=info.expected?Math.min(100,Math.round((Number(info.paid||0)/Number(info.expected))*100)):0;
+    const body=isRunning?`<div class="loan-eligibility-card">
+        <p class="loan-eligibility-message">Sorry, you are not eligible to take another loan while you still have a running loan. Settle your current loan fully before applying again. Members with a running loan also cannot guarantee others.</p>
+        <div class="loan-eligibility-details">
+          <div><span>Loan reference</span><strong>${esc(info.reference||"—")}</strong></div>
+          ${info.amount?`<div><span>Loan amount</span><strong>${money(info.amount)}</strong></div>`:""}
+          ${info.balance!=null?`<div><span>Outstanding balance</span><strong>${money(info.balance)}</strong></div>`:""}
+        </div>
+        <div class="loan-eligibility-actions"><button type="button" class="button primary" data-member-eligibility-loans>${icons.loans}View my loans</button><button type="button" class="button secondary" data-close-eligibility>Close</button></div>
+      </div>`:isSavings?`<div class="loan-eligibility-card">
+        <p class="loan-eligibility-message">Sorry, you are not eligible to take a loan at the moment. Please update your savings to date then reapply. Thank you.</p>
+        <div class="loan-eligibility-highlight">
+          <span>Amount remaining to complete target</span>
+          <strong>${money(info.remaining)}</strong>
+          <small>${esc(info.fiscalYear||"Savings target")} · save this amount to unlock loan applications</small>
+        </div>
+        ${info.expected?`<div class="loan-eligibility-progress">
+          <div class="loan-eligibility-progress-head">
+            <div><strong>${esc(info.fiscalYear||"Target progress")}</strong><span>${money(info.paid||0)} paid of ${money(info.expected)}</span></div>
+            <b>${progressPct}%</b>
+          </div>
+          <div class="loan-eligibility-progress-bar" role="progressbar" aria-valuenow="${progressPct}" aria-valuemin="0" aria-valuemax="100"><em style="width:${progressPct}%"></em></div>
+          <p class="loan-eligibility-progress-note ${Number(info.paid||0)>=Number(info.expected)?"ahead":"behind"}">${Number(info.paid||0)>=Number(info.expected)?"Target met":"Still short by "+money(info.remaining)}</p>
+        </div>`:""}
+        <div class="loan-eligibility-actions"><button type="button" class="button primary" data-member-eligibility-savings>${icons.savings}Update savings</button><button type="button" class="button secondary" data-close-eligibility>Close</button></div>
+      </div>`:`<div class="loan-eligibility-card">
+        <p class="loan-eligibility-message">Sorry, you are not eligible to take a loan at the moment because you are currently guaranteeing another member's loan. Once that loan is fully settled you may apply again. Thank you.</p>
+        <div class="loan-eligibility-details">
+          <div><span>Borrower</span><strong>${esc(info.borrower||"Member")}</strong></div>
+          <div><span>Loan reference</span><strong>${esc(info.reference||"—")}</strong></div>
+          ${info.amount?`<div><span>Loan amount</span><strong>${money(info.amount)}</strong></div>`:""}
+          ${info.balance?`<div><span>Outstanding balance</span><strong>${money(info.balance)}</strong></div>`:""}
+        </div>
+        <div class="loan-eligibility-actions"><button type="button" class="button secondary" data-member-eligibility-guarantors>View my guarantorship</button><button type="button" class="button secondary" data-close-eligibility>Close</button></div>
+      </div>`;
+    const subtitle=isRunning?"Running loan":isSavings?"Complete your savings target first":"Active guarantorship";
+    document.body.insertAdjacentHTML("beforeend",`<div class="modal-backdrop loan-eligibility-backdrop" id="modal-backdrop"><div class="modal loan-eligibility-modal"><div class="modal-head"><div><h2>Loan application not available</h2><p>${subtitle}</p></div><button class="modal-close" data-close-eligibility aria-label="Close">${icons.x}</button></div>${body}</div></div>`);
+    document.querySelectorAll("[data-close-eligibility]").forEach(el=>el.addEventListener("click",closeModal));
+    document.querySelector("[data-member-eligibility-savings]")?.addEventListener("click",()=>{closeModal();state.page="member-savings";window.render();window.scrollTo(0,0);});
+    document.querySelector("[data-member-eligibility-guarantors]")?.addEventListener("click",()=>{closeModal();state.page="member-guarantorship";window.render();window.scrollTo(0,0);});
+    document.querySelector("[data-member-eligibility-loans]")?.addEventListener("click",()=>{closeModal();state.page="member-loans";window.render();window.scrollTo(0,0);});
+  }
+  function loanEligibilityFromError(message){
+    const text=String(message||"");
+    if(/running loan/i.test(text)||/already have a running loan/i.test(text)){
+      const refMatch=text.match(/\(([A-Z]+-[\w]+)\)/);
+      return {blocked:true,type:"running-loan",reference:refMatch?refMatch[1]:"",amount:0,balance:0};
+    }
+    if(/remaining to complete target/i.test(text)||/savings target/i.test(text)||/savings progress/i.test(text)){
+      const amountMatch=text.match(/UGX\s*([\d,]+(?:\.\d+)?)/i);
+      const remaining=amountMatch?Number(amountMatch[1].replace(/,/g,"")):0;
+      const fyMatch=text.match(/FY\s*[\d\/\-]+/i);
+      return {blocked:true,type:"savings",fiscalYear:fyMatch?fyMatch[0]:"Savings target",remaining,expected:0,paid:0};
+    }
+    if(/guarantee/i.test(text)&&(/cannot apply|not eligible|while guaranteeing|guaranteeing/i.test(text))){
+      const refMatch=text.match(/loan\s+([A-Z]+-[\w]+)/i);
+      const borrowerMatch=text.match(/guaranteeing\s+(.+?)'s\s+loan/i);
+      return {blocked:true,type:"guarantor",borrower:borrowerMatch?borrowerMatch[1].trim():"",reference:refMatch?refMatch[1]:"",amount:0,balance:0};
+    }
+    return null;
+  }
   async function loanForm(){
     try{
-      const candidates=(await api("/api/loans/guarantor-candidates")).candidates;
-      modal("Apply for a loan",`<form class="form" data-member-loan-form enctype="multipart/form-data"><div class="form-grid">
+      const blocked=loanEligibilityCheck();
+      if(blocked.blocked)return showLoanEligibilityCard(blocked);
+      const result=await api("/api/loans/guarantor-candidates");
+      const candidates=result.candidates||[];
+      const borrowerSavings=Number(result.borrower?.savings||C()?.member?.savings||0);
+      modal("Apply for a loan",`<form class="form" data-member-loan-form enctype="multipart/form-data" data-borrower-savings="${borrowerSavings}"><div class="form-grid">
         <label class="field full check-field loan-policy-check"><input type="checkbox" name="borrowerDeclaration" value="accepted" required><span>I have read and understood the Kwagalana loan policy.</span></label>
         <div class="field"><label>Loan product</label><select name="productId" required data-loan-product>${state.products.map(x=>`<option value="${x.id}" data-product-name="${esc(x.name)}">${esc(x.name)}</option>`).join("")}</select></div>
         <div class="field full" data-other-loan-fields hidden><label>Specify loan product</label><input name="customProductName" maxlength="120" placeholder="Type the loan product name"><small>Required when Other Loan is selected.</small></div>
-        <div class="field"><label>Amount (UGX)</label><input name="amount" type="number" min="100000" max="25000000" step="50000" required><small>Any member may apply for up to UGX 25,000,000 — not limited by savings balance.</small></div>
+        <div class="field"><label>Amount (UGX)</label><input name="amount" type="number" min="100000" max="25000000" step="50000" required data-loan-amount><small data-loan-amount-help>Up to UGX 25,000,000. Your first security is 75% of your savings (${money(window.LoanSecurity.capacity(borrowerSavings))} capacity).</small></div>
         <div class="field"><label>Repayment term</label><select name="termMonths">${Array.from({length:10},(_,i)=>`<option value="${i+1}" ${i===4?"selected":""}>${i+1} month${i?"s":""}</option>`).join("")}</select></div>
-        <div class="field"><label>Security offered</label><select name="securityType" required data-loan-security><option value="">Choose security</option><option value="savings_and_shares">Savings and shares</option><option value="collateral">Collateral</option></select></div>
+        <div class="field"><label>Security offered</label><select name="securityType" required data-loan-security><option value="">Choose security</option><option value="savings">Savings</option><option value="collateral">Collateral</option></select></div>
         <div class="field full"><label>Loan purpose (optional)</label><textarea name="purpose" placeholder="You may explain the purpose and repayment plan"></textarea></div>
         <div class="field full" data-collateral-fields hidden><div class="form-grid">
           <div class="field full"><label>Collateral description</label><textarea name="collateralDescription" placeholder="Land title, vehicle/logbook, type, identifying details and condition"></textarea></div>
@@ -150,10 +271,22 @@
           <div class="field"><label>Collateral owner phone number</label><input name="collateralOwnerPhone" type="tel" placeholder="e.g. +256 7xx xxx xxx"></div>
           <label class="field full check-field"><input type="checkbox" name="collateralOwnerConsent" value="accepted"><span>I consent to use my collateral as security.</span></label>
         </div></div>
-        <div class="field full" data-guarantor-fields hidden><label>Choose guarantors</label><div class="group-member-picker">${candidates.map(x=>`<label class="group-member-option"><input type="checkbox" name="guarantorIds" value="${x.id}"><div class="chat-avatar">${initials(x.fullName)}</div><div><strong>${esc(x.fullName)}</strong><span>${esc(x.memberNumber)}</span></div></label>`).join("")||`<div class="member-empty">No eligible guarantor accounts are currently available.</div>`}</div><small>Call the guarantors to accept guaranteeing from their dashboards.</small></div>
+        <div class="field full" data-guarantor-fields hidden>
+          <div class="loan-security-summary" data-loan-security-summary aria-live="polite"></div>
+          <label>Choose guarantors</label>
+          <div class="group-member-picker" data-guarantor-picker>${candidates.map(x=>{
+            const busy=x.available===false||Number(x.activeGuarantees||0)>0||Number(x.runningLoans||0)>0;
+            const reason=x.unavailableReason||(Number(x.runningLoans||0)>0?`Has a running loan${x.runningLoanReference?` (${x.runningLoanReference})`:""} — cannot guarantee`:(Number(x.activeGuarantees||0)>0?"Already guaranteeing an active loan — unavailable until that loan is completed":"Unavailable"));
+            return typeof guarantorOptionHtml==="function"?guarantorOptionHtml(x):`<label class="group-member-option ${busy?"guarantor-unavailable":""}"><input type="checkbox" name="guarantorIds" value="${x.id}" data-guarantor-savings="${Number(x.savings||0)}" ${busy?"disabled":""}><div class="chat-avatar">${initials(x.fullName)}</div><div><strong>${esc(x.fullName)}</strong><span>${esc(x.memberNumber)}</span><em>${busy?esc(reason):`Savings ${money(x.savings||0)} · 75% security ${money(window.LoanSecurity.capacity(x.savings||0))}`}</em></div></label>`;
+          }).join("")||`<div class="member-empty">No eligible guarantor accounts are currently available.</div>`}</div>
+          <small>Select enough guarantors so 75% of their savings covers what your own 75% does not. Call them to accept from their dashboards.</small>
+        </div>
         <div class="field full record-file-field"><label>Supporting document (optional)</label><input name="supportingDocument" type="file" accept="image/jpeg,image/png,image/webp,application/pdf,.doc,.docx"><small>Attach a land title, vehicle logbook, collateral evidence, quotation or other relevant document.</small></div>
-        <label class="field full check-field loan-overdue-check"><input type="checkbox" name="overdueDeclaration" value="accepted" required><span>I understand that overdue instalments attract the approved 5% monthly late-payment penalty, recovery costs and security enforcement.</span></label>
-      </div><div class="member-form-message" data-loan-message aria-live="polite"></div><div class="form-actions"><button type="button" class="button secondary" data-close-modal>Cancel</button><button type="submit" class="button primary">Submit loan application</button></div></form>`);bindMember();
+        <label class="field full check-field loan-overdue-check"><input type="checkbox" name="overdueDeclaration" value="accepted" required><span>I understand that after a 5-day grace from the due date, unpaid principal attracts a 5% late-payment penalty (interest is not included in the penalty base), plus recovery costs and security enforcement.</span></label>
+      </div><div class="member-form-message" data-loan-message aria-live="polite"></div><div class="form-actions"><button type="button" class="button secondary" data-close-modal>Cancel</button><button type="submit" class="button primary">Submit loan application</button></div></form>`);
+      const form=document.querySelector("[data-member-loan-form]");
+      if(typeof bindLoanSecurityCalculator==="function")bindLoanSecurityCalculator(form,{borrowerSavings,candidates});
+      bindMember();
     }catch(error){toast(error.message);}
   }
   function withdrawalForm(){modal("Request savings withdrawal",`<form class="form" data-member-withdrawal><div class="field"><label>Amount</label><input name="amount" type="number" min="10000" step="10000" required></div><div class="field"><label>Payment method</label><select name="method"><option>Mobile Money</option><option>Bank transfer</option><option>Cash</option></select></div><div class="field"><label>Reason</label><textarea name="reason" required></textarea></div><div class="form-actions"><button type="button" class="button secondary" data-close-modal>Cancel</button><button class="button primary">Submit request</button></div></form>`);bindMember();}
@@ -162,26 +295,25 @@
     const totalDue=Number(loan.totalDue||loan.amount||0),totalPaid=Number(loan.totalPaid||0);
     const remainingContract=Math.max(0,totalDue-totalPaid);
     const remainingPrincipal=Math.max(0,Number(loan.balance||0));
-    const fee=Number(loan.processingFee||0),netDisbursed=Math.max(0,Number(loan.amount||0)-fee);
-    const suggested=settleFull?remainingPrincipal:Number(loan.nextPaymentAmount||remainingContract);
-    const maxAmount=settleFull?remainingPrincipal:remainingContract;
+    const firstMonthInterest=Math.max(0,Number(loan.firstMonthInterestRemaining||0));
+    const earlySettlement=Math.max(0,Number(loan.earlySettlementAmount||remainingPrincipal+firstMonthInterest));
+    const suggested=settleFull?earlySettlement:Number(loan.nextPaymentAmount||remainingContract);
+    const maxAmount=settleFull?earlySettlement:remainingContract;
     const helpText=settleFull
-      ?`Pay in full clears remaining principal ${money(remainingPrincipal)} only. Contract interest is waived. Cash originally received ${money(netDisbursed)} after the ${money(fee)} processing fee.`
-      :`Total repayment ${money(totalDue)}. Remaining on schedule ${money(remainingContract)}. Cash originally received ${money(netDisbursed)} after the ${money(fee)} processing fee. Credits verifies your payment before the progress bar moves.`;
-    const amountHelp=settleFull
-      ?"Paying the remaining principal closes the loan. Interest is not charged on early settlement."
-      :"Pay one installment or any amount up to the remaining schedule balance.";
+      ?`Settlement: principal ${money(remainingPrincipal)} + first-month interest ${money(firstMonthInterest)}. Later months waived.`
+      :`Remaining balance ${money(remainingContract)} of ${money(totalDue)} total.`;
+    const amountHelp=settleFull?"":"Up to remaining balance.";
     modal(settleFull?"Pay loan in full":"Pay loan",`<form class="form" data-member-repay-form enctype="multipart/form-data" novalidate action="#" method="post">
       <input type="hidden" name="loanId" value="${loan.id}">
       <input type="hidden" name="settleFull" value="${settleFull?"1":"0"}">
       <input type="hidden" name="maxAmount" value="${Math.ceil(maxAmount)}">
       <div class="form-grid">
         <div class="field full"><label>Active loan</label><input value="${esc(loan.reference)} - ${esc(loan.product)}" disabled><small>${helpText}</small></div>
-        <div class="field"><label>Amount (UGX)</label><input name="amount" type="number" min="1000" step="1000" value="${Math.round(suggested)}" max="${Math.ceil(maxAmount)}" required><small>${amountHelp}</small></div>
+        <div class="field"><label>Amount (UGX)</label><input name="amount" type="number" min="1000" step="1000" value="${Math.round(suggested)}" max="${Math.ceil(maxAmount)}" required>${amountHelp?`<small>${amountHelp}</small>`:""}</div>
         <div class="field"><label>Payment method</label><select name="method" required><option>Mobile Money</option><option>Bank transfer</option><option>Cheque</option><option>Cash</option></select></div>
-        <div class="field full"><label>Transaction reference</label><input name="externalReference" minlength="3" required placeholder="Mobile money, bank, cheque or cash reference"><small>Enter the reference printed on the payment message or slip.</small></div>
-        <div class="field full"><label>Notes</label><textarea name="notes" placeholder="Add details that will help Credits confirm the loan payment">${settleFull?"Early full settlement - remaining principal only":""}</textarea></div>
-        <div class="field full record-file-field"><label>Receipt photo or PDF</label><input name="receipt" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" required><small>Credits verifies the evidence before updating your loan progress.</small></div>
+        <div class="field full"><label>Transaction reference</label><input name="externalReference" minlength="3" required placeholder="Payment reference from your slip or message"></div>
+        <div class="field full"><label>Notes</label><textarea name="notes" placeholder="Optional note for Credits">${settleFull?"Early full settlement":""}</textarea></div>
+        <div class="field full record-file-field"><label>Receipt photo or PDF</label><input name="receipt" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" required></div>
       </div>
       <div class="member-form-message" data-repay-message aria-live="polite"></div>
       <div class="form-actions">
@@ -207,7 +339,7 @@
     const maxAmount=Number(form.elements.maxAmount?.value||0);
     const fail=text=>{if(message){message.className="member-form-message error";message.textContent=text;}else toast(text);};
     if(!amount?.value||Number(amount.value)<1000)return fail("Enter a payment amount of at least UGX 1,000.");
-    if(maxAmount>0&&Number(amount.value)>maxAmount+0.005)return fail(settleFull?"Pay in full cannot exceed the remaining principal balance.":"Amount exceeds the remaining schedule balance.");
+    if(maxAmount>0&&Number(amount.value)>maxAmount+0.005)return fail(settleFull?"Pay in full cannot exceed remaining principal plus first-month interest.":"Amount exceeds the remaining schedule balance.");
     if(!reference?.value?.trim()||reference.value.trim().length<3)return fail("Enter the payment transaction reference.");
     if(!file)return fail("Choose a receipt photo or PDF before sending.");
     if(file.size>15*1024*1024)return fail("The receipt is larger than 15 MB.");
@@ -220,7 +352,7 @@
       if(!response.ok)throw new Error(result.error||"Loan payment failed");
       closeModal();
       await reload(result.status==="pending"
-        ?`${result.message||"Loan payment sent to Credits for verification."} Reference ${result.reference}.`
+        ?`${result.message||"Loan payment sent to the Credits Officer for approval."} Reference ${result.reference}.`
         :`Loan payment recorded. Receipt ${result.receiptNumber}. Remaining principal ${money(result.balance)}.`);
     }catch(error){
       if(button)button.disabled=false;
@@ -281,7 +413,11 @@
     if(!canActOnMember())return;
     document.querySelector("[data-member-action='apply-loan']")?.addEventListener("click",loanForm);
     document.querySelectorAll("[data-member-repay]").forEach(x=>x.addEventListener("click",()=>repayForm(x.dataset.memberRepay,x.dataset.settle==="1")));
-    document.querySelector("[data-loan-security]")?.addEventListener("change",event=>{const form=event.target.form,isCollateral=event.target.value==="collateral";form.querySelector("[data-collateral-fields]").hidden=!isCollateral;form.querySelector("[data-guarantor-fields]").hidden=isCollateral||!event.target.value;form.querySelectorAll("[data-collateral-fields] input,[data-collateral-fields] textarea").forEach(input=>{if(["collateralDescription","collateralValue","collateralOwner","collateralOwnerPhone"].includes(input.name))input.required=isCollateral;});});
+    const memberLoanForm=document.querySelector("[data-member-loan-form]");
+    if(memberLoanForm&&!memberLoanForm._loanSecurityState&&typeof bindLoanSecurityCalculator==="function"){
+      const candidates=[...memberLoanForm.querySelectorAll("[name=guarantorIds]")].map(input=>({id:input.value,savings:Number(input.dataset.guarantorSavings||0)}));
+      bindLoanSecurityCalculator(memberLoanForm,{borrowerSavings:Number(memberLoanForm.dataset.borrowerSavings||0),candidates});
+    }
     const syncOtherLoan=()=>{const select=document.querySelector("[data-loan-product]"),box=document.querySelector("[data-other-loan-fields]"),input=document.querySelector("[name=customProductName]");if(!select||!box||!input)return;const option=select.selectedOptions?.[0];const isOther=/^other loan$/i.test(option?.dataset.productName||option?.textContent||"");box.hidden=!isOther;input.required=isOther;if(!isOther)input.value="";};
     document.querySelector("[data-loan-product]")?.addEventListener("change",syncOtherLoan);syncOtherLoan();
     document.querySelectorAll("[data-member-action='deposit']").forEach(x=>x.addEventListener("click",depositForm));
@@ -289,8 +425,41 @@
     document.querySelector("[data-member-action='welfare-contribution']")?.addEventListener("click",welfareContributionForm);
     document.querySelector("[data-member-action='welfare-request']")?.addEventListener("click",welfareRequestForm);
     document.querySelectorAll("[data-member-invest]").forEach(x=>x.addEventListener("click",()=>investmentForm(x.dataset.memberInvest)));
-    document.querySelector("[data-member-loan-form]")?.addEventListener("submit",async e=>{e.preventDefault();const form=e.currentTarget,data=new FormData(form),message=form.querySelector("[data-loan-message]"),button=form.querySelector("button[type=submit]"),security=data.get("securityType"),guarantors=data.getAll("guarantorIds");const productOption=form.elements.productId?.selectedOptions?.[0];const isOther=/^other loan$/i.test(productOption?.dataset.productName||productOption?.textContent||"");if(data.get("borrowerDeclaration")!=="accepted"){message.textContent="You must read and accept the Kwagalana loan policy.";message.className="member-form-message error";return;}if(data.get("overdueDeclaration")!=="accepted"){message.textContent="Accept the overdue repayment declaration before submitting.";message.className="member-form-message error";return;}if(isOther&&!String(data.get("customProductName")||"").trim()){message.textContent="Type the loan product name for Other Loan.";message.className="member-form-message error";return;}if(security==="savings_and_shares"&&guarantors.length!==3){message.textContent="Choose three guarantors for savings and shares security.";message.className="member-form-message error";return;}if(security==="collateral"&&(!data.get("collateralDescription")||!data.get("collateralValue")||!data.get("collateralOwner")||!data.get("collateralOwnerPhone")||data.get("collateralOwnerConsent")!=="accepted")){message.textContent="Complete the collateral details, owner phone number and consent.";message.className="member-form-message error";return;}button.disabled=true;message.textContent="Checking the application and policy rules...";message.className="member-form-message sending";try{const response=await fetch("/api/loans",{method:"POST",credentials:"same-origin",body:data}),raw=await response.text();let result={};try{result=raw?JSON.parse(raw):{};}catch{}if(!response.ok)throw new Error(result.error||"Loan submission failed");closeModal();await reload(`Loan ${result.reference} submitted successfully.`);}catch(error){button.disabled=false;message.textContent=error.message;message.className="member-form-message error";}});
-    document.querySelector("[data-member-withdrawal]")?.addEventListener("submit",async e=>{e.preventDefault();try{const result=await api("/api/member/withdrawals",{method:"POST",body:JSON.stringify(Object.fromEntries(new FormData(e.currentTarget)))});closeModal();await reload(`Withdrawal ${result.reference} submitted.`);}catch(error){toast(error.message);}});
+    document.querySelector("[data-member-loan-form]")?.addEventListener("submit",async e=>{
+      e.preventDefault();
+      const form=e.currentTarget,data=new FormData(form),message=form.querySelector("[data-loan-message]"),button=form.querySelector("button[type=submit]"),security=data.get("securityType"),guarantors=data.getAll("guarantorIds");
+      const productOption=form.elements.productId?.selectedOptions?.[0];
+      const isOther=/^other loan$/i.test(productOption?.dataset.productName||productOption?.textContent||"");
+      if(data.get("borrowerDeclaration")!=="accepted"){message.textContent="You must read and accept the Kwagalana loan policy.";message.className="member-form-message error";return;}
+      if(data.get("overdueDeclaration")!=="accepted"){message.textContent="Accept the overdue repayment declaration before submitting.";message.className="member-form-message error";return;}
+      if(isOther&&!String(data.get("customProductName")||"").trim()){message.textContent="Type the loan product name for Other Loan.";message.className="member-form-message error";return;}
+      if(security==="savings"||security==="savings_and_shares"){
+        const amount=Number(data.get("amount")||0),borrowerSavings=Number(form.dataset.borrowerSavings||0);
+        const estimate=window.LoanSecurity.estimate(amount,borrowerSavings,[...form.querySelectorAll("[name=guarantorIds]")].map(input=>Number(input.dataset.guarantorSavings||0)));
+        const selectedCover=window.LoanSecurity.selectedCover([...form.querySelectorAll("[name=guarantorIds]:checked")].map(input=>Number(input.dataset.guarantorSavings||0)));
+        if(estimate.remaining>0&&guarantors.length===0){message.textContent=`Choose guarantors to cover the remaining ${money(estimate.remaining)} after your 75% savings security.`;message.className="member-form-message error";return;}
+        if(estimate.remaining>0&&selectedCover+0.005<estimate.remaining){message.textContent=`Selected guarantors cover ${money(selectedCover)}, but ${money(estimate.remaining)} is still needed.`;message.className="member-form-message error";return;}
+      }
+      if(security==="collateral"&&(!data.get("collateralDescription")||!data.get("collateralValue")||!data.get("collateralOwner")||!data.get("collateralOwnerPhone")||data.get("collateralOwnerConsent")!=="accepted")){message.textContent="Complete the collateral details, owner phone number and consent.";message.className="member-form-message error";return;}
+      button.disabled=true;message.textContent="Checking the application and policy rules...";message.className="member-form-message sending";
+      let result={};
+      try{
+        const response=await fetch("/api/loans",{method:"POST",credentials:"same-origin",body:data}),raw=await response.text();
+        try{result=raw?JSON.parse(raw):{};}catch{}
+        if(!response.ok)throw new Error(result.error||"Loan submission failed");
+        closeModal();await reload(`Loan ${result.reference} submitted successfully.`);
+      }catch(error){
+        button.disabled=false;
+        const eligibility=loanEligibilityFromError(error.message);
+        if(eligibility){
+          closeModal();
+          showLoanEligibilityCard({...eligibility,remaining:Number(result.remainingToCompleteTarget||eligibility.remaining||0),fiscalYear:result.fiscalYear||eligibility.fiscalYear,expected:Number(result.remainingToCompleteTarget||eligibility.remaining||0)+Number(C()?.financialYearProgress?.savingsPaid||C()?.pastYearProgress?.totalPaid||0),paid:Number(C()?.financialYearProgress?.savingsPaid||C()?.pastYearProgress?.totalPaid||0)});
+          return;
+        }
+        message.textContent=error.message;message.className="member-form-message error";
+      }
+    });
+    document.querySelector("[data-member-withdrawal]")?.addEventListener("submit",async e=>{e.preventDefault();try{const result=await api("/api/withdrawals",{method:"POST",body:JSON.stringify(Object.fromEntries(new FormData(e.currentTarget)))});closeModal();await reload(`Withdrawal ${result.reference} submitted.`);}catch(error){toast(error.message);}});
     document.querySelector("[data-member-deposit]")?.addEventListener("submit",submitMemberDeposit);
     document.querySelector("[data-member-repay-form]")?.addEventListener("submit",submitMemberRepayment);
     document.querySelector("[data-member-investment]")?.addEventListener("submit",e=>submitMultipart(e,"/api/member/investments","Investment request submitted:"));

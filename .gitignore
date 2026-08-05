@@ -2,10 +2,13 @@
 .env
 data/
 *.log
+.edge-smoke-profile/
 storage/uploads/*
 !storage/uploads/.gitkeep
-backups/
+backups/*
+!backups/.gitkeep
 storage/quarantine/*
+!storage/quarantine/.gitkeep
 private/
 scripts/_patch-*.js
 scripts/_member-*.js

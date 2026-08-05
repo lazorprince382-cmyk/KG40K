@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 "use strict";
 /**
- * Import db/railway-seed.sql into DATABASE_URL (Railway Postgres).
+ * Import database/dumps/railway-seed.sql into DATABASE_URL (Railway Postgres).
  * Usage: DATABASE_URL=... npm run db:import-railway
  */
 const { spawnSync } = require("child_process");
@@ -9,14 +9,14 @@ const fs = require("fs");
 const path = require("path");
 
 const databaseUrl = process.env.DATABASE_URL;
-const dumpPath = path.join(__dirname, "..", "db", "railway-seed.sql");
+const dumpPath = path.join(__dirname, "..", "database", "dumps", "railway-seed.sql");
 
 if (!databaseUrl) {
   console.error("Set DATABASE_URL to your Railway Postgres URL first.");
   process.exit(1);
 }
 if (!fs.existsSync(dumpPath)) {
-  console.error("Missing db/railway-seed.sql — export the local database first.");
+  console.error("Missing database/dumps/railway-seed.sql — export the local database first.");
   process.exit(1);
 }
 

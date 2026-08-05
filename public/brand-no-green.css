@@ -110,7 +110,18 @@ a,.link-button,.dept-link{color:#16558f!important}
 .loan-calculator-modal{width:min(940px,calc(100vw - 30px));max-height:92vh;overflow:auto}.loan-calculator-fields{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;padding:20px}.loan-calculator-fields label{display:grid;gap:7px;font-weight:700}.loan-calculator-fields input{min-height:44px;padding:9px 12px;border:1px solid #ccd8e4;border-radius:8px}.loan-calculator-actions{display:flex;gap:10px;padding:0 20px 18px}.loan-calculator-result{padding:0 20px 22px}.loan-calculator-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px}.loan-calculator-summary span{padding:13px;border-radius:10px;background:#f1f5f9;color:#607084}.loan-calculator-summary strong{display:block;margin-top:4px;color:#082e57;font-size:18px}.member-active-loans{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:15px;margin:16px 0}.member-loan-progress header{display:flex;justify-content:space-between;gap:12px}.member-loan-progress h3{margin:5px 0 12px}.member-loan-progress-bar{height:10px;border-radius:99px;background:#e8eef4;overflow:hidden}.member-loan-progress-bar i{display:block;height:100%;background:linear-gradient(90deg,#0b4b86,#d89b00);border-radius:inherit}.member-loan-progress-meta,.member-next-repayment{display:flex;justify-content:space-between;gap:12px;margin-top:8px}.member-next-repayment{margin-top:15px;padding-top:12px;border-top:1px solid #e2e8f0}.member-next-repayment span{color:#708096}.member-next-repayment strong{display:block;margin-top:3px;color:#082e57}
 @media(max-width:720px){.loan-calculator-fields,.loan-calculator-summary{grid-template-columns:1fr}.login-form-logo{width:96px!important;height:96px!important;margin-bottom:14px!important}}
 
-.credits-row-progress{margin-top:12px;max-width:430px}.credits-row-progress>div{display:flex;justify-content:space-between;color:#607084}.credits-row-progress>i{display:block;height:8px;margin:5px 0;border-radius:20px;background:#e5ebf1;overflow:hidden}.credits-row-progress>i>u{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#0b4b86,#d89b00)}.credits-row-progress small{color:#082e57!important}
+.loan-security-summary{margin:0 0 12px;padding:12px 14px;border:1px solid #d7e0ea;border-left:4px solid #d89b00;border-radius:10px;background:#f8fafc;text-align:left}
+.loan-security-summary strong{display:block;color:#082e57;margin-bottom:4px}
+.loan-security-summary p{margin:4px 0 0;color:#4b5d73;font-size:13px;line-height:1.45}
+.loan-security-summary b{color:#082e57}
+.group-member-option em{display:block;margin-top:2px;color:#607084;font-size:12px;font-style:normal}
+.group-member-option.guarantor-unavailable{opacity:.62;background:#f8fafc}
+.group-member-option.guarantor-unavailable em{color:#a15c12}
+.exec-loan-actions{max-width:390px;display:flex;align-items:center;justify-content:flex-end;gap:5px;flex-wrap:wrap}
+.exec-loan-actions>b{width:100%;font-size:14px;text-align:right}
+.loan-decision-actions{justify-content:flex-start;gap:8px;margin-top:12px}
+@media(max-width:520px){.group-member-option strong{font-size:13px}.group-member-option span,.group-member-option em{font-size:11px}.exec-loan-actions>b{text-align:left}}
+
 
 .exec-dept-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}.exec-dept-actions .primary{border:0;background:#082e57;color:#fff;padding:9px 12px;border-radius:8px;font-weight:700;cursor:pointer}.credits-borrower-meta{margin:4px 0 8px;color:#4b5d73}.credits-active-loan .credits-loan-actions{display:flex;flex-wrap:wrap;gap:8px}.member-loan-totals{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:12px;color:#607084}.member-loan-totals span{padding:10px 12px;border:1px solid #e5edf5;border-radius:10px;background:#f8fafc}.member-loan-totals strong{display:block;margin-top:4px;color:#082e57}.member-loan-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}.member-loan-fee-note{display:block;margin-top:10px;color:#708096}
 
@@ -137,9 +148,20 @@ a,.link-button,.dept-link{color:#16558f!important}
   .login-brand{min-height:auto!important;padding:14px 16px 16px!important;gap:0!important;justify-content:flex-start!important}
   .login-brand-identity{transform:none!important;gap:0!important;margin:0!important}
   .login-brand-identity>img,.login-message,.login-features,.login-trust,.login-footer,.login-language{display:none!important}
-  .login-brand-identity .login-organization-heading{display:flex!important;font-size:clamp(22px,7.2vw,34px)!important}
-  .login-organization-heading.login-form-heading{font-size:clamp(20px,6.4vw,30px)!important;margin:0 0 14px!important}
+  .login-brand-identity .login-organization-heading{display:flex!important;font-size:clamp(16px,5.2vw,24px)!important}
+  .login-organization-heading.login-form-heading{font-size:clamp(15px,4.8vw,22px)!important;margin:0 0 10px!important}
+  .login-form-logo{width:84px!important;height:84px!important;margin-bottom:10px!important}
+  .login-box h2{font-size:22px!important;letter-spacing:-.4px!important}
+  .login-box>p{margin-bottom:20px!important;font-size:13px!important}
   .login-panel{padding-top:28px!important;padding-bottom:28px!important}
+}
+@media(max-width:520px){
+  .login-brand-identity .login-organization-heading{font-size:clamp(14px,4.6vw,18px)!important}
+  .login-organization-heading.login-form-heading{font-size:clamp(14px,4.4vw,18px)!important;margin:0 0 8px!important}
+  .login-form-logo{width:76px!important;height:76px!important;margin-bottom:8px!important}
+  .login-box h2{font-size:20px!important}
+  .login-box>p{font-size:12px!important;margin-bottom:16px!important}
+  .login-box .field label{font-size:13px!important}
 }
 
 /* Keep member guarantor decision controls readable and aligned. */

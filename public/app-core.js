@@ -53,10 +53,10 @@ const rolePages = {
     "credits-charges","credits-reports","credits-analytics","credits-documents","credits-notifications","messages","settings"],
   "Legal Officer": ["dashboard","settings"],
   "Welfare Officer": ["dashboard","settings"],
-  "Executive Officer": ["dashboard","messages","members","departments","executive-finance","executive-credits","executive-investments","executive-welfare","executive-legal","executive-audit","executive-supervisory","executive-approvals","executive-meetings","executive-projects","executive-reports","executive-analytics","notifications","executive-documents","settings"],
+  "Executive Officer": ["dashboard","messages","members","departments","users","executive-finance","executive-credits","executive-investments","executive-welfare","executive-legal","executive-audit","executive-supervisory","executive-approvals","executive-meetings","executive-projects","executive-reports","executive-analytics","notifications","executive-documents","settings"],
   "Supervisory Officer": ["dashboard","settings"]
 };const pageMeta = {
-  dashboard: ["Organization overview", "Dashboard"], departments: ["Organization structure", "Departmental dashboards"], messages: ["Communication", "Messages"], users: ["Access control", "User accounts"], members: ["People", "Members"], savings: ["Credits", "Savings"],
+  dashboard: ["Organization overview", "Dashboard"], departments: ["Organization structure", "Departmental dashboards"], messages: ["Communication", "Messages"], users: ["System accounts", "System accounts"], members: ["People", "Members"], savings: ["Credits", "Savings"],
   loans: ["Credit", "Loans"], withdrawals: ["Finance", "Withdrawals"], approvals: ["Workflow", "Approvals"],
   reports: ["Insights", "Reports"], audit: ["Compliance", "Audit log"], settings: ["Administration", "System settings"],
   "executive-finance":["Department summary","Finance"],"executive-credits":["Department summary","Credits (SACCO)"],
@@ -192,7 +192,26 @@ function save() {}
 function money(value) { return `UGX ${Math.abs(Number(value)).toLocaleString("en-US")}`; }
 function initials(name) { return name.split(" ").map(part => part[0]).slice(0, 2).join("").toUpperCase(); }
 function profileImage(userId,name,hasPhoto) { return hasPhoto?`<img class="profile-avatar-image" src="/api/users/${userId}/profile-photo?v=${state.profilePhotoVersion||0}" alt="${escapeHtml(name)}">`:initials(name); }
-function status(value) { return `<span class="status ${value}">${value}</span>`; }
+const STATUS_LABELS = {
+  pending:"Pending", review:"Review", approved:"Approved", active:"Active", rejected:"Rejected",
+  overdue:"Overdue", suspended:"Suspended", draft:"Draft", paid:"Paid", completed:"Completed",
+  verified:"Verified", success:"Success", correction:"Correction",
+  "pending-guarantors":"Guarantors", "officer-review":"Officer", "committee-review":"Committee",
+  "finance-verification":"Finance", "executive-authorization":"Executive", "ready-disbursement":"Disburse",
+  pending_finance_review:"Pending", information_requested:"Info requested"
+};
+function statusLabel(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "—";
+  return STATUS_LABELS[raw] || raw.replaceAll("-", " ").replaceAll("_", " ");
+}
+function status(value) {
+  const raw = String(value || "").trim();
+  return `<span class="status ${escapeHtml(raw)}" title="${escapeHtml(statusLabel(raw))}">${escapeHtml(statusLabel(raw))}</span>`;
+}
+function displayRef(value) {
+  return String(value || "").replace(/^([A-Za-z0-9]+)-/, (_, prefix) => `${prefix}\u2011`);
+}
 function actor() { return state.user?.full_name || "Organization User"; }
 function canWrite() { return state.role!=="Auditor"; }
 function addAudit() {}
@@ -256,7 +275,12 @@ async function init() {
 function executiveWorkspaceRole() {
   return ({credits:"Credits Officer",finance:"Finance Officer",investment:"Investment Officer",welfare:"Welfare Officer",legal:"Legal Officer",audit:"Auditor",supervisory:"Supervisory Officer"})[state.executiveWorkspace]||state.role;
 }
-function isExecutiveReadOnly(){return state.role==="Executive Officer"&&Boolean(state.executiveWorkspace);}
+function isExecutiveReadOnly() {
+  return state.role==="Executive Officer"&&Boolean(state.executiveWorkspace);
+}
+function canCreditsDisburse(){
+  return state.role==="Credits Officer"&&!isExecutiveReadOnly()&&Boolean(state.credits?.access?.canEdit);
+}
 function render() {
   const workspaceRole=executiveWorkspaceRole();
   const allowed = rolePages[workspaceRole]||rolePages[state.role];
@@ -358,11 +382,13 @@ function creditsSidebar() {
     "credits-reports":"reports","credits-analytics":"reports","credits-documents":"file","credits-notifications":"bell"};
   const c=state.credits,applicationBadge=c?.stats?.pendingApplications||0,recoveryBadge=c?.stats?.overdueLoans||0,activeBadge=c?.stats?.activeLoans||0;
   const repaymentBadge=(c?.transactions||[]).filter(t=>t.type==="Loan repayment"&&t.status==="pending").length;
+  const dangerBadge=(c?.loans||[]).filter(l=>l.inDangerPeriod&&Number(l.balance)>0).length;
   const pages=rolePages[executiveWorkspaceRole()]||rolePages[state.role];
   const sidebarPages=new Set(["dashboard","messages","credits-members","credits-savings","credits-applications","credits-approvals","credits-active","credits-disbursement","credits-receipts","credits-repayments","credits-guarantors","credits-recovery","credits-reports","credits-documents","credits-notifications","settings"]);
+  if(isExecutiveReadOnly()) sidebarPages.delete("credits-disbursement");
   return `<aside class="sidebar executive-sidebar credits-sidebar" id="sidebar">
     <div class="executive-brand"><div class="executive-crest credits-crest">${icons.loans}</div><div><strong>KASANGATI G40<br>KWAGALANA</strong><span>SACCO - CREDITS DEPARTMENT</span></div></div>
-    <nav class="nav executive-nav">${pages.filter(page=>sidebarPages.has(page)).map(page=>`<button class="nav-item ${state.page===page?"active":""}" data-page="${page}">${icons[iconMap[page]||page]||icons.dashboard}<span>${labels[page]}</span>${page==="credits-applications"&&applicationBadge?`<b class="nav-badge">${applicationBadge}</b>`:page==="credits-active"&&activeBadge?`<b class="nav-badge">${activeBadge}</b>`:page==="credits-repayments"&&repaymentBadge?`<b class="nav-badge">${repaymentBadge}</b>`:page==="credits-recovery"&&recoveryBadge?`<b class="nav-badge">${recoveryBadge}</b>`:""}</button>`).join("")}</nav>
+    <nav class="nav executive-nav">${pages.filter(page=>sidebarPages.has(page)).map(page=>`<button class="nav-item ${state.page===page?"active":""}" data-page="${page}">${icons[iconMap[page]||page]||icons.dashboard}<span>${labels[page]}</span>${page==="credits-applications"&&applicationBadge?`<b class="nav-badge">${applicationBadge}</b>`:page==="credits-active"&&activeBadge?`<b class="nav-badge">${activeBadge}</b>`:page==="credits-repayments"&&repaymentBadge?`<b class="nav-badge">${repaymentBadge}</b>`:page==="credits-recovery"&&(recoveryBadge||dangerBadge)?`<b class="nav-badge">${recoveryBadge+dangerBadge}</b>`:""}</button>`).join("")}</nav>
     <div class="sidebar-bottom">${state.executiveWorkspace?`<button class="executive-quick" data-executive-workspace-exit>${icons.arrowUp}<span>Back to Executive</span></button>`:`<button class="executive-quick" data-action="credits-quick">${icons.arrowUp}<span>Quick Actions</span><b>&gt;</b></button>`}
       <div class="sidebar-user"><div class="avatar blue">${initials(actor())}</div><div><div class="user-name">${actor()}</div><div class="user-role">${state.executiveWorkspace?"Executive read-only view":"Credits Department"}</div></div></div></div>
   </aside>`;
@@ -386,16 +412,16 @@ function financeSidebar() {
   </aside>`;
 }
 function executiveSidebar() {
-  const labels={dashboard:"Dashboard",messages:"Messages",members:"Members",departments:"Departments","executive-finance":"Finance","executive-credits":"Credits (SACCO)",
+  const labels={dashboard:"Dashboard",messages:"Messages",members:"Members",departments:"Departments",users:"System accounts","executive-finance":"Finance","executive-credits":"Credits (SACCO)",
     "executive-investments":"Investments","executive-welfare":"Welfare","executive-legal":"Legal","executive-audit":"Audit",
     "executive-supervisory":"Supervisory","executive-approvals":"Approvals","executive-meetings":"Meetings","executive-projects":"Projects",
     "executive-reports":"Reports","executive-analytics":"Analytics",notifications:"Notifications","executive-documents":"Documents",settings:"Settings"};
   const iconMap={"executive-finance":"wallet","executive-credits":"loans","executive-investments":"reports","executive-welfare":"users",
     "executive-legal":"file","executive-audit":"audit","executive-supervisory":"shield","executive-approvals":"approvals",
     "executive-meetings":"clock","executive-projects":"building","executive-reports":"reports","executive-analytics":"reports",
-    notifications:"bell","executive-documents":"file"};
+    notifications:"bell","executive-documents":"file",users:"lock"};
   const pending=state.executive?.stats?.pendingApprovals||((state.executive?.approvals||[]).length+((state.executive?.documents||[]).filter(d=>d.status==="pending_executive").length));
-  const sidebarPages=new Set(["dashboard","messages","members","departments","executive-approvals","executive-meetings","executive-projects","executive-reports","executive-analytics","notifications","executive-documents","settings"]);
+  const sidebarPages=new Set(["dashboard","messages","members","departments","users","executive-approvals","executive-meetings","executive-projects","executive-reports","executive-analytics","notifications","executive-documents","settings"]);
   return `<aside class="sidebar executive-sidebar" id="sidebar">
     <div class="executive-brand"><div class="executive-crest">${icons.shield}</div><div><strong>KASANGATI G40<br>KWAGALANA</strong><span>Executive Department</span></div></div>
     <nav class="nav executive-nav">${rolePages[state.role].filter(page=>sidebarPages.has(page)).map(page=>`<button class="nav-item ${state.page===page?"active":""}" data-page="${page}">${icons[iconMap[page]||page]||icons.dashboard}<span>${labels[page]}</span>${page==="executive-approvals"&&pending?`<b class="nav-badge">${pending}</b>`:""}</button>`).join("")}</nav>
@@ -413,7 +439,7 @@ function subtitle() {
       state.role==="Executive Officer"?"Strategic organization health, performance, alerts and major decisions.":"A central view of verified organization information and work requiring attention.",
     departments: "Only departments granted by your assignment and leadership level are shown.",
     messages: "Securely connect with members, departments and leadership.",
-    users: "Create secure login accounts and assign role-based access.",
+    users: "Reset passwords and manage secure login accounts for staff and members.",
     members: "Manage member records, status and account information.",
     savings: "Track contributions, deposits and member savings balances.",
     loans: "Manage applications, approvals and repayment performance.",
@@ -713,7 +739,7 @@ function executiveDashboardView() {
         ["Contracts awaiting review",e.legal.contracts],["Cases open",e.legal.open_cases],["Policies pending",e.legal.policies],
         ["Compliance alerts",e.legal.alerts]])}
       ${executiveHealthCard("Supervisory","executive-supervisory","shield",[
-        ["Department performance","84%"],["Recommendations",e.supervisory.recommendations],
+        ["Department performance",`${e.performance.supervisory}%`],["Recommendations",e.supervisory.recommendations],
         ["Pending follow-ups",e.supervisory.followups],["Departments below target",e.supervisory.departmentsBelowTarget]])}
     </div>
     <div class="exec-bottom-grid">${executiveNotificationsWidget(e.notifications.slice(0,6))}${executiveCalendarWidget(e.meetings.slice(0,7))}</div>
@@ -725,8 +751,9 @@ function executiveStatCard(label,value,icon,target,note,index) {
 }
 function executivePerformanceWidget(e) {
   const labels={executive:"Executive",finance:"Finance",credits:"Credits",investment:"Investment",welfare:"Welfare",legal:"Legal",audit:"Audit",supervisory:"Supervisory"};
-  return `<section class="exec-panel exec-performance"><div class="exec-panel-head"><div><h3>Organization Performance</h3><p>Department achievement against target</p></div><button data-executive-page="departments">View departments ></button></div>
-    <div class="exec-performance-list">${Object.entries(e.performance).map(([key,value])=>`<div><div><span>${labels[key]||key}</span><strong>${value>0?`${value}%`:"Not scored"}</strong></div><div class="exec-track"><i class="${value>0&&value<80?"low":value>0&&value<88?"watch":""}" style="width:${Math.max(0,value)}%"></i></div></div>`).join("")}</div></section>`;
+  const sources=e.performanceSource||{};
+  return `<section class="exec-panel exec-performance"><div class="exec-panel-head"><div><h3>Organization Performance</h3><p>Live operational scores — official assessments override when recorded</p></div><button data-executive-page="departments">View departments ></button></div>
+    <div class="exec-performance-list">${Object.entries(e.performance).map(([key,value])=>{const score=Number(value)||0,live=sources[key]==="live";return `<div><div><span>${labels[key]||key}</span><strong>${score}%${live?`<em class="exec-perf-live">Live</em>`:""}</strong></div><div class="exec-track"><i class="${score<80?"low":score<88?"watch":""}" style="width:${Math.max(2,score)}%"></i></div></div>`;}).join("")}</div></section>`;
 }
 function executiveApprovalWidget(items) {
   const pendingDocuments=(state.executive?.documents||[]).filter(d=>d.status==="pending_executive");
@@ -734,18 +761,33 @@ function executiveApprovalWidget(items) {
     ...pendingDocuments.map(d=>({id:`doc-${d.id}`,department:d.department||"Legal",title:d.title,amount:null,activityType:"document-publication",documentId:d.id,isDocument:true})),
     ...items
   ];
+  const row=item=>{
+    if(item.isDocument){
+      return `<div><div class="exec-approval-copy"><span class="exec-type">${escapeHtml(item.department)}</span><strong>${escapeHtml(item.title)}</strong><small>Document publication</small></div><div><button class="approve" data-document-publication="${item.documentId}" data-decision="approve">Publish</button><button class="reject" data-document-publication="${item.documentId}" data-decision="reject">Return</button><button data-executive-page="executive-approvals">Open</button></div></div>`;
+    }
+    if(item.recordType==="loan"){
+      const loanId=item.loanId||item.id;
+      const canDecide=Boolean(item.canCurrentUserDecide)||(item.pendingReviewers||[]).some(r=>Number(r.userId)===Number(state.user?.id));
+      return `<div><div class="exec-approval-copy"><span class="exec-type">${escapeHtml(item.department)}</span><strong>${escapeHtml(item.title)}</strong><small>${item.amount?money(item.amount):"Loan authorization"}</small></div><div>${canDecide?`<button type="button" class="approve" data-exec-loan-decision="${loanId}" data-decision="authorize">Approve</button><button type="button" class="reject" data-exec-loan-decision="${loanId}" data-decision="reject">Reject</button>`:`<span class="maker-checker-note">Pending your committee vote</span>`}<button type="button" data-loan-detail-id="${loanId}">Details</button></div></div>`;
+    }
+    return `<div><div class="exec-approval-copy"><span class="exec-type">${escapeHtml(item.department)}</span><strong>${escapeHtml(item.title)}</strong><small>${item.amount?money(item.amount):String(item.activityType||"").replaceAll("-"," ")}</small></div><div><button class="approve" data-exec-decision="${item.id}" data-decision="approve">Approve</button><button class="reject" data-exec-decision="${item.id}" data-decision="reject">Reject</button><button data-exec-details="${item.id}">Details</button></div></div>`;
+  };
   return `<section class="exec-panel exec-approval-widget"><div class="exec-panel-head"><div><h3>Pending Approvals</h3><p>Major decisions requiring authority</p></div><button data-executive-page="executive-approvals">View all ></button></div>
-    <div class="exec-approval-list">${merged.length?merged.slice(0,6).map(item=>item.isDocument?`<div><div class="exec-approval-copy"><span class="exec-type">${escapeHtml(item.department)}</span><strong>${escapeHtml(item.title)}</strong><small>Document publication</small></div><div><button class="approve" data-document-publication="${item.documentId}" data-decision="approve">Publish</button><button class="reject" data-document-publication="${item.documentId}" data-decision="reject">Return</button><button data-executive-page="executive-approvals">Open</button></div></div>`:`<div><div class="exec-approval-copy"><span class="exec-type">${item.department}</span><strong>${escapeHtml(item.title)}</strong><small>${item.amount?money(item.amount):item.activityType.replaceAll("-"," ")}</small></div><div><button class="approve" data-exec-decision="${item.id}" data-decision="approve">Approve</button><button class="reject" data-exec-decision="${item.id}" data-decision="reject">Reject</button><button data-exec-details="${item.id}">Details</button></div></div>`).join(""):`<div class="exec-empty">No executive approvals are waiting.</div>`}</div></section>`;
+    <div class="exec-approval-list">${merged.length?merged.slice(0,6).map(row).join(""):`<div class="exec-empty">No executive approvals are waiting.</div>`}</div></section>`;
 }
 function executiveActivityWidget(items) {
   const verbs={finance:"recorded finance activity",credits:"updated the loan portfolio",investment:"updated a project",legal:"reviewed a legal record",welfare:"reviewed welfare support",supervisory:"submitted an assurance update",executive:"updated an executive record"};
   return `<section class="exec-panel"><div class="exec-panel-head"><div><h3>Department Activity</h3><p>Latest verified updates</p></div><button data-executive-page="departments">All activity &gt;</button></div><div class="exec-activity-feed">${items.map((item,i)=>`<div><i class="dot-${i%6}"></i><span><strong>${item.department}</strong> ${verbs[item.departmentCode]||"updated an activity"}<small>${escapeHtml(item.title)} - ${new Date(item.createdAt).toLocaleDateString()}</small></span></div>`).join("")}</div></section>`;
 }
 function executiveFinancialWidget(e) {
-  const max=Math.max(...e.monthly.flatMap(m=>[m.income,m.expenses]));
+  const months=e.monthly||[];
+  const max=Math.max(...months.flatMap(m=>[m.income,m.expenses]),1);
+  const net=Number(e.stats?.netBalance||0);
+  const cashFlowLabel=net>0?"Positive":net<0?"Negative":"Balanced";
+  const cashFlowClass=net>=0?"positive":"negative";
   return `<section class="exec-panel exec-financial"><div class="exec-panel-head"><div><h3>Financial Overview</h3><p>Monthly income, expenses and cash flow (UGX millions)</p></div><button data-executive-page="executive-finance">Full summary ></button></div>
-    <div class="exec-finance-summary"><span>Net balance<strong>${money(e.stats.netBalance)}</strong></span><span>Budget used<strong>${e.finance.budgetUtilization}%</strong></span><span>Cash flow<strong class="positive">Positive</strong></span></div>
-    <div class="exec-bar-chart">${e.monthly.map(m=>`<div><div class="exec-bars"><i style="height:${m.income/max*100}%"></i><i class="expense" style="height:${m.expenses/max*100}%"></i></div><span>${m.month}</span></div>`).join("")}</div><div class="exec-legend"><span><i></i>Income</span><span><i class="expense"></i>Expenses</span></div></section>`;
+    <div class="exec-finance-summary"><span>Net balance<strong>${money(e.stats.netBalance)}</strong></span><span>Budget used<strong>${e.finance.budgetUtilization}%</strong></span><span>Cash flow<strong class="${cashFlowClass}">${cashFlowLabel}</strong></span></div>
+    <div class="exec-bar-chart">${months.length?months.map(m=>`<div><div class="exec-bars"><i style="height:${m.income/max*100}%"></i><i class="expense" style="height:${m.expenses/max*100}%"></i></div><span>${m.month}</span></div>`).join(""):`<div class="exec-empty">No monthly history yet.</div>`}</div><div class="exec-legend"><span><i></i>Income</span><span><i class="expense"></i>Expenses</span></div></section>`;
 }
 function executiveHealthCard(title,target,icon,rows) {
   return `<button class="exec-health-card" data-executive-page="${target}"><div class="exec-health-head"><span>${icons[icon]}</span><h3>${title}</h3><b>&gt;</b></div>${rows.map(([label,value])=>`<div class="exec-health-row"><span>${label}</span><strong>${value}</strong></div>`).join("")}</button>`;
@@ -766,25 +808,24 @@ function executiveQuickPanel() {
 function executiveDepartmentsView() {
   const e=state.executive;
   const modules=[
-    ["executive","Executive Department","Leads strategy, authority and organization-wide decisions","Pending approvals",e.stats.pendingApprovals,"Upcoming meetings",e.stats.upcomingMeetings,e.performance.executive,"dashboard","blue",null],
-    ["finance","Finance Department","Manages organization finances and budgets","Income this month",money(e.stats.organizationIncome),"Expenses",money(e.stats.organizationExpenditure),e.performance.finance,"executive-finance","green","finance"],
-    ["credits","Credits Department (SACCO)","Manages savings, loans and credit services","Total savings",money(e.stats.totalSavings),"Outstanding loans",money(e.stats.outstandingLoans),e.performance.credits,"executive-credits","blue","credits"],
-    ["investment","Investment Department","Manages ventures and income-generating projects","Active projects",e.investment.running,"Expected returns",money(e.investment.expected_return),e.performance.investment,"executive-investments","violet","investment"],
-    ["welfare","Welfare Department","Handles member welfare and social support","Fund balance",money(e.welfare.fundBalance),"Pending requests",e.welfare.pending,e.performance.welfare,"executive-welfare","orange","welfare"],
-    ["legal","Legal Department","Contracts, policies, disputes and compliance","Active cases",e.legal.open_cases,"Contracts under review",e.legal.contracts,e.performance.legal,"executive-legal","red","legal"],
-    ["audit","Audit Department","Audits records and ensures financial integrity","Open audit issues",e.audit.open,"Compliance score",`${e.audit.compliance}%`,e.performance.audit,"executive-audit","teal","audit"],
-    ["supervisory","Supervisory Department","Supervises departments and ensures accountability","Pending follow-ups",e.supervisory.followups,"Department compliance",`${e.performance.supervisory}%`,e.performance.supervisory,"executive-supervisory","amber","supervisory"]
+    ["executive","Executive Department","Strategy and authority","Pending approvals",e.stats.pendingApprovals,"Upcoming meetings",e.stats.upcomingMeetings,e.performance.executive,"dashboard","blue",null],
+    ["finance","Finance Department","Budgets and finances","Income this month",money(e.stats.organizationIncome),"Expenses",money(e.stats.organizationExpenditure),e.performance.finance,"executive-finance","green","finance"],
+    ["credits","Credits Department (SACCO)","Savings, loans and credit","Total savings",money(e.stats.totalSavings),"Outstanding loans",money(e.stats.outstandingLoans),e.performance.credits,"executive-credits","blue","credits"],
+    ["investment","Investment Department","Ventures and projects","Active projects",e.investment.running,"Expected returns",money(e.investment.expected_return),e.performance.investment,"executive-investments","violet","investment"],
+    ["welfare","Welfare Department","Member welfare support","Fund balance",money(e.welfare.fundBalance),"Pending requests",e.welfare.pending,e.performance.welfare,"executive-welfare","orange","welfare"],
+    ["legal","Legal Department","Contracts and compliance","Active cases",e.legal.open_cases,"Contracts under review",e.legal.contracts,e.performance.legal,"executive-legal","red","legal"],
+    ["audit","Audit Department","Financial integrity","Open audit issues",e.audit.open,"Compliance score",`${Math.round(Number(e.audit.compliance)||0)}%`,e.performance.audit,"executive-audit","teal","audit"],
+    ["supervisory","Supervisory Department","Oversight and accountability","Pending follow-ups",e.supervisory.followups,"Department compliance",`${e.performance.supervisory}%`,e.performance.supervisory,"executive-supervisory","amber","supervisory"]
   ];
   const totalDepartments=e.departments.length,activeDepartments=e.departments.length;
-  const assessedScores=modules.map(module=>Number(module[7]||0)).filter(score=>score>0);
-  const performingWell=assessedScores.filter(score=>score>=85).length,needAttention=assessedScores.filter(score=>score<85).length;
-  const awaitingScore=totalDepartments-assessedScores.length;
+  const scores=modules.map(module=>Number(module[7]||0));
+  const performingWell=scores.filter(score=>score>=85).length,needAttention=scores.filter(score=>score<85).length;
   return `<div class="exec-dept-top"><div class="exec-mini-stat"><span>${icons.building}</span><div><small>Total Departments</small><strong>${totalDepartments}</strong><em>Active organization arms</em></div></div>
     <div class="exec-mini-stat"><span class="green">${icons.check}</span><div><small>Active Departments</small><strong>${activeDepartments}</strong><em>${activeDepartments===totalDepartments?"100% active":`${totalDepartments-activeDepartments} inactive`}</em></div></div>
     <div class="exec-mini-stat"><span class="violet">${icons.reports}</span><div><small>Performing Well</small><strong>${performingWell}</strong><em>85% or above</em></div></div>
-    <div class="exec-mini-stat"><span class="orange">${icons.info}</span><div><small>Need Attention</small><strong>${needAttention}</strong><em>Below 85%${awaitingScore?` - ${awaitingScore} not scored`:""}</em></div></div></div>
+    <div class="exec-mini-stat"><span class="orange">${icons.info}</span><div><small>Need Attention</small><strong>${needAttention}</strong><em>Below 85% target</em></div></div></div>
     <div class="exec-department-layout"><div class="exec-department-cards">${modules.map(m=>`<article class="exec-department-card"><div class="exec-dept-title"><span class="${m[9]}">${icons[departmentIcon(m[0])]}</span><div><h3>${m[1]}</h3><p>${m[2]}</p></div></div><div class="exec-dept-values"><div><small>${m[3]}</small><strong>${m[4]}</strong><small>${m[5]}</small><strong>${m[6]}</strong></div><div class="exec-ring" style="--score:${m[7]}"><span>${m[7]}%</span></div></div><div class="exec-dept-actions"><button data-executive-page="${m[8]}">View summary <b>&gt;</b></button></div></article>`).join("")}</div>${executivePerformanceWidget(e)}</div>
-    <div class="exec-panel exec-dept-chart"><div class="exec-panel-head"><div><h3>Department Performance Chart</h3><p>Verified performance score by organizational arm</p></div></div><div class="exec-wide-bars">${modules.map(m=>`<div><div><i style="height:${Math.max(2,Number(m[7]||0))}%"></i></div><span>${m[0]}${m[7]>0?` - ${m[7]}%`:" - N/A"}</span></div>`).join("")}</div></div>`;
+    <div class="exec-panel exec-dept-chart"><div class="exec-panel-head"><div><h3>Department Performance Chart</h3><p>Live scores from current operations</p></div></div><div class="exec-wide-bars">${modules.map(m=>`<div><div><i style="height:${Math.max(2,Number(m[7]||0))}%"></i></div><span>${m[0]} - ${m[7]}%</span></div>`).join("")}</div></div>`;
 }
 function executiveModuleView(module) {
   const e=state.executive;
@@ -830,9 +871,13 @@ function executiveApprovalsView() {
   const pendingDocuments=(state.executive.documents||[]).filter(d=>d.status==="pending_executive");
   const waitingCount=items.length+pendingDocuments.length;
   const groups=[["Large Loans","large-loan"],["Document Publications","documents"],["Department Budgets","finance-budget"],["Large Payments","finance-payment"],["Investment Proposals","investment-proposal"],["Major Welfare Requests","welfare-request"],["Contract Signing","legal-contract"],["Policy Changes","policy"]];
-  const newestAt=list=>list.reduce((max,item)=>{const t=new Date(item.createdAt||item.updatedAt||0).getTime();return t>max?t:max;},0);
-  const byNewest=(a,b)=>newestAt(b)-newestAt(a)||Number(b.id||b.loanId||0)-Number(a.id||a.loanId||0);
-  const row=x=>x.recordType==="loan"?`<div class="exec-approval-row executive-loan-approval"><div><span>${x.reference} - ${x.department}</span><strong>${escapeHtml(x.title)}</strong><p>${escapeHtml(x.description||"")}</p><small>${x.nextReviewer?`Next Executive reviewer: ${escapeHtml(x.nextReviewer.fullName)}${x.nextReviewer.isChair?" (Chairperson Tabula - final)":""}. Credits already cleared this loan.`:`All Executive approvals complete. Credits already cleared this loan.`}</small></div><div>${x.amount?`<b>${money(x.amount)}</b>`:""}${status(x.status)}<button data-loan-detail-id="${x.loanId||x.id}">View details</button>${x.canCurrentUserDecide?`<button class="approve" data-exec-loan-decision="${x.loanId}" data-decision="authorize">Approve loan</button><button class="more" data-exec-loan-decision="${x.loanId}" data-decision="return">Request information</button><button class="reject" data-exec-loan-decision="${x.loanId}" data-decision="reject">Reject</button>`:`<span class="maker-checker-note">${x.nextReviewer?`Waiting for ${escapeHtml(x.nextReviewer.fullName)}`:`Queued`}</span>`}</div></div>`:`<div class="exec-approval-row"><div><span>${x.reference} - ${x.department}</span><strong>${escapeHtml(x.title)}</strong><p>${escapeHtml(x.description||"")}${x.assignedTo?` - Reviewer: ${escapeHtml(x.assignedTo)}`:""}</p></div><div>${x.amount?`<b>${money(x.amount)}</b>`:""}${status(x.status)}<button data-exec-details="${x.id}">View details</button><button data-exec-reviewer="${x.id}">Assign reviewer</button><button class="approve" data-exec-decision="${x.id}" data-decision="approve">Approve</button><button class="more" data-exec-decision="${x.id}" data-decision="more_information">Request information</button><button class="reject" data-exec-decision="${x.id}" data-decision="reject">Reject</button></div></div>`;
+  const itemTime=item=>new Date(item?.createdAt||item?.updatedAt||0).getTime()||0;
+  const newestAt=list=>Array.isArray(list)&&list.length?list.reduce((max,item)=>Math.max(max,itemTime(item)),0):0;
+  const byNewest=(a,b)=>itemTime(b)-itemTime(a)||Number(b.id||b.loanId||0)-Number(a.id||a.loanId||0);
+  const row=x=>{
+    const canDecide=Boolean(x.canCurrentUserDecide)||(x.recordType==="loan"&&(x.pendingReviewers||[]).some(r=>Number(r.userId)===Number(state.user?.id)));
+    return x.recordType==="loan"?`<div class="exec-approval-row executive-loan-approval"><div><span>${x.reference} - ${x.department}</span><strong>${escapeHtml(x.title)}</strong><p>${escapeHtml(x.description||"")}</p><small>${x.approvalProgress?`${x.approvalProgress.approvedCount}/${x.approvalProgress.requiredCount} Executive approvals recorded. Any remaining Executive member may decide. Credits already cleared this loan.`:`Credits already cleared this loan.`}</small></div><div class="exec-loan-actions">${x.amount?`<b>${money(x.amount)}</b>`:""}${status(x.status)}<button type="button" data-loan-detail-id="${x.loanId||x.id}">View details</button>${canDecide?`<button type="button" class="approve" data-exec-loan-decision="${x.loanId||x.id}" data-decision="authorize">Approve loan</button><button type="button" class="more" data-exec-loan-decision="${x.loanId||x.id}" data-decision="return">Request information</button><button type="button" class="reject" data-exec-loan-decision="${x.loanId||x.id}" data-decision="reject">Reject</button>`:`<span class="maker-checker-note">${(x.pendingReviewers||[]).length?`You already decided, or ${ (x.pendingReviewers||[]).length} other reviewer${(x.pendingReviewers||[]).length===1?"":"s"} still pending`:`Awaiting committee`}</span>`}</div></div>`:`<div class="exec-approval-row"><div><span>${x.reference} - ${x.department}</span><strong>${escapeHtml(x.title)}</strong><p>${escapeHtml(x.description||"")}${x.assignedTo?` - Reviewer: ${escapeHtml(x.assignedTo)}`:""}</p></div><div>${x.amount?`<b>${money(x.amount)}</b>`:""}${status(x.status)}<button type="button" data-exec-details="${x.id}">View details</button><button type="button" data-exec-reviewer="${x.id}">Assign reviewer</button><button type="button" class="approve" data-exec-decision="${x.id}" data-decision="approve">Approve</button><button type="button" class="more" data-exec-decision="${x.id}" data-decision="more_information">Request information</button><button type="button" class="reject" data-exec-decision="${x.id}" data-decision="reject">Reject</button></div></div>`;
+  };
   const documentRows=pendingDocuments.slice().sort(byNewest).map(d=>`<div class="exec-approval-row executive-document-approval"><div><span>${escapeHtml(d.reference)} - ${escapeHtml(d.department||"Legal")}</span><strong>${escapeHtml(d.title)}</strong><p>${escapeHtml(d.documentType)} - Version ${escapeHtml(d.version)} awaiting Executive publication approval.</p></div><div>${status(d.status)}${d.hasFile?`<div class="document-actions"><a href="/api/documents/${d.id}/view" target="_blank" title="View document">${icons.eye}<span>View</span></a><a href="/api/documents/${d.id}/download" title="Download document">${icons.download}</a></div>`:`<span class="status pending no-file-badge">No file</span>`}<button class="approve" data-document-publication="${d.id}" data-decision="approve">Publish</button><button class="more" data-document-publication="${d.id}" data-decision="reject">Return</button></div></div>`);
   const sections=groups.map(([label,type])=>{
     if(type==="documents")return{label,type,count:pendingDocuments.length,freshness:newestAt(pendingDocuments),empty:`No document publications are waiting.`,body:documentRows.length?documentRows.join(""):null,subtitle:`${pendingDocuments.length} document${pendingDocuments.length===1?"":"s"} awaiting Executive publication`};
@@ -926,6 +971,7 @@ function financeDashboardView() {
     ${financeHistoricalSnapshot(f)}
     <div class="finance-period-heading"><div><strong>Current operations</strong><span>Live receipts, payments and registered cash accounts for the current period</span></div><small>${new Date().toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"})}</small></div>
     <div class="finance-stat-grid finance-current-grid">${cards.slice(0,4).map((card,index)=>financeStatCard(...card,index)).join("")}</div>
+    ${financePendingEntriesWidget(f)}
     <div class="finance-dashboard-grid">
       ${financeRevenueGraph(f)}
       ${financeBudgetWidget(f)}
@@ -951,6 +997,27 @@ function financeHistoricalSnapshot(f) {
 function financeStatCard(label,value,icon,target,note,index) {
   const colors=["blue","green","violet","red","teal","purple","orange","red","blue","green","violet","orange"];
   return `<button class="finance-stat-card" data-finance-page="${target}"><span class="${colors[index]}">${icons[icon]}</span><div><small>${label}</small><strong>${value}</strong><em>${note}</em></div><b>View details ></b></button>`;
+}
+function financePendingEntriesWidget(f) {
+  const rows=(f.pendingEntries||f.entries||[]).filter(x=>x.status==="pending_finance_review");
+  if(!rows.length)return "";
+  const accountOptions=(f.accounts||[]).map(a=>`<option value="${a.id}">${escapeHtml(a.accountName)} (${money(a.balance)})</option>`).join("");
+  return `<section class="finance-panel finance-entry-review"><div class="finance-panel-head"><div><h3>Payments awaiting Finance verification</h3><p>Welfare, investment and subscription receipts that must be posted to an account</p></div><strong>${rows.length} waiting</strong></div>
+    <div class="finance-voucher-list">${rows.map(x=>`<article><div class="finance-voucher-main"><span>${escapeHtml(x.reference)} · ${escapeHtml(x.entryType||"")}</span><h3>${escapeHtml(x.category||"Payment")}</h3><p>${escapeHtml(x.description||"")} · ${escapeHtml(x.counterparty||"—")}</p><small>${x.transactionDate?new Date(x.transactionDate).toLocaleDateString():""} · ${escapeHtml(x.recordedBy||"")}</small></div><div class="finance-voucher-value"><strong>${money(x.amount)}</strong>${status(x.status)}</div><div class="finance-voucher-actions">${f.access?.canApprove?`<select data-finance-entry-account="${x.id}"><option value="">Post to account…</option>${accountOptions}</select><button class="approve" data-finance-entry-review="${x.id}" data-decision="approve">Verify &amp; post</button><button class="reject" data-finance-entry-review="${x.id}" data-decision="reject">Reject</button>`:`<span class="maker-checker-note">Awaiting Finance approver</span>`}</div></article>`).join("")}</div></section>`;
+}
+async function reviewFinanceEntry(id,decision){
+  if(!state.finance?.access?.canApprove)return toast("Finance approval authority is required.");
+  const accountSelect=document.querySelector(`[data-finance-entry-account="${id}"]`);
+  const accountId=accountSelect?Number(accountSelect.value):null;
+  if(decision==="approve"&&!accountId)return toast("Choose the Finance account that received or paid this amount.");
+  let comment="";
+  if(decision==="reject"){comment=await promptDialog("Reason for rejecting this payment verification:","");if(comment===null)return;}
+  try{
+    await api(`/api/finance/entries/${id}/review`,{method:"POST",body:JSON.stringify({decision,accountId,comment})});
+    state.finance=await api("/api/finance/command-center");
+    render();
+    toast(decision==="approve"?"Payment verified and posted to the selected account.":"Payment verification rejected.");
+  }catch(error){toast(error.message);}
 }
 function financeRevenueGraph(f) {
   const max=Math.max(...f.monthly.flatMap(row=>[row.income,row.expenses]),1);
@@ -1005,7 +1072,8 @@ function financeQuickPanel() {
 }
 function financeIncomeView() {
   const f=state.finance,rows=f.entries.filter(x=>x.entryType==="income");
-  return `<div class="exec-module-metrics">${executiveModuleMetric("Today",money(f.stats.incomeToday),"green")}${executiveModuleMetric("This month",money(f.stats.monthlyIncome),"blue")}${executiveModuleMetric("Receipts",rows.length,"violet")}${executiveModuleMetric("Top source","Membership Fees","orange")}</div>${financeIncomeWidget(f)}${financeDataTable("Organization income ledger",["Receipt","Date","Payer / Organization","Category","Method","Amount","Status"],rows.map(x=>[x.receiptNumber||x.reference,new Date(x.transactionDate).toLocaleDateString(),x.counterparty||"?",x.category,x.paymentMethod||"?",money(x.amount),status(x.status)]))}`;
+  const topSource=[...(f.incomeBySource||[])].sort((a,b)=>b.amount-a.amount)[0];
+  return `<div class="exec-module-metrics">${executiveModuleMetric("Today",money(f.stats.incomeToday),"green")}${executiveModuleMetric("This month",money(f.stats.monthlyIncome),"blue")}${executiveModuleMetric("Receipts",rows.length,"violet")}${executiveModuleMetric("Top source",topSource?topSource.label:"—","orange")}</div>${financeIncomeWidget(f)}${financeDataTable("Organization income ledger",["Receipt","Date","Payer / Organization","Category","Method","Amount","Status"],rows.map(x=>[x.receiptNumber||x.reference,new Date(x.transactionDate).toLocaleDateString(),x.counterparty||"?",x.category,x.paymentMethod||"?",money(x.amount),status(x.status)]))}`;
 }
 function financeExpensesView() {
   const f=state.finance,rows=f.entries.filter(x=>x.entryType==="expense");
@@ -1207,14 +1275,21 @@ function executiveSearchView() {
 async function executiveLoanDecision(id,decision) {
   const item=(state.executive.approvals||[]).find(x=>String(x.loanId||x.id)===String(id));
   if(!item)return toast("Loan authorization is no longer available.");
-  if(!item.canCurrentUserDecide)return toast(item.nextReviewer?`Next reviewer is ${item.nextReviewer.fullName}.`:"You are not the next Executive reviewer for this loan.");
+  const canDecide=Boolean(item.canCurrentUserDecide)||(item.pendingReviewers||[]).some(r=>Number(r.userId)===Number(state.user?.id));
+  if(!canDecide)return toast("You are not an assigned Executive reviewer for this loan, or you already decided.");
   let comment="";
   if(decision!=="authorize") { comment=await promptDialog(decision==="reject"?"Reason for rejecting this loan:":"What information should Credits provide:",""); if(comment===null||!comment.trim())return; }
-  else { if(!await confirmDialog(`Approve ${item.reference} for ${money(item.amount)}?${item.nextReviewer?.isChair?" Your Chairperson approval is final.":" The next Executive member will review after you."}`))return; }
-  try { const result=await api(`/api/loans/${id}/decision`,{method:"POST",body:JSON.stringify({decision,comment})}); state.executive=await api("/api/executive/command-center"); render(); toast(decision==="authorize"?"Executive approval recorded.":decision==="reject"?(result.advisoryReject?"Rejection recorded with reason. Loan continues to the next reviewer — only Tabula can finally reject.":result.finalReject?"Loan finally rejected by Tabula Robert.":"Loan rejected."):"Loan returned to Credits for another full review."); } catch(error){toast(error.message);}
+  else { if(!await confirmDialog(`Approve ${item.reference} for ${money(item.amount)}? Other Executive members may still need to record their decisions.`))return; }
+  try {
+    const result=await api(`/api/loans/${id}/decision`,{method:"POST",body:JSON.stringify({decision,comment})});
+    state.executive=await api("/api/executive/command-center");
+    render();
+    toast(decision==="authorize"?"Executive approval recorded.":decision==="reject"?(result.advisoryReject?"Rejection recorded with reason. Loan continues — only Tabula can finally reject.":result.finalReject?"Loan finally rejected by Tabula Robert.":"Loan rejected."):"Loan returned to Credits for another full review.");
+  } catch(error){toast(error.message);}
 }async function executiveDecision(id,decision) {
-  const item=state.executive.approvals.find(x=>String(x.id)===String(id));
+  const item=state.executive.approvals.find(x=>String(x.id)===String(id)||String(x.loanId)===String(id));
   if(!item)return toast("Approval item is no longer available.");
+  if(item.recordType==="loan")return executiveLoanDecision(item.loanId||item.id,decision==="approve"?"authorize":decision);
   let comment="";
   if(decision!=="approve") {
     comment=await promptDialog(decision==="reject"?"Reason for rejecting this request:":"What additional information is required:","");
@@ -1533,13 +1608,17 @@ function investmentProposalDetails(id) {
 function downloadInvestmentReport(name,format="excel") { downloadGeneratedReport("investment",name,format); }
 function creditsDashboardView() {
   const c=state.credits;if(!c)return `<div class="executive-loading">Loading Credits workspace?</div>`;
-  const s=c.stats,cards=[
+  const s=c.stats;
+  const pendingRepays=(c.verificationQueue||[]).filter(x=>x.type==="Loan repayment");
+  const pendingQueue=c.verificationQueue||[];
+  const cards=[
     ["SACCO Members",s.totalMembers,"members","credits-members","Active SACCO accounts"],
     ["Total Savings",money(s.totalSavings),"wallet","credits-savings",`${s.savingsGrowth}% growth this month`],
     ["Available Funds",money(s.availableFunds),"savings","credits-analytics","Available for lending"],
     ["Active Loans",s.activeLoans,"loans","credits-active",money(c.portfolio.outstanding)],
     ["Pending Applications",s.pendingApplications,"file","credits-applications","Across approval stages"],
     ["Awaiting Disbursement",s.awaitingDisbursement,"wallet","credits-disbursement","Approved facilities"],
+    ["Repayments to approve",s.pendingRepaymentVerifications||pendingRepays.length,"receipt","credits-repayments",c.primaryCreditsOfficer?`Assigned to ${c.primaryCreditsOfficer}`:"Member payments awaiting verification"],
     ["Overdue Loans",s.overdueLoans,"clock","credits-recovery","Recovery attention"],
     ["Loan Recovery Rate",`${s.recoveryRate}%`,"reports","credits-analytics","Scheduled principal recovered"],
     ["Interest Earned (Month)",money(s.interestEarned),"receipt","credits-charges","From repayments"],
@@ -1547,8 +1626,11 @@ function creditsDashboardView() {
     ["Guarantors Pending",s.pendingGuarantors,"users","credits-guarantors","Awaiting confirmation"],
     ["Applications Under Review",s.applicationsUnderReview,"approvals","credits-approvals","Officer and committee"]
   ];
+  const approvalBanner=pendingRepays.length?`<div class="credits-verification-banner"><div>${icons.bell}<span><strong>${pendingRepays.length} loan repayment${pendingRepays.length===1?"":"s"} awaiting your approval</strong><small>${c.primaryCreditsOfficer?`${c.primaryCreditsOfficer} (Credits Officer)`:"Credits Officer"} — open Repayments, verify the receipt, then approve to update the member loan.</small></span></div></div>`:"";
   return `<div class="finance-title-strip credits-title-strip"><div><p class="eyebrow">Credits Department - SACCO</p><h2>Savings and credit control center</h2><p>Member savings, loans, guarantors and recovery only?organization Finance remains separate.</p></div><time>${new Date().toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"})}</time></div>
+    ${approvalBanner}
     <div class="finance-stat-grid credits-stat-grid">${cards.slice(0,8).map((card,index)=>creditsStatCard(...card,index)).join("")}</div>
+    ${creditsApprovalQueueWidget(c,pendingQueue)}
     ${creditsContributionProgress(c)}
     <div class="credits-dashboard-grid">
       ${creditsSavingsLoanChart(c)}${creditsPortfolioWidget(c)}${creditsPendingApplicationsWidget(c)}
@@ -1556,6 +1638,11 @@ function creditsDashboardView() {
     </div>
     <div class="credits-lower-grid">${creditsTransactionsWidget(c)}${creditsDisbursementWidget(c)}${creditsNotificationsWidget(c)}</div>
     ${creditsQuickPanel()}`;
+}
+function creditsApprovalQueueWidget(c,rows=[]) {
+  if(!rows.length)return "";
+  return `<section class="finance-panel credits-approval-queue"><div class="finance-panel-head"><div><h3>Payments awaiting approval</h3><p>${c.primaryCreditsOfficer?`Routed to ${c.primaryCreditsOfficer} (Credits Officer)`:"Credits Officer verification queue"}</p></div><button data-credits-page="credits-repayments">Open repayments ></button></div>
+    <div class="credits-application-list">${rows.map(t=>`<article class="credits-queue-row"><div class="credits-row-main"><strong>${escapeHtml(t.member)}</strong><small><span class="credits-ref" title="${escapeHtml(t.reference)}">${escapeHtml(displayRef(t.reference))}</span>${t.loanReference?`<span class="credits-ref" title="${escapeHtml(t.loanReference)}">${escapeHtml(displayRef(t.loanReference))}</span>`:""}<span>${escapeHtml(t.type)}</span></small></div><div class="credits-row-actions"><b>${money(t.amount)}</b>${status("pending")}<button type="button" class="credits-review-btn" data-credits-transaction="${t.id}">${icons.eye}<span>Review</span></button></div></article>`).join("")}</div></section>`;
 }
 function creditsStatCard(label,value,icon,target,note,index) {
   const colors=["blue","green","violet","red","orange","violet","red","teal","green","blue","violet","orange"];
@@ -1586,8 +1673,8 @@ function creditsPortfolioWidget(c) {
 }
 function creditsPendingApplicationsWidget(c) {
   const rows=c.loans.filter(l=>["pending","review","pending-guarantors","officer-review","committee-review","correction","finance-verification","executive-authorization"].includes(l.status)).slice(0,5);
-  return `<section class="finance-panel"><div class="finance-panel-head"><div><h3>Pending Loan Applications</h3><p>Applications requiring progress</p></div><button data-credits-page="credits-applications">View all ></button></div>
-    <div class="credits-application-list">${rows.map(l=>`<article><div><strong>${l.member}</strong><small>${l.reference} - ${new Date(l.createdAt).toLocaleDateString()}</small></div><b>${money(l.amount)}</b>${status(l.status)}<button data-loan-detail-id="${l.id}" title="View full process">${icons.eye}</button></article>`).join("")||`<div class="exec-empty">No pending applications.</div>`}</div></section>`;
+  return `<section class="finance-panel credits-pending-apps"><div class="finance-panel-head"><div><h3>Pending Loan Applications</h3><p>Applications requiring progress</p></div><button data-credits-page="credits-applications">View all ></button></div>
+    <div class="credits-application-list">${rows.map(l=>`<article class="credits-queue-row"><div class="credits-row-main"><strong>${escapeHtml(l.member)}</strong><small><span class="credits-ref" title="${escapeHtml(l.reference)}">${escapeHtml(displayRef(l.reference))}</span><span>${new Date(l.createdAt).toLocaleDateString()}</span></small></div><div class="credits-row-actions"><b>${money(l.amount)}</b>${status(l.status)}<button type="button" class="credits-icon-btn" data-loan-detail-id="${l.id}" title="View full process">${icons.eye}</button></div></article>`).join("")||`<div class="exec-empty">No pending applications.</div>`}</div></section>`;
 }
 function creditsSavingsOverviewWidget(c) {
   const s=c.savings;
@@ -1595,8 +1682,12 @@ function creditsSavingsOverviewWidget(c) {
     ${[["Total savings",s.totalSavings,"green"],["Today's deposits",s.depositsToday,"blue"],["Monthly deposits",s.monthlyDeposits,"violet"],["Withdrawals",s.withdrawals,"orange"]].map(([label,value,color])=>`<div class="${color}"><span>${label}</span><strong>${money(value)}</strong></div>`).join("")}</div>${progress("Savings growth",`${s.growth}%`,Math.max(0,Math.min(100,s.growth*5)),"lime")}</section>`;
 }
 function creditsRecoveryWidget(c) {
+  const danger=c.loans.filter(l=>l.inDangerPeriod&&Number(l.balance)>0).slice(0,5);
   const rows=c.loans.filter(l=>l.status==="overdue"||l.daysOverdue>0&&l.balance>0).slice(0,5);
-  return `<section class="finance-panel"><div class="finance-panel-head"><div><h3>Loan Recovery</h3><p>Defaulters and scheduled follow-ups</p></div><button data-credits-page="credits-recovery">Recovery desk ></button></div><div class="credits-recovery-list">${rows.map(l=>`<div><div><strong>${l.member}</strong><small>${l.reference} - ${l.daysOverdue} days overdue</small></div><b>${money(l.balance)}</b><button data-credits-recover="${l.id}">Follow up</button></div>`).join("")||`<div class="exec-empty">No overdue loans.</div>`}</div></section>`;
+  return `<section class="finance-panel"><div class="finance-panel-head"><div><h3>Loan Recovery & danger alerts</h3><p>5-day grace window, then 5% on principal only</p></div><button data-credits-page="credits-recovery">Recovery desk ></button></div>
+    ${danger.length?`<div class="credits-danger-banner"><strong>${danger.length} loan${danger.length===1?"":"s"} in danger period</strong><small>Due date reached — grace ends in up to 5 days. Remind members before the principal penalty.</small></div>
+      <div class="credits-recovery-list danger">${danger.map(l=>`<div><div><strong>${l.member}</strong><small>${l.reference} · due ${l.nextDueDate?new Date(l.nextDueDate).toLocaleDateString():"—"} · next ${money(l.nextPaymentAmount||0)}</small></div><b>${money(l.balance)}</b><button data-credits-recover="${l.id}">Remind</button></div>`).join("")}</div>`:""}
+    <div class="credits-recovery-list">${rows.map(l=>`<div><div><strong>${l.member}</strong><small>${l.reference} - ${l.daysOverdue} days overdue (after grace)</small></div><b>${money(l.balance)}</b><button data-credits-recover="${l.id}">Follow up</button></div>`).join("")||(danger.length?"":`<div class="exec-empty">No overdue loans.</div>`)}</div></section>`;
 }
 function creditsGuarantorWidget(c) {
   const g=c.guarantorSummary;
@@ -1614,7 +1705,7 @@ function creditsDisbursementWidget(c) {
     <div class="orange"><span>Interest earned</span><strong>${money(c.stats.interestEarned)}</strong></div></div></section>`;
 }
 function creditsNotificationsWidget(c) {
-  return `<section class="finance-panel"><div class="finance-panel-head"><div><h3>Notifications</h3><p>SACCO alerts requiring attention</p></div><button data-credits-page="credits-notifications">View all ></button></div><div class="finance-notifications">${c.notifications.map(n=>`<div class="${n.level}"><span>${n.level==="success"?icons.check:icons.info}</span><strong>${n.title}</strong><time>${relativeTime(n.createdAt||n.time)}</time></div>`).join("")}</div></section>`;
+  return `<section class="finance-panel"><div class="finance-panel-head"><div><h3>Notifications</h3><p>SACCO alerts requiring attention</p></div><button data-credits-page="credits-notifications">View all ></button></div><div class="finance-notifications">${c.notifications.map(n=>`<button type="button" class="finance-notification-item ${n.level}" ${n.target?`data-credits-page="${n.target}"`:""} ${n.transactionId?`data-credits-transaction="${n.transactionId}"`:""}><span>${n.level==="success"?icons.check:icons.info}</span><div><strong>${escapeHtml(n.title)}</strong>${n.detail?`<small>${escapeHtml(n.detail)}</small>`:""}</div><time>${relativeTime(n.createdAt||n.time)}</time></button>`).join("")}</div></section>`;
 }
 function creditsQuickPanel() {
   if(isExecutiveReadOnly()) return `<div class="notice"><div>${icons.shield}</div><div><strong>Executive read-only mode</strong><p>You can inspect the live Credits dashboard. Recording deposits, loans and repayments remains with Credits officers.</p></div></div>`;
@@ -1708,17 +1799,17 @@ function creditsActiveLoansView() {
 function loanApprovalQueue(l) {
   const p=l.approvalProgress;if(!p?.reviewers?.length)return "";
   const body=p.body||(p.stage==="credits"?"Credit Committee":"Executive Committee");
-  const next=p.nextReviewer?`<strong>Next: ${escapeHtml(p.nextReviewer.fullName)}${p.nextReviewer.positionTitle?` · ${escapeHtml(p.nextReviewer.positionTitle)}`:""}${p.nextReviewer.isFinalRejector?" (Tabula - final reject authority)":p.nextReviewer.isChair?" (final)":""}</strong>`:`<strong>${escapeHtml(body)} complete</strong>`;
+  const pending=p.pendingReviewers||p.reviewers.filter(r=>!r.decision);
+  const tabulaWaiting=p.stage==="executive"&&p.reviewers.some(r=>r.isFinalRejector&&!r.decision&&p.reviewers.some(o=>!o.isFinalRejector&&!o.decision));
+  const next=`<strong>${tabulaWaiting?`Waiting for other Executive votes — Tabula Robert decides last`:pending.length?`${pending.length} pending · any remaining member may decide`:`${escapeHtml(body)} complete`}</strong>`;
   return `<div class="loan-approval-queue"><div><span>${escapeHtml(body)} · ${p.approvedCount}/${p.requiredCount} approved</span>${next}</div>
     <ol>${p.reviewers.map(r=>{
-      const waiting=p.nextReviewer&&Number(r.userId)===Number(p.nextReviewer.userId);
-      const cls=r.decision||(waiting?"next":"");
-      let mark=" · queued";
+      const cls=r.decision||"pending";
+      let mark=" · pending";
       if(r.decision==="approve")mark=` · approved${r.comment?`: ${escapeHtml(r.comment)}`:""}`;
       else if(r.advisoryReject)mark=` · advisory reject${r.comment?`: ${escapeHtml(r.comment)}`:""}`;
       else if(r.decision==="reject"&&r.isFinalRejector)mark=` · final reject${r.comment?`: ${escapeHtml(r.comment)}`:""}`;
       else if(r.decision)mark=` · ${r.decision}${r.comment?`: ${escapeHtml(r.comment)}`:""}`;
-      else if(waiting)mark=" · waiting now";
       return `<li class="${cls}${r.advisoryReject?" advisory-reject":""}">${escapeHtml(r.fullName)}${r.positionTitle?` · ${escapeHtml(r.positionTitle)}`:""}${mark}</li>`;
     }).join("")}</ol></div>`;
 }
@@ -1726,7 +1817,8 @@ function creditsLoanRow(l,actions=false) {
   const inCreditsReview=["officer-review","pending","review","correction","committee-review"].includes(l.status);
   const canDecide=inCreditsReview&&l.canCurrentUserDecide&&!isExecutiveReadOnly()&&(state.credits.access.canEdit||state.credits.access.canApprove);
   const active=["active","overdue"].includes(l.status),p=loanRepaymentProgress(l);
-  const nextLine=l.nextReviewer?`Next: ${escapeHtml(l.nextReviewer.fullName)}${l.nextReviewer.positionTitle?` · ${escapeHtml(l.nextReviewer.positionTitle)}`:""}`:(l.status==="executive-authorization"?"Awaiting Executive Committee":"");
+  const pendingCount=(l.pendingReviewers||l.approvalProgress?.pendingReviewers||[]).length;
+  const nextLine=inCreditsReview?(pendingCount?`${pendingCount} Credit Committee vote${pendingCount===1?"":"s"} still needed · any remaining member may decide`:`Credit Committee complete`):(l.status==="executive-authorization"?"Awaiting Executive Committee":"");
   const repayment=active?`<div class="credits-row-progress"><div><span>Repayment progress</span><strong>${p.progressPct}%</strong></div><i><u style="width:${p.progressPct}%"></u></i><small>${money(p.totalPaid)} of ${money(p.totalDue)} · Next ${money(l.nextPaymentAmount||0)}</small></div>`:"";
   const officerActions=canDecide?`<button class="approve" data-credits-loan="${l.id}" data-credit-decision="approve">Approve</button><button class="return" data-credits-loan="${l.id}" data-credit-decision="return">Request information</button><button class="reject" data-credits-loan="${l.id}" data-credit-decision="reject">Reject</button>`:"";
   return `<article class="credits-loan-card">
@@ -1745,16 +1837,19 @@ function creditsLoanRow(l,actions=false) {
   </article>`;
 }
 function creditsDisbursementView() {
+  if(isExecutiveReadOnly()){
+    return `<div class="notice"><div>${icons.shield}</div><div><strong>Credits Officer disbursement only</strong><p>Authorized loans are disbursed only by the Credits Officer (Nakayiza Baraza Olivia). Executive authorization ends when the loan reaches ready for disbursement.</p></div></div>`;
+  }
   const rows=state.credits.loans.filter(l=>["ready-disbursement","executive-authorization"].includes(l.status));
   const receipts=(state.credits.transactions||[]).filter(t=>t.type==="Loan disbursement"&&t.status==="completed");
-  return `<div class="credits-workflow">${["Credit Committee approved","Executive authorized","Credits sends funds","Schedule created"].map((x,i)=>`<span><b>${i+1}</b>${x}</span>`).join("<i>&gt;</i>")}</div>
+  return `<div class="credits-workflow">${["Credit Committee approved","Executive authorized","Credits Officer disburses","Schedule created"].map((x,i)=>`<span><b>${i+1}</b>${x}</span>`).join("<i>&gt;</i>")}</div>
     <div class="credits-loan-list">${rows.map(l=>{
       const fee=Number(l.processingFee||Math.round(Number(l.verifiedAmount||l.amount)*0.02));
       const net=Math.max(0,Number(l.verifiedAmount||l.amount)-fee);
       return `<article><div class="credits-loan-main"><span>${l.reference} - ${l.product}</span><h3>${l.member}</h3><p>${l.purpose||"Purpose not provided"} - ${l.termMonths} months</p>
         <small>Approved ${money(l.verifiedAmount||l.amount)} · Fee ${money(fee)} · Cash to send ${money(net)}</small></div>
         <div><strong>${money(net)}</strong><small>Cash to member</small></div>${status(l.status)}
-        <div class="credits-loan-actions">${l.status==="ready-disbursement"&&state.credits.access.canEdit?`<button class="approve" data-credits-disburse="${l.id}">Disburse</button>`:""}<button data-loan-detail-id="${l.id}">View details</button></div></article>`;
+        <div class="credits-loan-actions">${l.status==="ready-disbursement"&&canCreditsDisburse()?`<button class="approve" data-credits-disburse="${l.id}">Disburse</button>`:""}<button data-loan-detail-id="${l.id}">View details</button></div></article>`;
     }).join("")||`<div class="exec-empty">No loans currently await disbursement.</div>`}</div>
     <section class="exec-panel exec-approval-history" style="margin-top:16px"><div class="exec-panel-head"><div><h3>Disbursement receipts</h3><p>Money actually given to members after the processing fee</p></div><button data-credits-page="credits-receipts">Open receipts &gt;</button></div>
       <div class="table-scroll"><table><thead><tr><th>Receipt / Ref</th><th>Member</th><th>Loan</th><th>Cash given</th><th>Method</th><th>Date</th></tr></thead><tbody>
@@ -1786,9 +1881,13 @@ function creditsGuarantorsView() {
     ${financeDataTable("Guarantor register",["Guarantor","Membership","Borrower","Loan","Guaranteed share","Savings capacity","Available capacity","Response","Date"],c.guarantors.map(g=>{const committed=c.guarantors.filter(x=>x.memberId===g.memberId&&x.status==="accepted").reduce((n,x)=>n+x.guaranteedAmount,0);return [g.guarantor,g.memberNumber,g.borrower,g.loanReference,money(g.guaranteedAmount),money(g.savings),money(Math.max(0,g.savings-committed)),status(g.status),g.respondedAt?new Date(g.respondedAt).toLocaleDateString():"Pending"];}))}`;
 }
 function creditsRecoveryView() {
-  const c=state.credits,overdue=c.loans.filter(l=>l.status==="overdue"||l.daysOverdue>0&&l.balance>0);
-  return `<div class="exec-module-metrics">${executiveModuleMetric("Defaulters",overdue.length,"red")}${executiveModuleMetric("Amount outstanding",money(overdue.reduce((n,l)=>n+l.balance,0)),"orange")}${executiveModuleMetric("Open follow-ups",c.recovery.filter(r=>r.recoveryStatus==="open").length,"blue")}${executiveModuleMetric("Recovery rate",`${c.stats.recoveryRate}%`,"green")}</div>
-    <div class="credits-recovery-cards">${overdue.map(l=>{const history=c.recovery.filter(r=>r.loanId===l.id);return `<article><div><span>${l.reference}</span><h3>${l.member}</h3><p>${l.daysOverdue} days overdue - ${money(l.balance)}</p></div>${status(l.status)}<div class="credits-recovery-history">${history.map(r=>`<div><strong>${r.actionType}</strong><span>${r.notes}</span><small>${new Date(r.createdAt).toLocaleDateString()} - Follow-up ${r.followUpDate?new Date(r.followUpDate).toLocaleDateString():"not set"}</small></div>`).join("")||"<small>No recovery action recorded yet.</small>"}</div><button data-credits-recover="${l.id}">Record follow-up</button></article>`}).join("")||`<div class="exec-empty">No defaulted loans.</div>`}</div>`;
+  const c=state.credits;
+  const danger=c.loans.filter(l=>l.inDangerPeriod&&Number(l.balance)>0);
+  const overdue=c.loans.filter(l=>l.status==="overdue"||l.daysOverdue>0&&l.balance>0);
+  return `<div class="exec-module-metrics">${executiveModuleMetric("Danger period",danger.length,"orange")}${executiveModuleMetric("Overdue (after grace)",overdue.length,"red")}${executiveModuleMetric("Amount outstanding",money(overdue.reduce((n,l)=>n+l.balance,0)),"orange")}${executiveModuleMetric("Recovery rate",`${c.stats.recoveryRate}%`,"green")}</div>
+    ${danger.length?`<section class="finance-panel" style="margin-bottom:16px"><div class="finance-panel-head"><div><h3>Danger period — active due loans</h3><p>Due date reached through day 5. After grace, 5% penalty applies on unpaid principal only (not interest).</p></div></div>
+      <div class="credits-recovery-cards">${danger.map(l=>`<article class="danger-period"><div><span>${l.reference}</span><h3>${l.member}</h3><p>Due ${l.nextDueDate?new Date(l.nextDueDate).toLocaleDateString():"—"} · installment ${money(l.nextPaymentAmount||0)} · principal ${money(l.balance)}</p></div><span class="status review">Danger</span><button data-credits-recover="${l.id}">Record reminder</button></article>`).join("")}</div></section>`:""}
+    <div class="credits-recovery-cards">${overdue.map(l=>{const history=c.recovery.filter(r=>r.loanId===l.id);return `<article><div><span>${l.reference}</span><h3>${l.member}</h3><p>${l.daysOverdue} days overdue after grace - ${money(l.balance)}</p></div>${status(l.status)}<div class="credits-recovery-history">${history.map(r=>`<div><strong>${r.actionType}</strong><span>${r.notes}</span><small>${new Date(r.createdAt).toLocaleDateString()} - Follow-up ${r.followUpDate?new Date(r.followUpDate).toLocaleDateString():"not set"}</small></div>`).join("")||"<small>No recovery action recorded yet.</small>"}</div><button data-credits-recover="${l.id}">Record follow-up</button></article>`}).join("")||`<div class="exec-empty">No defaulted loans.</div>`}</div>`;
 }
 function creditsStatementsView() {
   return `<div class="credits-statement-grid">${state.credits.members.map(m=>`<article><div class="avatar blue">${initials(m.name)}</div><div><span>${m.memberNumber}</span><h3>${m.name}</h3><p>Savings ${money(m.savings)} - Loans ${money(m.outstandingBalance)}</p></div><button data-credits-statement="${m.id}">${icons.download}Statement</button></article>`).join("")}</div>`;
@@ -1915,12 +2014,12 @@ function exitMemberDashboard() {
 async function creditsLoanDecision(id,decision) {
   let comment="";
   if(decision==="approve"){
-    if(!await confirmDialog("Approve this loan and send it to the next reviewer?"))return;
+    if(!await confirmDialog("Record your Credits approval? Other committee members may still need to decide."))return;
   } else {
     comment=await promptDialog(decision==="return"?"Information or correction required:":"Reason for rejection:","");
     if(comment===null||!comment.trim())return;
   }
-  try{const result=await api(`/api/loans/${id}/decision`,{method:"POST",body:JSON.stringify({decision,comment})});await refreshCredits();render();toast(decision==="approve"?"Your Credits approval was recorded. The next officer in the queue will review next.":decision==="reject"?(result.advisoryReject?"Rejection reason recorded. The loan continues to the next reviewer — only Tabula can finally reject.":"Loan rejected."):"Loan decision recorded.");}catch(error){toast(error.message);}
+  try{const result=await api(`/api/loans/${id}/decision`,{method:"POST",body:JSON.stringify({decision,comment})});await refreshCredits();render();toast(decision==="approve"?"Your Credits approval was recorded.":decision==="reject"?(result.advisoryReject?"Rejection reason recorded. The loan continues — only Tabula can finally reject.":"Loan rejected."):"Loan decision recorded.");}catch(error){toast(error.message);}
 }
 async function creditsDisburse(id) {
   const loan=state.credits.loans.find(l=>String(l.id)===String(id));if(!loan)return;
@@ -2480,17 +2579,92 @@ function openForwardMessage(message) {
   });
 }
 
+function ensureSystemAccountStyles(){
+  if(document.querySelector('link[href*="legal-biodata-styles.css"]'))return;
+  const link=document.createElement("link");link.rel="stylesheet";link.href="/legal-biodata-styles.css?v=36";document.head.appendChild(link);
+}
+function formatUserLastLogin(value){
+  if(!value)return "Never";
+  const parsed=new Date(String(value).includes("T")&&!String(value).endsWith("Z")?value:value.endsWith("Z")?value:`${value}Z`);
+  return Number.isNaN(parsed.getTime())?"Never":parsed.toLocaleString();
+}
+function applyUsersApiResult(result){
+  state.users=result.users;
+  state.roles=result.roles;
+  state.departmentRoster=result.departmentRoster;
+  state.otherAccounts=result.otherAccounts;
+  state.branches=result.branches;
+  state.departments=result.departments;
+}
+function filteredSystemUsers(){
+  const users=state.users||[],filter=state.userAccountsFilter||{q:"",department:"all",stat:"all"};
+  const q=String(filter.q||"").trim().toLowerCase();
+  const dept=filter.department||filter.role||"all";
+  return users.filter(u=>{
+    if(dept&&dept!=="all"){
+      const codes=(u.governanceDepartments||[]).map(d=>d.code);
+      if(dept==="other"&&codes.length)return false;
+      if(dept!=="other"&&!codes.includes(dept))return false;
+    }
+    if(filter.stat==="active"&&!u.active)return false;
+    if(filter.stat==="inactive"&&u.active)return false;
+    if(filter.stat==="staff"&&!(u.governanceDepartments||[]).length)return false;
+    if(filter.stat==="recent"&&!u.lastLogin)return false;
+    if(!q)return true;
+    const haystack=[u.fullName,u.email,u.phone,u.role,u.memberNumber,u.branch,...(u.assignments||[]).flatMap(a=>[a.department,a.code,a.position]),...(u.governanceDepartments||[]).flatMap(a=>[a.name,a.code,a.title])].join(" ").toLowerCase();
+    return haystack.includes(q);
+  });
+}
+function userAccountCard(u){
+  const assignments=u.assignments||[];
+  return `<article class="bio-card ${u.active?"active-user":"inactive"}">
+    <header><div class="bio-avatar">${u.hasProfilePhoto?profileImage(u.id,u.fullName,true):initials(u.fullName)}</div><div><small>${escapeHtml(u.memberNumber||u.role)}</small><h3>${escapeHtml(u.fullName)}</h3><span>${escapeHtml(u.email)}</span></div>${status(u.active?"active":"suspended")}</header>
+    <div class="bio-dept-tags">${assignments.length?assignments.slice(0,3).map(a=>`<span class="bio-dept-tag" title="${escapeHtml(a.position||"")}">${escapeHtml(a.department)} · L${a.level}</span>`).join(""):`<span class="bio-dept-tag">No department assignment</span>`}${assignments.length>3?`<span class="bio-dept-tag">+${assignments.length-3} more</span>`:""}</div>
+    <dl><div><dt>Role</dt><dd>${escapeHtml(u.role)}</dd></div><div><dt>Phone</dt><dd>${escapeHtml(u.phone||"—")}</dd></div><div><dt>Branch</dt><dd>${escapeHtml(u.branch||"—")}</dd></div><div><dt>Last login</dt><dd>${formatUserLastLogin(u.lastLogin)}</dd></div></dl>
+    <div class="bio-login-summary ${u.active?"active":"inactive"}"><span>${icons.lock}</span><div><small>Login security</small><strong>${u.mustChangePassword?"Temporary password pending change":"Password is set"}</strong><em>${u.active?"Active and allowed to sign in":"Account deactivated"}</em></div></div>
+    <footer><button data-user-view="${u.id}">${icons.eye}View details</button><button data-user-reset="${u.id}">${icons.lock}Reset password</button>${u.id!==state.user.id?`<button class="${u.active?"danger-action":""}" data-user-status="${u.id}" data-active="${u.active?0:1}">${u.active?"Deactivate":"Activate"}</button>`:""}</footer>
+  </article>`;
+}
+function openUserAccountDetail(id){
+  const user=(state.users||[]).find(u=>String(u.id)===String(id));if(!user)return;
+  const assignments=user.assignments||[];
+  document.body.insertAdjacentHTML("beforeend",`<div class="modal-backdrop" id="modal-backdrop"><div class="modal"><div class="modal-head"><div><h2>System account</h2><p>${escapeHtml(user.fullName)} — ${escapeHtml(user.email)}</p></div><button class="modal-close" data-close-modal>${icons.x}</button></div>
+    <div class="bio-detail">
+      <header><div class="bio-avatar large">${user.hasProfilePhoto?profileImage(user.id,user.fullName,true):initials(user.fullName)}</div><div><small>${escapeHtml(user.memberNumber||"Staff account")} · Created ${formatUserLastLogin(user.createdAt).replace("Never","—")}</small><h2>${escapeHtml(user.fullName)}</h2><p>${escapeHtml(user.role)}${user.branch?` · ${escapeHtml(user.branch)}`:""}</p></div>${status(user.active?"active":"suspended")}</header>
+      <section><h3>Login credentials</h3><dl><div><dt>Email</dt><dd>${escapeHtml(user.email)}</dd></div><div><dt>Phone</dt><dd>${escapeHtml(user.phone||"—")}</dd></div><div><dt>Last login</dt><dd>${formatUserLastLogin(user.lastLogin)}</dd></div><div><dt>Password</dt><dd>Protected — cannot be displayed</dd></div><div><dt>Password status</dt><dd>${user.mustChangePassword?"Temporary password must be changed at next sign-in":"Password is set"}</dd></div><div><dt>Account status</dt><dd>${user.active?"Active":"Inactive"}</dd></div></dl></section>
+      <section><h3>Department access</h3>${assignments.length?`<dl>${assignments.map(a=>`<div><dt>${escapeHtml(a.department)}</dt><dd>${escapeHtml(a.position||"Assigned")} · Level ${a.level}${a.canApprove?" · Can approve":""}${a.canEdit?" · Can edit":""}${a.canCreate?" · Can create":""}</dd></div>`).join("")}</dl>`:`<p>No active department assignments recorded for this account.</p>`}</section>
+      <div class="form-actions"><button type="button" class="button secondary" data-close-modal>Close</button><button type="button" class="button secondary" data-user-reset="${user.id}">${icons.lock}Reset password</button>${user.id!==state.user.id?`<button type="button" class="button ${user.active?"danger":"primary"}" data-user-status="${user.id}" data-active="${user.active?0:1}">${user.active?"Deactivate account":"Activate account"}</button>`:""}</div>
+    </div></div></div>`);
+  document.querySelectorAll("#modal-backdrop [data-close-modal]").forEach(el=>el.addEventListener("click",closeModal));
+  document.querySelector("#modal-backdrop [data-user-reset]")?.addEventListener("click",()=>{closeModal();resetUserPassword(user.id);});
+  document.querySelector("#modal-backdrop [data-user-status]")?.addEventListener("click",el=>changeUserStatus(el.currentTarget));
+}
 function usersView() {
-  const users=state.users||[];
+  ensureSystemAccountStyles();
+  if(!state.userAccountsFilter)state.userAccountsFilter={q:"",department:"all",stat:"all"};
+  const users=state.users||[],filter=state.userAccountsFilter;
+  const filtered=filteredSystemUsers();
   const active=users.filter(u=>u.active).length;
-  return `<div class="metric-grid">
-    ${metric("User accounts",users.length,"users","Across current department roles","dark")}
-    ${metric("Active accounts",active,"check",`${users.length-active} inactive`)}
-    ${metric("Staff roles",new Set(users.filter(u=>u.role!=="Member").map(u=>u.role)).size,"shield","Role-based access enforced","blue")}
-    ${metric("Recent logins",users.filter(u=>u.lastLogin).length,"clock","Recorded with IP and device","amber")}
-  </div>
-  <div class="notice">${icons.shield}<div><strong>Financial separation is enforced</strong><p>Legal registers members and creates their linked login accounts. System administration cannot alter savings or loan balances.</p></div></div>
-  <div class="card table-card"><div class="card-head"><div><h2 class="card-title">System users</h2><p class="card-subtitle">${users.length} secure login accounts</p></div></div><div class="table-scroll"><table><thead><tr><th>User</th><th>Email</th><th>Role</th><th>Department access</th><th>Last login</th><th>Status</th><th>Actions</th></tr></thead><tbody>${users.map(u=>`<tr><td><div class="member-cell"><div class="avatar blue">${profileImage(u.id,u.fullName,u.hasProfilePhoto)}</div><div><div class="cell-main">${u.fullName}</div><div class="cell-sub">${u.phone||"No phone"}</div></div></div></td><td>${u.email}</td><td><span class="status review">${u.role}</span></td><td><div class="user-departments">${(u.assignments||[]).slice(0,2).map(a=>`<span>${a.department} - L${a.level}</span>`).join("")||"<em>None assigned</em>"}${u.assignments?.length>2?`<small>+${u.assignments.length-2} more</small>`:""}</div></td><td>${u.lastLogin?new Date(u.lastLogin+"Z").toLocaleString():"Never"}</td><td>${status(u.active?"active":"suspended")}</td><td><div class="table-actions"><button class="button small secondary" data-user-reset="${u.id}">Reset password</button>${u.id!==state.user.id?`<button class="button small ${u.active?"danger":"primary"}" data-user-status="${u.id}" data-active="${u.active?0:1}">${u.active?"Deactivate":"Activate"}</button>`:""}</div></td></tr>`).join("")}</tbody></table></div></div>`;
+  const rosterStaff=users.filter(u=>(u.governanceDepartments||[]).length).length;
+  const recent=users.filter(u=>u.lastLogin).length;
+  const deptFilter=filter.department||filter.role||"all";
+  const roster=state.departmentRoster||[];
+  const deptChips=[["all","All accounts",users.length],...roster.map(d=>[d.code,d.name,d.accountCount]),["other","Other accounts",state.otherAccounts||0]];
+  const deptLabel=deptFilter==="all"?"":deptFilter==="other"?"Other accounts":(roster.find(d=>d.code===deptFilter)||{}).name||deptFilter;
+  const statCards=[["all","User accounts",users.length,"users","dark","All secure login accounts"],["active","Active accounts",active,"check","green",`${users.length-active} inactive`],["staff","Department runners",rosterStaff,"shield","blue","Official committee accounts"],["recent","Recent logins",recent,"clock","orange","Recorded with IP and device"]];
+  return `<div class="bio-page system-accounts-page">
+    <div class="bio-protection">${icons.shield}<div><strong>Executive System accounts</strong><span>Reset passwords and activate or deactivate login accounts here. Legal registers members and can update login email or status, but password resets stay with Executive.</span></div><b>EXEC ACCESS</b></div>
+    <div class="bio-stats">${statCards.map(([key,label,value,icon,color,note])=>`<button type="button" class="bio-stat-btn ${color} ${filter.stat===key?"active":""}" data-user-stat-filter="${key}"><span>${icons[icon]}</span><div><small>${label}</small><strong>${value}</strong><em>${note}</em></div></button>`).join("")}</div>
+    <form class="bio-search" data-user-search>
+      <div>${icons.search}<input name="q" value="${escapeHtml(filter.q||"")}" placeholder="Search name, email, phone, role, member number or department..."></div>
+      <select name="department"><option value="all">All departments</option>${roster.map(d=>`<option value="${escapeHtml(d.code)}" ${deptFilter===d.code?"selected":""}>${escapeHtml(d.name)} (${d.accountCount})</option>`).join("")}<option value="other" ${deptFilter==="other"?"selected":""}>Other accounts (${state.otherAccounts||0})</option></select>
+      <button class="button primary">${icons.search}Search accounts</button>
+      <button type="button" class="button secondary" data-user-clear>Clear</button>
+    </form>
+    <div class="bio-dept-chips">${deptChips.map(([code,label,count])=>`<button type="button" class="bio-dept-chip ${deptFilter===code?"active":""}" data-user-dept-filter="${escapeHtml(code)}">${escapeHtml(label)}${code!=="all"?` <b>${count}</b>`:""}</button>`).join("")}</div>
+    <div class="bio-result-head"><div><h2>System accounts register</h2><p>${filtered.length} matching account${filtered.length===1?"":"s"}${filter.stat!=="all"?` · ${statCards.find(x=>x[0]===filter.stat)?.[1]||"Filtered"}`:""}${deptFilter!=="all"?` · ${escapeHtml(deptLabel)}`:""}</p></div><span>${icons.lock}Password resets are logged and role controlled</span></div>
+    <div class="bio-grid">${filtered.map(userAccountCard).join("")||`<div class="exec-empty">No system accounts matched this search.</div>`}</div>
+  </div>`;
 }
 
 function settingsView() {
@@ -2527,7 +2701,7 @@ function bind() {
       try { await loadMessenger(); } catch(error) { toast(error.message); }
     }
     if(state.page==="users"&&!state.users) {
-      try { const result=await api("/api/users"); state.users=result.users; state.roles=result.roles; state.branches=result.branches; state.departments=result.departments; } catch(error) { toast(error.message); }
+      try { const result=await api("/api/users"); applyUsersApiResult(result); } catch(error) { toast(error.message); }
     }
     render(); window.scrollTo(0,0);
   }));
@@ -2554,6 +2728,7 @@ function bind() {
   document.querySelector("[data-finance-fy]")?.addEventListener("change",async event=>{try{event.target.disabled=true;state.finance=await api(`/api/finance/command-center?fy=${event.target.value}`);render();}catch(error){toast(error.message);}});
   document.querySelectorAll("[data-finance-modal]").forEach(el=>el.addEventListener("click",()=>openFinanceModal(el.dataset.financeModal)));
   document.querySelectorAll("[data-finance-voucher]").forEach(el=>el.addEventListener("click",()=>financeVoucherDecision(el.dataset.financeVoucher,el.dataset.decision)));
+  document.querySelectorAll("[data-finance-entry-review]").forEach(el=>el.addEventListener("click",()=>reviewFinanceEntry(el.dataset.financeEntryReview,el.dataset.decision)));
   document.querySelectorAll("[data-finance-investment]").forEach(el=>el.addEventListener("click",()=>financeInvestmentDecision(el.dataset.financeInvestment,el.dataset.decision)));
   document.querySelectorAll("[data-finance-process]").forEach(el=>el.addEventListener("click",()=>processFinanceVoucher(el.dataset.financeProcess)));
   document.querySelectorAll("[data-finance-voucher-detail]").forEach(el=>el.addEventListener("click",()=>financeVoucherDetails(el.dataset.financeVoucherDetail)));
@@ -2574,6 +2749,8 @@ function bind() {
   document.querySelectorAll("[data-credits-waive]").forEach(el=>el.addEventListener("click",()=>waiveCreditCharge(el.dataset.creditsWaive)));
   document.querySelectorAll("[data-credits-member]").forEach(el=>el.addEventListener("click",()=>creditsMemberDetails(el.dataset.creditsMember)));
   document.querySelectorAll("[data-credits-transaction]").forEach(el=>el.addEventListener("click",()=>creditsTransactionDetails(el.dataset.creditsTransaction)));
+  document.querySelectorAll(".finance-notification-item[data-credits-transaction]").forEach(el=>el.addEventListener("click",()=>creditsTransactionDetails(el.dataset.creditsTransaction)));
+  document.querySelectorAll(".finance-notification-item[data-credits-page]").forEach(el=>el.addEventListener("click",()=>{if(!el.dataset.creditsTransaction){state.page=el.dataset.creditsPage;render();window.scrollTo(0,0);}}));
   document.querySelectorAll("[data-credits-statement]").forEach(el=>el.addEventListener("click",()=>downloadCreditsStatement(el.dataset.creditsStatement)));
   document.querySelectorAll("[data-credits-report]").forEach(el=>el.addEventListener("click",()=>downloadCreditsReport(el.dataset.creditsReport,el.dataset.format||"excel")));
   document.querySelectorAll("[data-credits-report-preview]").forEach(el=>el.addEventListener("click",()=>openOperationalReportPreview("credits",el.dataset.creditsReportPreview)));
@@ -2627,6 +2804,23 @@ function bind() {
   }));
   document.querySelectorAll("[data-user-status]").forEach(el=>el.addEventListener("click",()=>changeUserStatus(el)));
   document.querySelectorAll("[data-user-reset]").forEach(el=>el.addEventListener("click",()=>resetUserPassword(el.dataset.userReset)));
+  document.querySelectorAll("[data-user-view]").forEach(el=>el.addEventListener("click",()=>openUserAccountDetail(el.dataset.userView)));
+  document.querySelector("[data-user-search]")?.addEventListener("submit",event=>{
+    event.preventDefault();
+    const data=Object.fromEntries(new FormData(event.currentTarget));
+    state.userAccountsFilter={...(state.userAccountsFilter||{}),q:data.q||"",department:data.department||"all"};
+    render();
+  });
+  document.querySelector("[data-user-clear]")?.addEventListener("click",()=>{state.userAccountsFilter={q:"",department:"all",stat:"all"};render();});
+  document.querySelectorAll("[data-user-stat-filter]").forEach(el=>el.addEventListener("click",()=>{
+    state.userAccountsFilter={...(state.userAccountsFilter||{}),stat:el.dataset.userStatFilter};
+    render();window.scrollTo(0,0);
+  }));
+  document.querySelectorAll("[data-user-dept-filter]").forEach(el=>el.addEventListener("click",()=>{
+    const department=el.dataset.userDeptFilter;
+    state.userAccountsFilter={...(state.userAccountsFilter||{}),department:state.userAccountsFilter?.department===department?"all":department};
+    render();
+  }));
   document.querySelectorAll("[data-conversation]").forEach(el=>el.addEventListener("click",()=>openConversation(el.dataset.conversation)));
   document.querySelectorAll("[data-reply-message]").forEach(el=>el.addEventListener("dblclick",()=>setMessageReply(el.dataset.replyMessage)));
   document.querySelectorAll("[data-message-reply]").forEach(el=>el.addEventListener("click",()=>setMessageReply(el.dataset.messageReply)));
@@ -2874,7 +3068,7 @@ async function submitForm(event) {
       state.departmentData=await api(`/api/organization/departments/${code}`);
     }
     closeModal(); await refreshData();
-    if(state.page==="users") { const users=await api("/api/users"); state.users=users.users; state.branches=users.branches; state.departments=users.departments; }
+    if(state.page==="users") applyUsersApiResult(await api("/api/users"));
     render(); toast(message); if(credential) detailModal("Account created","Copy this one-time password now",[["Temporary password",credential],["Next step","The user must change it after signing in."]]);
   } catch(error) { button.disabled=false; button.textContent="Try again"; toast(error.message); }
 }
@@ -2988,10 +3182,14 @@ async function openLoanDetails(referenceOrId) {
       ${loanApprovalQueue({approvalProgress:creditsQueue})||`<p class="page-subtitle">Credit Committee queue not started.</p>`}
       <h3 class="loan-section-title">Executive Committee</h3>
       ${loanApprovalQueue({approvalProgress:executiveQueue})||`<p class="page-subtitle">Executive Committee queue not started.</p>`}
+      ${details.canCurrentUserDecide?.executive?`<div class="form-actions loan-decision-actions"><button type="button" class="button primary" data-exec-loan-decision="${loan.id}" data-decision="authorize">Approve loan</button><button type="button" class="button secondary" data-exec-loan-decision="${loan.id}" data-decision="return">Request information</button><button type="button" class="button secondary" data-exec-loan-decision="${loan.id}" data-decision="reject">Reject</button></div>`:""}
+      ${details.canCurrentUserDecide?.credits&&["officer-review","pending","review","correction","committee-review"].includes(loan.status)?`<div class="form-actions loan-decision-actions"><button type="button" class="button primary" data-credits-loan="${loan.id}" data-credit-decision="approve">Approve (Credits)</button><button type="button" class="button secondary" data-credits-loan="${loan.id}" data-credit-decision="return">Request information</button><button type="button" class="button secondary" data-credits-loan="${loan.id}" data-credit-decision="reject">Reject</button></div>`:""}
       ${details.disbursement?`<h3 class="loan-section-title">Disbursement</h3><div class="notice ${details.disbursement.status==="disbursed"?"":"warning"}">${icons.wallet}<div><strong>${money(details.disbursement.amount)} · ${escapeHtml(details.disbursement.status)}</strong><p>${escapeHtml(details.disbursement.method||"")} to ${escapeHtml(details.disbursement.destination||"")}${details.disbursement.transactionReference?` · ${escapeHtml(details.disbursement.transactionReference)}`:""}</p><p>Processing fee ${money(loan.processing_fee||0)} · Cash given to member ${money(Math.max(0,Number(details.disbursement.amount||loan.amount||0)-Number(loan.processing_fee||0)))}</p></div></div>`:""}
       ${details.schedule.length?`<h3 class="loan-section-title">Repayment schedule</h3><div class="table-scroll repayment-scroll"><table><thead><tr><th>#</th><th>Due date</th><th>Opening balance</th><th>Principal</th><th>Interest</th><th>Total due</th><th>Status</th></tr></thead><tbody>${details.schedule.map(row=>`<tr><td>${row.installment}</td><td>${new Date(row.dueDate).toLocaleDateString()}</td><td>${money(row.openingBalance)}</td><td>${money(row.principal)}</td><td>${money(row.interest)}</td><td class="cell-main">${money(row.totalDue)}</td><td>${status(row.status)}</td></tr>`).join("")}</tbody></table></div>`:""}
       <div class="form-actions"><button class="button primary" data-close-2>Done</button></div></div></div></div>`);
     document.querySelector("[data-close]").onclick=closeModal;document.querySelector("[data-close-2]").onclick=closeModal;
+    document.querySelectorAll("#modal-backdrop [data-exec-loan-decision]").forEach(el=>el.addEventListener("click",async()=>{closeModal();await executiveLoanDecision(el.dataset.execLoanDecision,el.dataset.decision);}));
+    document.querySelectorAll("#modal-backdrop [data-credits-loan]").forEach(el=>el.addEventListener("click",async()=>{closeModal();await creditsLoanDecision(el.dataset.creditsLoan,el.dataset.creditDecision);}));
   } catch(error){toast(error.message);}
 }
 function workflowLabel(stage,action) {
@@ -3018,13 +3216,19 @@ function downloadReport(type) {
 async function changeUserStatus(element) {
   try {
     await api(`/api/users/${element.dataset.userStatus}/status`,{method:"PATCH",body:JSON.stringify({active:element.dataset.active==="1"})});
-    const result=await api("/api/users"); state.users=result.users; render(); toast("User account status updated.");
+    const result=await api("/api/users"); applyUsersApiResult(result); render(); toast("User account status updated.");
   } catch(error) { toast(error.message); }
 }
 async function resetUserPassword(id) {
+  const user=(state.users||[]).find(u=>String(u.id)===String(id));
+  if(!user)return toast("User account not found.");
+  const temporary=await promptDialog("Enter a strong temporary password, or leave blank to generate one automatically:","");
+  if(temporary===null)return;
   try {
-    const result=await api(`/api/users/${id}/reset-password`,{method:"POST",body:"{}"});
-    detailModal("Password reset","Copy this one-time password now",[["Temporary password",result.temporaryPassword],["Next step","The user must change it after signing in."]]);
+    const result=await api(`/api/users/${id}/reset-password`,{method:"POST",body:JSON.stringify(temporary?{password:temporary}:{})});
+    closeModal();
+    document.body.insertAdjacentHTML("beforeend",`<div class="modal-backdrop" id="modal-backdrop"><div class="modal"><div class="modal-head"><div><h2>Temporary password issued</h2><p>${escapeHtml(user.fullName)} - ${escapeHtml(user.email)}</p></div><button class="modal-close" data-close-modal>${icons.x}</button></div><div class="bio-password-result"><p>Give this password securely to the user. It is shown only now and must be changed at the next sign-in.</p><code>${escapeHtml(result.temporaryPassword)}</code><button class="button primary" data-close-modal>Done</button></div></div></div>`);
+    document.querySelectorAll("#modal-backdrop [data-close-modal]").forEach(x=>x.addEventListener("click",closeModal));
   } catch(error) { toast(error.message); }
 }async function verifyTransaction(id) {
   try {
