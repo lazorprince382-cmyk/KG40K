@@ -44,14 +44,36 @@
     if(!state.memberOversight)return "";
     return `<div class="notice"><div>${icons.shield}</div><div><strong>Viewing ${esc(C()?.member?.fullName||"member")} dashboard</strong><p>${canActOnMember()?"You can submit deposits and loan payments for this member from this view.":"Read-only oversight of this Legal-registered member account. Deposit, loan application and repayment actions stay with the member or Credits officers."}</p></div></div>`;
   }
+  function dashboardNextUp(c){
+    const items=[];
+    const pendingGuarantee=(c.guarantees||[]).find(x=>x.guaranteeStatus==="pending");
+    if(pendingGuarantee){
+      items.push({tone:"warning",title:`Guarantee request from ${pendingGuarantee.borrower}`,detail:`${money(pendingGuarantee.amount)} · ${pendingGuarantee.reference}`,action:"member-guarantorship",label:"Respond"});
+    }
+    const activeLoan=(c.loans||[]).find(x=>["active","overdue"].includes(x.status));
+    if(activeLoan&&Number(activeLoan.nextPaymentAmount||0)>0){
+      items.push({tone:activeLoan.inDangerPeriod||activeLoan.status==="overdue"?"danger":"info",title:`Next loan repayment · ${activeLoan.reference}`,detail:`${money(activeLoan.nextPaymentAmount)} due ${date(activeLoan.nextDueDate)}`,action:"member-loans",label:"Pay loan"});
+    }
+    const fy=c.financialYearProgress;
+    if(fy&&Number(fy.expectedSavingsToDate)>0&&Number(fy.savingsPaid)<Number(fy.expectedSavingsToDate)){
+      const short=Number(fy.expectedSavingsToDate)-Number(fy.savingsPaid);
+      items.push({tone:"info",title:`${fy.fiscalYear} savings still short`,detail:`${money(short)} needed to stay on target`,action:"member-savings",label:"Submit deposit"});
+    }
+    if(!items.length)return "";
+    return `<section class="member-next-up"><div class="member-next-up-head"><h3>Next for you</h3><p>Only what needs attention now</p></div><div class="member-next-up-list">${items.slice(0,2).map(item=>`<article class="${item.tone}"><div><strong>${esc(item.title)}</strong><span>${esc(item.detail)}</span></div><button type="button" class="button small ${item.tone==="danger"?"primary":"secondary"}" data-member-page="${item.action}">${item.label}</button></article>`).join("")}</div></section>`;
+  }
+  function dashboardActions(c){
+    if(!canActOnMember())return `<button class="button secondary" data-member-page="member-profile">View profile</button>`;
+    const activeLoan=(c.loans||[]).find(x=>["active","overdue"].includes(x.status));
+    return `<button class="button primary" data-member-action="deposit">${icons.plus}Submit deposit</button>${activeLoan?`<button class="button secondary" data-member-repay="${activeLoan.id}" data-settle="0">${icons.receipt}Pay loan</button>`:`<button class="button secondary" data-member-action="apply-loan">${icons.loans}Apply for a loan</button>`}`;
+  }
   function dashboard(){
     const c=C(),m=c.member,s=c.summary,h=new Date().getHours(),g=h<12?"Good morning":h<18?"Good afternoon":"Good evening";
-    return `${oversightBanner()}<div class="member-portal"><section class="member-welcome"><div><span>${g}</span><h2>${esc(m.fullName)}</h2><p>Member ID: <b>${esc(m.memberNumber)}</b> - Status: <b>${esc(m.status)}</b> - Joined ${date(m.joinedAt)}</p></div><div class="module-actions">${canActOnMember()?`<button class="button primary" data-member-action="deposit">${icons.plus}Submit deposit</button>`:""}<button class="button secondary" data-member-page="member-profile">View profile</button></div></section>
-      <div class="member-summary-grid">${metric("My Savings",money(s.savings),"savings","member-savings","Current carried-forward balance")}${metric("Share Capital",money(s.shares),"building","member-savings","Current share balance")}${metric("Total Member Funds",money(s.totalMemberFunds),"wallet","member-savings","Savings plus share capital")}${metric("Active Loan Balance",money(s.activeLoanBalance),"loans","member-loans","Remaining total repayment including interest")}${metric("Pending Requests",s.pendingRequests,"clock","member-requests","Contributions, loans and support")}${metric("Notifications",s.notifications,"bell","member-notifications")}</div>
+    return `${oversightBanner()}<div class="member-portal"><section class="member-welcome"><div><span>${g}</span><h2>${esc(m.fullName)}</h2><p>Member ID: <b>${esc(m.memberNumber)}</b> - Status: <b>${esc(m.status)}</b> - Joined ${date(m.joinedAt)}</p></div><div class="module-actions">${dashboardActions(c)}</div></section>
+      <div class="member-summary-grid">${metric("My Savings",money(s.savings),"savings","member-savings","Current carried-forward balance")}${metric("Share Capital",money(s.shares),"building","member-savings","Current share balance")}${metric("Total Member Funds",money(s.totalMemberFunds),"wallet","member-savings","Savings plus share capital")}${metric("Active Loan Balance",money(s.activeLoanBalance),"loans","member-loans","Remaining total repayment including interest")}</div>
+      ${dashboardNextUp(c)}
       <div class="member-target-layout">${financialYearPanel()}${closingPositionPanel()}</div>
-      <div class="member-home-grid">${panel("Recent activity","Your latest account events",`<div class="member-list">${c.recentActivity.slice(0,8).map(x=>`<article><span>${icons[x.type==="notification"?"bell":"receipt"]}</span><div><strong>${esc(x.title)}</strong><p>${esc(x.detail)}</p></div><time>${date(x.date)}</time></article>`).join("")||`<div class="member-empty">No activity.</div>`}</div>`)}
-      ${panel("Upcoming events","Meetings shared with members",`<div class="member-list">${c.meetings.filter(x=>new Date(x.scheduledAt)>=new Date()).slice(0,6).map(x=>`<article><span>${icons.clock}</span><div><strong>${esc(x.title)}</strong><p>${date(x.scheduledAt)} - ${esc(x.venue||"Venue pending")}</p></div></article>`).join("")||`<div class="member-empty">No upcoming events.</div>`}</div>`)}</div>
-      ${panel("Announcements","Official organization updates",`<div class="member-list">${c.announcements.slice(0,5).map(x=>`<article><span>${icons.bell}</span><div><strong>${esc(x.title)}</strong><p>${esc(x.body)}</p></div><time>${date(x.createdAt)}</time></article>`).join("")||`<div class="member-empty">No announcements.</div>`}</div>`)}</div>`;
+      ${panel("Recent activity","Your latest account events",`<div class="member-list">${(c.recentActivity||[]).slice(0,5).map(x=>`<article><span>${icons[x.type==="notification"?"bell":"receipt"]}</span><div><strong>${esc(x.title)}</strong><p>${esc(x.detail)}</p></div><time>${date(x.date)}</time></article>`).join("")||`<div class="member-empty">No activity.</div>`}</div>`)}</div>`;
   }
   function profile(){
     const m=C().member,items=[["Member ID",m.memberNumber],["Membership status",m.status],["National ID",m.nationalId],["Phone",m.phone],["Email",m.email||"Not recorded"],["Joined",date(m.joinedAt)],["Date of birth",date(m.dateOfBirth)],["Gender",m.gender||"Not recorded"],["Nationality",m.nationality||"Not recorded"],["Address",m.address||"Not recorded"],["Occupation",m.occupation||"Not recorded"],["Employer",m.employer||"Not recorded"],["Next of kin",m.nextOfKin||"Not recorded"],["Emergency contact",`${m.emergencyContactName||"Not recorded"} ${m.emergencyContactPhone||""}`]];
