@@ -56,8 +56,8 @@ async function getSavingsTargetStatus(memberId) {
   const financialYear = await one(
     `SELECT fiscal_year_label AS "fiscalYear",starts_on AS "startsOn",ends_on AS "endsOn",
       monthly_savings_target::float AS "monthlySavingsTarget",
-      LEAST(12,GREATEST(0,(EXTRACT(YEAR FROM age(LEAST(CURRENT_DATE,ends_on),starts_on))*12+
-        EXTRACT(MONTH FROM age(LEAST(CURRENT_DATE,ends_on),starts_on))+1)::int)) AS "monthsDue"
+      LEAST(12,GREATEST(0,(EXTRACT(YEAR FROM age(date_trunc('month',LEAST(CURRENT_DATE,ends_on+INTERVAL '1 day')),date_trunc('month',starts_on)))*12+
+        EXTRACT(MONTH FROM age(date_trunc('month',LEAST(CURRENT_DATE,ends_on+INTERVAL '1 day')),date_trunc('month',starts_on))))::int)) AS "monthsDue"
       FROM member_financial_year_policies
       WHERE status='active' AND CURRENT_DATE BETWEEN starts_on AND ends_on
       ORDER BY starts_on DESC LIMIT 1`

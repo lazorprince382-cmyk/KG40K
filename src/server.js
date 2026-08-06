@@ -1438,8 +1438,8 @@ app.get("/api/credits/command-center",auth,requireCredits("view"),asyncRoute(asy
   const contributionPolicy=await one(`SELECT id,fiscal_year_label AS "fiscalYear",starts_on AS "startsOn",ends_on AS "endsOn",
     monthly_savings_target::float AS "monthlySavingsTarget",annual_share_target::float AS "annualShareTarget",
     annual_subscription_fee::float AS "annualSubscriptionFee",
-    LEAST(12,GREATEST(0,(EXTRACT(YEAR FROM age(LEAST(CURRENT_DATE,ends_on),starts_on))*12+
-      EXTRACT(MONTH FROM age(LEAST(CURRENT_DATE,ends_on),starts_on))+1)::int)) AS "monthsDue"
+    LEAST(12,GREATEST(0,(EXTRACT(YEAR FROM age(date_trunc('month',LEAST(CURRENT_DATE,ends_on+INTERVAL '1 day')),date_trunc('month',starts_on)))*12+
+      EXTRACT(MONTH FROM age(date_trunc('month',LEAST(CURRENT_DATE,ends_on+INTERVAL '1 day')),date_trunc('month',starts_on))))::int)) AS "monthsDue"
     FROM member_financial_year_policies WHERE status='active' AND CURRENT_DATE BETWEEN starts_on AND ends_on
     ORDER BY starts_on DESC LIMIT 1`);
   const memberContributionRows=contributionPolicy?(await query(`SELECT member_id AS "memberId",
@@ -2967,8 +2967,8 @@ app.post("/api/loans",auth,upload.single("supportingDocument"),(req,res,next)=>{
   }
   const financialYear=await one(`SELECT fiscal_year_label AS "fiscalYear",starts_on AS "startsOn",ends_on AS "endsOn",
     monthly_savings_target::float AS "monthlySavingsTarget",
-    LEAST(12,GREATEST(0,(EXTRACT(YEAR FROM age(LEAST(CURRENT_DATE,ends_on),starts_on))*12+
-      EXTRACT(MONTH FROM age(LEAST(CURRENT_DATE,ends_on),starts_on))+1)::int)) AS "monthsDue"
+    LEAST(12,GREATEST(0,(EXTRACT(YEAR FROM age(date_trunc('month',LEAST(CURRENT_DATE,ends_on+INTERVAL '1 day')),date_trunc('month',starts_on)))*12+
+      EXTRACT(MONTH FROM age(date_trunc('month',LEAST(CURRENT_DATE,ends_on+INTERVAL '1 day')),date_trunc('month',starts_on))))::int)) AS "monthsDue"
     FROM member_financial_year_policies
     WHERE status='active' AND CURRENT_DATE BETWEEN starts_on AND ends_on ORDER BY starts_on DESC LIMIT 1`);
   // Members who completed FY 25/26 may apply freely; only members without that closing target must stay on current-year pace
