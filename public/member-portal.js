@@ -33,9 +33,7 @@
     const advanceNote=annualMet&&annualSurplus>0
       ?`<div class="member-policy-note member-advance-note"><b>Annual savings target met.</b> Extra ${money(annualSurplus)} remains as surplus toward future months.</div>`
       :completedMet&&!annualMet?`<div class="member-policy-note">You are up to date on completed months. Keep saving toward the full-year target of ${money(f.annualSavingsTarget)}.</div>`:"";
-    const shareNote=Number(f.openingShareCredit)>0
-      ?`<div class="member-policy-note"><b>Bought shares this year:</b> ${money(f.openingShareCredit)} already counted toward the ${money(f.annualShareTarget)} share target.</div>`
-      :"";
+    const shareNote="";
     return panel(`${f.fiscalYear} contribution progress`,
       `${f.monthsDue} completed month${Number(f.monthsDue)===1?"":"s"} due since 1 July  -  the current month counts only after it ends`,
       `${targetLine("Savings for completed months",savingsToward,f.expectedSavingsToDate)}

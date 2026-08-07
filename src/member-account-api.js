@@ -144,7 +144,6 @@ module.exports = function registerMemberAccountApi({
         WHERE member_id=$1 AND type=$2 AND status='completed' AND
           (target_fiscal_year=$3 OR (target_fiscal_year IS NULL AND created_at::date BETWEEN $4 AND $5))`,
       [req.user.member_id,transactionType,targetFiscalYear,currentPolicy.startsOn,currentPolicy.endsOn]))?.amount||0);
-      if(transactionType==='Share purchase')paid+=Number(currentPolicy.openingShareCredit||0);
       if(transactionType==='Savings deposit'){
         const past=await one(`SELECT COALESCE(legacy.expected_savings,0)::float AS expected,
           COALESCE(legacy.savings_balance,0)::float+COALESCE((SELECT SUM(t.amount) FROM transactions t
@@ -302,11 +301,11 @@ module.exports = function registerMemberAccountApi({
     const coveredMonthsExact = monthlyTarget > 0 ? pastSurplus / monthlyTarget : 0;
     const coveredMonths = Math.floor(coveredMonthsExact + 1e-9);
     const coveredMonthsRemainder = Math.max(0, pastSurplus - (coveredMonths * monthlyTarget));
-    const openingShareCredit = Number(financialYear?.openingShareCredit || 0);
+    const openingShareCredit = 0;
     const savingsPaidThisYear = Number(yearContributions.savings || 0);
     const savingsTowardTarget = savingsPaidThisYear + pastSurplus;
     const sharePaidThisYear = Number(yearContributions.shares || 0);
-    const sharePaidTowardTarget = sharePaidThisYear + openingShareCredit;
+    const sharePaidTowardTarget = sharePaidThisYear;
     const subscriptionPaid = Number(yearContributions.subscription || 0);
     const annualSavingsTarget = monthlyTarget * 12;
     const annualShareTarget = Number(financialYear?.annualShareTarget || 0);

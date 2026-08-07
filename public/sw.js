@@ -1,11 +1,11 @@
-const CACHE="kasangati-v127";
+const CACHE="kasangati-v128";
 const SHELL=[
-  "/","/index.html","/styles.css?v=87","/brand-theme.css?v=64","/brand-no-green.css?v=16","/legal-member-exit.css?v=1","/app.js?v=113",
+  "/","/index.html","/styles.css?v=87","/brand-theme.css?v=64","/brand-no-green.css?v=16","/legal-member-exit.css?v=1","/app.js?v=114",
   "/app-core.js?v=111","/department-theme.js?v=63","/department-core.js?v=67",
   "/audit-dashboard.js?v=63","/audit-modules.js?v=63","/welfare-module.js?v=63",
   "/legal-module.js?v=64","/legal-biodata-module.js?v=67","/legal-family-ui.js?v=2","/legal-member-exit-ui.js?v=1",
   "/legal-registration-module.js?v=63","/supervisory-module.js?v=63","/department-events.js?v=63",
-  "/official-policy-ui.js?v=7","/member-portal.js?v=94","/loan-calculator.js?v=5",
+  "/official-policy-ui.js?v=7","/member-portal.js?v=95","/loan-calculator.js?v=5",
   "/legal-biodata-styles.css?v=36",
   "/brand-logo.png?v=51","/brand-logo-slogan.png?v=51","/manifest.webmanifest"
 ];
