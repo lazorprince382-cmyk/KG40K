@@ -8,6 +8,8 @@
     "dev": "node server.js",
     "seed": "node scripts/seed.js",
     "db:import-railway": "node scripts/import-railway-db.js",
+    "db:purge-loans": "node scripts/purge-test-loans.js",
+    "db:purge-loans": "node scripts/purge-test-loans.js",
     "test": "node scripts/test-security.js",
     "test:financial": "node scripts/test-financial-integrity.js",
     "check": "node scripts/check.js"
