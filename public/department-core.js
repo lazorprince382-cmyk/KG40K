@@ -108,7 +108,7 @@
       <div class="sidebar-bottom">${state.executiveWorkspace?`<button class="executive-quick" data-executive-workspace-exit>${icons.arrowUp}<span>Back to Executive</span></button>`:`<button class="executive-quick" data-dept-quick="${cfg.key}">${icons.arrowUp}<span>Quick Actions</span><b>^</b></button>`}<div class="sidebar-user"><div class="avatar blue">${profileImage(state.user.id,actor(),state.user.has_profile_photo)}</div><div><div class="user-name">${esc(actor())}</div><div class="user-role">${state.executiveWorkspace?"Executive read-only view":cfg.title}</div></div></div></div></aside>`;
   }
   const baseSidebar=sidebar;
-  sidebar=function(){const cfg=effectiveConfig();const html=cfg?deptSidebar(cfg):baseSidebar();return typeof injectWorkspaceSwitcher==="function"?injectWorkspaceSwitcher(html):html;};
+  sidebar=function(){const cfg=effectiveConfig();if(!cfg)return baseSidebar();return typeof injectWorkspaceSwitcher==="function"?injectWorkspaceSwitcher(deptSidebar(cfg)):deptSidebar(cfg);};
 
   const baseSubtitle=subtitle;
   subtitle=function(){const cfg=effectiveConfig();if(!cfg)return baseSubtitle();if(ui.subtitles[cfg.key])return ui.subtitles[cfg.key]();return `${cfg.title} records, workflows, reports and controlled decisions.`;};

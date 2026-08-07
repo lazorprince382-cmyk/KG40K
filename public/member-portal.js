@@ -532,11 +532,7 @@
   const oldSidebar=window.sidebar;window.sidebar=function(){
     if(inMemberSpace()){
       let html=sidebar();
-      if(typeof injectWorkspaceSwitcher==="function"&&availableWorkspaces().length>1){
-        const switcher=workspaceSwitcherHtml();
-        if(html.includes("sidebar-bottom"))html=html.replace(`<div class="sidebar-bottom">`,`<div class="sidebar-bottom">${switcher}`);
-        return html;
-      }
+      if(typeof injectWorkspaceSwitcher==="function")html=injectWorkspaceSwitcher(html);
       return html;
     }
     let html=oldSidebar();

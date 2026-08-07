@@ -321,7 +321,7 @@ function workspacePickerView(workspaces,error=""){
   });
 }
 function injectWorkspaceSwitcher(html){
-  if(!workspaceNeedsPicker())return html;
+  if(!workspaceNeedsPicker()||!html||html.includes("workspace-switcher"))return html;
   const block=workspaceSwitcherHtml();
   if(html.includes('class="role-picker"')){
     return html.replace(/<div class="role-picker">[\s\S]*?<\/div>\s*<div class="sidebar-user">/,`${block}<div class="sidebar-user">`);
