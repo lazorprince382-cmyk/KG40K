@@ -1144,6 +1144,7 @@ function financeDashboardView() {
     <div class="finance-period-heading"><div><strong>Current operations</strong><span>Live receipts, payments and registered cash accounts for the current period</span></div><small>${new Date().toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"})}</small></div>
     <div class="finance-stat-grid finance-current-grid">${cards.slice(0,4).map((card,index)=>financeStatCard(...card,index)).join("")}</div>
     ${financePendingEntriesWidget(f)}
+    ${financeSubscriptionProgressWidget(f)}
     <div class="finance-dashboard-grid">
       ${financeRevenueGraph(f)}
       ${financeBudgetWidget(f)}
@@ -1177,6 +1178,22 @@ function financePendingEntriesWidget(f) {
   return `<section class="finance-panel finance-entry-review"><div class="finance-panel-head"><div><h3>Payments awaiting Finance verification</h3><p>Welfare, investment and subscription receipts that must be posted to an account</p></div><strong>${rows.length} waiting</strong></div>
     <div class="finance-voucher-list">${rows.map(x=>`<article><div class="finance-voucher-main"><span>${escapeHtml(x.reference)} · ${escapeHtml(x.entryType||"")}</span><h3>${escapeHtml(x.category||"Payment")}</h3><p>${escapeHtml(x.description||"")} · ${escapeHtml(x.counterparty||"—")}</p><small>${x.transactionDate?new Date(x.transactionDate).toLocaleDateString():""} · ${escapeHtml(x.recordedBy||"")}</small></div><div class="finance-voucher-value"><strong>${money(x.amount)}</strong>${status(x.status)}</div><div class="finance-voucher-actions">${f.access?.canApprove?`<select data-finance-entry-account="${x.id}"><option value="">Post to account…</option>${accountOptions}</select><button class="approve" data-finance-entry-review="${x.id}" data-decision="approve">Verify &amp; post</button><button class="reject" data-finance-entry-review="${x.id}" data-decision="reject">Reject</button>`:`<span class="maker-checker-note">Awaiting Finance approver</span>`}</div></article>`).join("")}</div></section>`;
 }
+function financeSubscriptionProgressWidget(f){
+  const s=f.subscriptionProgress;if(!s)return "";
+  const percent=Number(s.percent||0);
+  return `<section class="finance-panel finance-subscription-progress">
+    <button type="button" class="finance-subscription-bar" data-finance-subscriptions>
+      <div class="finance-panel-head"><div><h3>Total annual subscriptions</h3><p>${escapeHtml(s.fiscalYear||"Current year")} · ${s.membersPaid||0} of ${s.activeMembers||0} members paid</p></div><strong>${percent}%</strong></div>
+      <div class="finance-subscription-track"><em style="width:${percent}%"></em></div>
+      <div class="finance-subscription-meta"><span>${money(s.collected)} collected</span><span>${money(s.expected)} expected</span><span>Click to view members by date</span></div>
+    </button>
+  </section>`;
+}
+function openFinanceSubscriptionMembers(){
+  const s=state.finance?.subscriptionProgress;if(!s)return toast("Subscription progress is not available.");
+  const rows=(s.payments||[]).map(p=>`<tr><td><strong>${escapeHtml(p.member)}</strong><small>${escapeHtml(p.memberNumber||"")}</small></td><td>${escapeHtml(p.reference)}</td><td>${money(p.amount)}</td><td>${new Date(p.verifiedAt||p.paidAt).toLocaleString()}</td></tr>`).join("")||`<tr><td colspan="4"><div class="member-empty">No annual subscription payments verified yet.</div></td></tr>`;
+  modal("Annual subscription payments",`<div class="finance-subscription-detail"><p>${money(s.collected)} collected of ${money(s.expected)} · fee ${money(s.fee)} per member</p><div class="table-scroll"><table><thead><tr><th>Member</th><th>Reference</th><th>Amount</th><th>Paid / verified</th></tr></thead><tbody>${rows}</tbody></table></div></div>`);
+}
 async function reviewFinanceEntry(id,decision){
   if(!state.finance?.access?.canApprove)return toast("Finance approval authority is required.");
   const accountSelect=document.querySelector(`[data-finance-entry-account="${id}"]`);
@@ -1184,6 +1201,7 @@ async function reviewFinanceEntry(id,decision){
   if(decision==="approve"&&!accountId)return toast("Choose the Finance account that received or paid this amount.");
   let comment="";
   if(decision==="reject"){comment=await promptDialog("Reason for rejecting this payment verification:","");if(comment===null)return;}
+  else if(!await confirmDialog("Verify and post this payment to the selected account?"))return;
   try{
     await api(`/api/finance/entries/${id}/review`,{method:"POST",body:JSON.stringify({decision,accountId,comment})});
     state.finance=await api("/api/finance/command-center");
@@ -1254,7 +1272,7 @@ function financeExpensesView() {
 function financeVouchersView() {
   const f=state.finance;
   return `${financeInvestmentAnalysisQueue(f)}<div class="finance-voucher-filters">${["finance_review","executive_approval","finance_approved","executive_approved","processed","returned_for_correction","rejected"].map(value=>`<span>${value.replaceAll("_"," ")} <b>${f.vouchers.filter(v=>v.status===value).length}</b></span>`).join("")}</div>
-    <div class="finance-voucher-list">${f.vouchers.map(v=>`<article><div class="finance-voucher-main"><span>${v.voucherNumber} - ${v.department}</span><h3>${v.supplier}</h3><p>${v.description} - ${v.category} - ${v.budgetLine}</p><small>Requested by ${v.requestedBy}${v.reviewedBy?` - Reviewed by ${v.reviewedBy}`:""}</small></div><div class="finance-voucher-value"><strong>${money(v.amount)}</strong>${status(v.status)}</div><div class="finance-voucher-actions">${financeApprovalActions(v)}${["finance_approved","executive_approved"].includes(v.status)?`<button class="process" data-finance-process="${v.id}">Process payment</button>`:""}<button data-finance-voucher-detail="${v.id}">Details</button></div></article>`).join("")}</div>`;
+    <div class="finance-voucher-list">${f.vouchers.map(v=>`<article><div class="finance-voucher-main"><span>${v.voucherNumber} - ${v.department}</span><h3>${v.supplier}</h3><p>${v.description} - ${v.category} - ${v.budgetLine}</p><small>Requested by ${v.requestedBy}${v.reviewedBy?` - Reviewed by ${v.reviewedBy}`:""}</small></div><div class="finance-voucher-value"><strong>${money(v.amount)}</strong>${status(v.status)}</div><div class="finance-voucher-actions">${financeApprovalActions(v)}${["executive_approved"].includes(v.status)?`<button class="process" data-finance-process="${v.id}">Process payment</button>`:""}<button data-finance-voucher-detail="${v.id}">Details</button></div></article>`).join("")}</div>`;
 }
 function financeInvestmentAnalysisQueue(f){const items=f.investmentAnalyses||[];return `<section class="finance-panel finance-analysis-queue"><div class="finance-panel-head"><div><h3>Investment Financial Analysis</h3><p>Finance feasibility review required before a proposal reaches Executive</p></div><strong>${items.length} waiting</strong></div>${items.map(p=>`<article><div><span>${p.reference} - ${escapeHtml(p.category)}</span><h3>${escapeHtml(p.title)}</h3><p>${escapeHtml(p.description)}</p><small>Submitted by ${escapeHtml(p.createdBy)} - Risk: ${escapeHtml(p.riskAssessment)}</small></div><div><strong>${money(p.estimatedCost)}</strong><small>Expected revenue ${money(p.expectedRevenue)} - ROI ${p.expectedRoi}%</small>${p.supportingDocument?`<a href="${p.supportingDocument}" target="_blank">${icons.file} Evidence</a>`:""}</div><div class="record-actions"><button data-finance-investment="${p.id}" data-decision="approve">Approve analysis</button><button data-finance-investment="${p.id}" data-decision="more_information">More information</button><button class="danger-action" data-finance-investment="${p.id}" data-decision="reject">Reject</button></div></article>`).join("")||`<div class="exec-empty">No investment proposals await Finance analysis.</div>`}</section>`;}
 async function financeInvestmentDecision(id,decision){const analysis=await promptDialog("Financial analysis (affordability, cash flow, funding and budget impact):","");if(!analysis)return;const recommendation=await promptDialog("Finance recommendation:",decision==="approve"?"Financially viable and recommended for Executive review.":"");if(!recommendation)return;try{const result=await api(`/api/finance/investment-proposals/${id}/review`,{method:"POST",body:JSON.stringify({decision,analysis,recommendation})});state.finance=await api("/api/finance/command-center");render();toast(result.status==="executive_approval"?"Finance analysis completed; proposal sent to Executive.":"Finance decision recorded.");}catch(error){toast(error.message);}}
@@ -1368,7 +1386,7 @@ async function submitFinanceForm(event) {
 async function financeVoucherDecision(id,decision) {
   let comment="";
   if(decision!=="approve"){comment=await promptDialog(decision==="reject"?"Reason for rejection:":"Correction required:","");if(comment===null||!comment.trim())return;}
-  else if(!await confirmDialog("Approve this voucher at Finance review? Payments of UGX 10,000,000 or more will be forwarded to Executive."))return;
+  else if(!await confirmDialog("Approve this voucher at Finance review? It will then go to Executive for final approval before payment."))return;
   try{const result=await api(`/api/finance/vouchers/${id}/decision`,{method:"POST",body:JSON.stringify({decision,comment})});state.finance=await api("/api/finance/command-center");render();toast(result.status==="executive_approval"?"Finance review complete; sent to Executive.":"Voucher decision recorded.");}catch(error){toast(error.message);}
 }
 function editFinanceAccount(id) {
@@ -1468,9 +1486,7 @@ async function executiveLoanDecision(id,decision) {
     if(comment===null||!comment.trim())return;
   } else {
     if(!await confirmDialog(`Approve ${item.title}${item.amount?` for ${money(item.amount)}`:""}? This decision will be audited.`)) return;
-    const optional=await promptDialog("Optional executive comment:","Approved within executive authority.");
-    if(optional===null)return;
-    comment=optional.trim();
+    comment="";
   }
   try {
     await api(`/api/executive/approvals/${id}/decision`,{method:"POST",body:JSON.stringify({decision,comment})});
@@ -3000,6 +3016,7 @@ function bind() {
     state.page=el.dataset.financePage;state.financeQuickOpen=false;render();window.scrollTo(0,0);
   }));
   document.querySelector("[data-finance-fy]")?.addEventListener("change",async event=>{try{event.target.disabled=true;state.finance=await api(`/api/finance/command-center?fy=${event.target.value}`);render();}catch(error){toast(error.message);}});
+  document.querySelector("[data-finance-subscriptions]")?.addEventListener("click",()=>openFinanceSubscriptionMembers());
   document.querySelectorAll("[data-finance-modal]").forEach(el=>el.addEventListener("click",()=>openFinanceModal(el.dataset.financeModal)));
   document.querySelectorAll("[data-finance-voucher]").forEach(el=>el.addEventListener("click",()=>financeVoucherDecision(el.dataset.financeVoucher,el.dataset.decision)));
   document.querySelectorAll("[data-finance-entry-review]").forEach(el=>el.addEventListener("click",()=>reviewFinanceEntry(el.dataset.financeEntryReview,el.dataset.decision)));
@@ -3230,8 +3247,11 @@ async function deleteOrganizationDocument(id,title="this document") {
 }
 
 async function decideDocumentPublication(id,decision) {
-  const comment=await promptDialog(decision==="approve"?"Optional publication note:":"Explain what Legal should correct before publication:","");
-  if(comment===null)return;
+  let comment="";
+  if(decision!=="approve"){
+    comment=await promptDialog("Explain what Legal should correct before publication:","");
+    if(comment===null)return;
+  }else if(!await confirmDialog("Publish this document to its approved audience?"))return;
   try {
     await api(`/api/documents/${id}/publication-decision`,{method:"POST",body:JSON.stringify({decision,comment})});
     state.executive=await api("/api/executive/command-center");render();

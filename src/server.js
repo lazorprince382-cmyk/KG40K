@@ -1023,6 +1023,30 @@ app.get("/api/finance/command-center",auth,requireFinance("view"),asyncRoute(asy
   const snapshotValues=financialSnapshot?.values||{};
   const snapshotAmount=code=>Number(snapshotValues[code]?.current||0);
   const pendingFinanceEntries=entries.rows.filter(x=>x.status==="pending_finance_review");
+  const subscriptionPolicy=await one(`SELECT fiscal_year_label AS "fiscalYear",annual_subscription_fee::float AS fee,
+    EXTRACT(YEAR FROM ends_on)::int AS year,starts_on AS "startsOn",ends_on AS "endsOn"
+    FROM member_financial_year_policies WHERE status='active' ORDER BY ends_on DESC LIMIT 1`);
+  const activeMemberCount=Number((await one(`SELECT COUNT(*)::int AS count FROM members WHERE status='active'`))?.count||0);
+  const subscriptionPayments=subscriptionPolicy?(await query(`SELECT t.id,t.reference,t.amount::float,t.created_at AS "paidAt",
+      t.verified_at AS "verifiedAt",m.id AS "memberId",m.full_name AS member,m.member_number AS "memberNumber"
+      FROM transactions t JOIN members m ON m.id=t.member_id
+      WHERE t.type='Annual subscription fee' AND t.status='completed'
+        AND (t.target_fiscal_year=$1 OR (t.target_fiscal_year IS NULL AND t.created_at::date BETWEEN $2 AND $3))
+      ORDER BY COALESCE(t.verified_at,t.created_at) DESC,t.id DESC`,
+    [subscriptionPolicy.year,subscriptionPolicy.startsOn,subscriptionPolicy.endsOn])).rows:[];
+  const subscriptionCollected=subscriptionPayments.reduce((sum,row)=>sum+Number(row.amount||0),0);
+  const subscriptionExpected=activeMemberCount*Number(subscriptionPolicy?.fee||0);
+  const subscriptionMembersPaid=new Set(subscriptionPayments.map(row=>row.memberId)).size;
+  const subscriptionProgress={
+    fiscalYear:subscriptionPolicy?.fiscalYear||null,
+    fee:Number(subscriptionPolicy?.fee||0),
+    expected:subscriptionExpected,
+    collected:subscriptionCollected,
+    percent:subscriptionExpected?Math.min(100,Math.round(subscriptionCollected/subscriptionExpected*100)):0,
+    activeMembers:activeMemberCount,
+    membersPaid:subscriptionMembersPaid,
+    payments:subscriptionPayments
+  };
   res.json({
     selectedFiscalYear,availableFiscalYears,historicalPeriod,
     stats:{currentBankBalance:historicalPeriod?snapshotAmount('cash_bank'):bank,cashOnHand:historicalPeriod?0:cash,
@@ -1034,12 +1058,13 @@ app.get("/api/finance/command-center",auth,requireFinance("view"),asyncRoute(asy
       pendingFinanceEntries:pendingFinanceEntries.length,
       approvedBudget:budgetAllocated,budgetUtilized:budgetAllocated?Number((budgetUsed/budgetAllocated*100).toFixed(2)):0,
       totalAssets:historicalPeriod?snapshotAmount('total_assets'):totalAssets,
-      totalLiabilities:historicalPeriod?snapshotAmount('total_liabilities'):liabilities},
+      totalLiabilities:historicalPeriod?snapshotAmount('total_liabilities'):liabilities,
+      annualSubscriptionsCollected:subscriptionCollected,annualSubscriptionsExpected:subscriptionExpected},
     cashPosition:{bankBalance:bank,cashBalance:cash,pettyCash:petty,mobileMoney:mobile,availableFunds:Math.max(0,liquidFunds-restricted),restrictedFunds:restricted},
     financialSnapshot,accounts:accounts.rows,departments:departments.rows,budgets:budgetRows,vouchers:vouchers.rows,entries:entries.rows,
     pendingEntries:pendingFinanceEntries,invoices:invoices.rows,assets:assets.rows,
     procurements:procurements.rows,documents:documents.rows,investmentAnalyses:investmentAnalyses.rows,monthly,daily,
-    incomeBySource,expensesByCategory,
+    incomeBySource,expensesByCategory,subscriptionProgress,
     notifications:[
       ...pendingFinanceEntries.slice(0,4).map(x=>({level:"warning",title:`${x.reference} awaits Finance verification`,createdAt:x.createdAt||x.transactionDate})),
       ...budgetRows.filter(x=>x.utilization>=80).map(x=>({level:"warning",title:`${x.department} budget has reached ${x.utilization}%`,createdAt:x.updatedAt||x.createdAt})),
@@ -1240,14 +1265,14 @@ app.post("/api/finance/vouchers/:id/decision",auth,requireFinance("approve"),asy
   if(!voucher) return res.status(404).json({error:"Payment voucher not found"});
   if(Number(voucher.requested_by)===Number(req.user.id)) return res.status(403).json({error:"You cannot review your own payment request"});
   if(voucher.status!=="finance_review") return res.status(409).json({error:"This voucher is no longer awaiting Finance review"});
-  let statusValue=decision==="reject"?"rejected":decision==="return"?"returned_for_correction":Number(voucher.amount)>=10000000?"executive_approval":"finance_approved";
+  let statusValue=decision==="reject"?"rejected":decision==="return"?"returned_for_correction":"executive_approval";
   let activityId=null;
   if(statusValue==="executive_approval") {
     const financeDepartment=await one("SELECT id FROM departments WHERE code='finance'");
     const activity=await one(`INSERT INTO department_activities
       (department_id,reference,activity_type,title,description,amount,status,visibility_level,created_by)
       VALUES ($1,$2,'finance-payment',$3,$4,$5,'pending_executive',4,$6) RETURNING id`,
-    [financeDepartment.id,`EXEC-${voucher.voucher_number}`,`Large payment - ${voucher.supplier}`,voucher.description,voucher.amount,req.user.id]);
+    [financeDepartment.id,`EXEC-${voucher.voucher_number}`,`Payment voucher - ${voucher.supplier}`,voucher.description,voucher.amount,req.user.id]);
     activityId=activity.id;
   }
   await query(`UPDATE finance_payment_vouchers SET status=$1,finance_reviewed_by=$2,finance_comment=$3,
@@ -1261,13 +1286,13 @@ app.post("/api/finance/vouchers/:id/process",auth,requireFinance("edit"),asyncRo
   const processed=await transaction(async client=>{
     const voucher=(await client.query("SELECT * FROM finance_payment_vouchers WHERE id=$1 FOR UPDATE",[req.params.id])).rows[0];
     if(!voucher) { const error=new Error("Payment voucher not found"); error.status=404; throw error; }
-    if(!["finance_approved","executive_approved"].includes(voucher.status)) { const error=new Error("The required approvals are not complete or payment was already processed"); error.status=409; throw error; }
+    if(!["executive_approved"].includes(voucher.status)) { const error=new Error("Executive approval is required before payment can be processed"); error.status=409; throw error; }
     const account=(await client.query("SELECT * FROM finance_accounts WHERE id=$1 AND active=true FOR UPDATE",[Number(req.body.accountId)])).rows[0];
     if(!account||Number(account.balance)<Number(voucher.amount)) { const error=new Error("Select an account with sufficient funds"); error.status=400; throw error; }
     const debit=await client.query("UPDATE finance_accounts SET balance=balance-$1 WHERE id=$2 AND balance >= $1 RETURNING id",[voucher.amount,account.id]);
     if(debit.rowCount!==1) { const error=new Error("The account no longer has sufficient funds"); error.status=409; throw error; }
     const voucherUpdate=await client.query(`UPDATE finance_payment_vouchers SET status='processed',processed_by=$1,processed_at=NOW(),payment_method=COALESCE($2,payment_method)
-      WHERE id=$3 AND status IN ('finance_approved','executive_approved') RETURNING id`,[req.user.id,req.body.paymentMethod||null,voucher.id]);
+      WHERE id=$3 AND status='executive_approved' RETURNING id`,[req.user.id,req.body.paymentMethod||null,voucher.id]);
     if(voucherUpdate.rowCount!==1) { const error=new Error("Payment voucher was already processed"); error.status=409; throw error; }
     const financeDepartment=(await client.query("SELECT id FROM departments WHERE code='finance'")).rows[0];
     await client.query(`INSERT INTO organization_finance_entries
@@ -1520,7 +1545,7 @@ app.get("/api/credits/command-center",auth,requireCredits("view"),asyncRoute(asy
   ]);
   const contributionPolicy=await one(`SELECT id,fiscal_year_label AS "fiscalYear",starts_on AS "startsOn",ends_on AS "endsOn",
     monthly_savings_target::float AS "monthlySavingsTarget",annual_share_target::float AS "annualShareTarget",
-    annual_subscription_fee::float AS "annualSubscriptionFee",
+    annual_subscription_fee::float AS "annualSubscriptionFee",COALESCE(opening_share_credit,0)::float AS "openingShareCredit",
     LEAST(12,GREATEST(0,(EXTRACT(YEAR FROM age(date_trunc('month',LEAST(CURRENT_DATE,ends_on+INTERVAL '1 day')),date_trunc('month',starts_on)))*12+
       EXTRACT(MONTH FROM age(date_trunc('month',LEAST(CURRENT_DATE,ends_on+INTERVAL '1 day')),date_trunc('month',starts_on))))::int)) AS "monthsDue"
     FROM member_financial_year_policies WHERE status='active' AND CURRENT_DATE BETWEEN starts_on AND ends_on

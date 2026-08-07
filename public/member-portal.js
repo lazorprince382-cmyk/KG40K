@@ -18,8 +18,46 @@
   const metric=(name,value,icon,target,sub="")=>`<button class="member-summary-card" data-member-page="${target}"><span>${icons[icon]}</span><div><small>${name}</small><strong>${value}</strong><em>${sub}</em></div></button>`;
   const panel=(title,sub,body)=>`<section class="card member-panel"><div class="card-head"><div><h2 class="card-title">${title}</h2><p class="card-subtitle">${sub}</p></div></div>${body}</section>`;
   const targetLine=(label,paid,target,options={})=>{const p=Number(paid),t=Number(target),percent=t?Math.min(100,Math.round(p/t*100)):0,variance=p-t,surplusLabel=options.surplusLabel||"Ahead by";let statusClass="met",statusText="Target met";if(variance<-0.005){statusClass="behind";statusText=`Short by ${money(Math.abs(variance))}`;}else if(variance>0.005){statusClass="ahead";statusText=`${surplusLabel} ${money(variance)}`;}const barTone=statusClass==="met"?"met":statusClass;return `<div class="member-target-line ${statusClass}"><div><strong>${label}</strong><span>${money(paid)} paid of ${money(t)}</span></div><b>${percent}%</b><i class="${barTone}"><em style="width:${percent}%"></em></i><small class="${statusClass}">${statusText}</small></div>`;};
-  function financialYearPanel(){const f=C()?.financialYearProgress;if(!f)return "";const completedMet=Number(f.savingsPaid)>=Number(f.expectedSavingsToDate)-0.005,annualMet=Number(f.savingsPaid)>=Number(f.annualSavingsTarget)-0.005,annualSurplus=Math.max(0,Number(f.savingsPaid)-Number(f.annualSavingsTarget));const advanceNote=annualMet&&annualSurplus>0?`<div class="member-policy-note member-advance-note"><b>Annual savings target met.</b> The extra ${money(annualSurplus)} stays in your savings balance as surplus for ${esc(f.fiscalYear)}. It does not move to next year until that year starts and you choose it on deposit.</div>`:completedMet&&!annualMet?`<div class="member-policy-note">You are up to date on completed months. Keep saving toward the full-year target of ${money(f.annualSavingsTarget)}.</div>`:"";return panel(`${f.fiscalYear} contribution progress`,`${f.monthsDue} completed month${Number(f.monthsDue)===1?"":"s"} due since 1 July  -  the current month counts only after it ends`,`${targetLine("Savings for completed months",f.savingsPaid,f.expectedSavingsToDate)}${targetLine("Full-year savings target",f.savingsPaid,f.annualSavingsTarget,{surplusLabel:"Surplus for this year"})}${targetLine("Annual share contribution",f.sharePaid,f.annualShareTarget)}${targetLine("Annual subscription fee",f.subscriptionPaid,f.annualSubscriptionFee)}<div class="member-policy-note"><b>Monthly savings:</b> ${money(f.monthlySavingsTarget)}  -  <b>Full-year savings target:</b> ${money(f.annualSavingsTarget)}</div>${advanceNote}`);}
-  function closingPositionPanel(){const x=C()?.pastYearProgress;if(!x)return "";const variance=Number(x.variance||0),percent=x.expected?Math.min(100,Math.round(x.totalPaid/x.expected*100)):0;return panel(`${x.fiscalYear} closing-target progress`,`Year ended ${date(x.periodEnd)} - later arrears payments reduce the shortfall without changing the original closing report`,`${targetLine("Adjusted past-year savings",x.totalPaid,x.expected)}<div class="member-closing-grid"><div><span>Paid by 30 June</span><strong>${money(x.paidAtClose)}</strong></div><div><span>Arrears cleared later</span><strong>${money(x.arrearsPaid)}</strong></div><div><span>Expected target</span><strong>${money(x.expected)}</strong></div><div><span>Progress</span><strong>${percent}%</strong></div><div class="${variance<0?"behind":"ahead"}"><span>Remaining position</span><strong>${variance<0?`Still owing ${money(Math.abs(variance))}`:`Surplus ${money(variance)}`}</strong></div></div><p class="member-policy-note">Your lifetime savings balance includes every verified savings payment from all years.</p>`);}
+  function financialYearPanel(){
+    const f=C()?.financialYearProgress;if(!f)return "";
+    const savingsToward=Number(f.savingsTowardTarget??f.savingsPaid);
+    const shareToward=Number(f.sharePaidTowardTarget??f.sharePaid);
+    const completedMet=savingsToward>=Number(f.expectedSavingsToDate)-0.005;
+    const annualMet=savingsToward>=Number(f.annualSavingsTarget)-0.005;
+    const annualSurplus=Math.max(0,savingsToward-Number(f.annualSavingsTarget));
+    const covered=Number(f.coveredMonths||0);
+    const surplusApplied=Number(f.pastYearSurplusApplied||0);
+    const surplusNote=surplusApplied>0
+      ?`<div class="member-policy-note member-advance-note"><b>Past-year surplus applied:</b> ${money(surplusApplied)} carries into ${esc(f.fiscalYear)} savings and covers about <b>${covered} month${covered===1?"":"s"}</b>${Number(f.coveredMonthsRemainder)>0?` (plus ${money(f.coveredMonthsRemainder)} toward the next month)`:""}.</div>`
+      :"";
+    const advanceNote=annualMet&&annualSurplus>0
+      ?`<div class="member-policy-note member-advance-note"><b>Annual savings target met.</b> Extra ${money(annualSurplus)} remains as surplus toward future months.</div>`
+      :completedMet&&!annualMet?`<div class="member-policy-note">You are up to date on completed months. Keep saving toward the full-year target of ${money(f.annualSavingsTarget)}.</div>`:"";
+    const shareNote=Number(f.openingShareCredit)>0
+      ?`<div class="member-policy-note"><b>Bought shares this year:</b> ${money(f.openingShareCredit)} already counted toward the ${money(f.annualShareTarget)} share target.</div>`
+      :"";
+    return panel(`${f.fiscalYear} contribution progress`,
+      `${f.monthsDue} completed month${Number(f.monthsDue)===1?"":"s"} due since 1 July  -  the current month counts only after it ends`,
+      `${targetLine("Savings for completed months",savingsToward,f.expectedSavingsToDate)}
+       ${targetLine("Full-year savings target",savingsToward,f.annualSavingsTarget,{surplusLabel:"Surplus toward future months"})}
+       ${targetLine("Annual share contribution",shareToward,f.annualShareTarget)}
+       ${targetLine("Annual subscription fee",f.subscriptionPaid,f.annualSubscriptionFee)}
+       ${targetLine("Combined annual contribution",Number(f.combinedAnnualPaid||0),Number(f.combinedAnnualTarget||0))}
+       <div class="member-policy-note"><b>Monthly savings:</b> ${money(f.monthlySavingsTarget)}  -  <b>Full-year savings:</b> ${money(f.annualSavingsTarget)}  -  <b>Shares:</b> ${money(f.annualShareTarget)}  -  <b>Subscription:</b> ${money(f.annualSubscriptionFee)}  -  <b>Combined target:</b> ${money(f.combinedAnnualTarget||0)}</div>
+       ${surplusNote}${shareNote}${advanceNote}`);
+  }
+  function closingPositionPanel(){
+    const x=C()?.pastYearProgress;if(!x)return "";
+    const variance=Number(x.variance||0),percent=x.expected?Math.min(100,Math.round(x.totalPaid/x.expected*100)):0;
+    const f=C()?.financialYearProgress;
+    const monthly=Number(f?.monthlySavingsTarget||0);
+    const covered=monthly>0&&variance>0?Math.floor(variance/monthly):0;
+    const remainder=monthly>0&&variance>0?Math.max(0,variance-(covered*monthly)):0;
+    const carryNote=variance>0
+      ?`<p class="member-policy-note member-advance-note"><b>Surplus carries forward:</b> ${money(variance)} jumps into ${esc(f?.fiscalYear||"this year")} savings and covers about <b>${covered} month${covered===1?"":"s"}</b>${remainder>0?` plus ${money(remainder)}`:""}.</p>`
+      :`<p class="member-policy-note">Your lifetime savings balance includes every verified savings payment from all years.</p>`;
+    return panel(`${x.fiscalYear} closing-target progress`,`Year ended ${date(x.periodEnd)} - later arrears payments reduce the shortfall without changing the original closing report`,`${targetLine("Adjusted past-year savings",x.totalPaid,x.expected)}<div class="member-closing-grid"><div><span>Paid by 30 June</span><strong>${money(x.paidAtClose)}</strong></div><div><span>Arrears cleared later</span><strong>${money(x.arrearsPaid)}</strong></div><div><span>Expected target</span><strong>${money(x.expected)}</strong></div><div><span>Progress</span><strong>${percent}%</strong></div><div class="${variance<0?"behind":"ahead"}"><span>Remaining position</span><strong>${variance<0?`Still owing ${money(Math.abs(variance))}`:`Surplus ${money(variance)}`}</strong></div></div>${carryNote}`);
+  }
 
   function accountSettings(){
     const photo=state.user?.has_profile_photo,m=C()?.member;
@@ -55,8 +93,8 @@
       items.push({tone:activeLoan.inDangerPeriod||activeLoan.status==="overdue"?"danger":"info",title:`Next loan repayment · ${activeLoan.reference}`,detail:`${money(activeLoan.nextPaymentAmount)} due ${date(activeLoan.nextDueDate)}`,action:"member-loans",label:"Pay loan"});
     }
     const fy=c.financialYearProgress;
-    if(fy&&Number(fy.expectedSavingsToDate)>0&&Number(fy.savingsPaid)<Number(fy.expectedSavingsToDate)){
-      const short=Number(fy.expectedSavingsToDate)-Number(fy.savingsPaid);
+    if(fy&&Number(fy.expectedSavingsToDate)>0&&Number(fy.savingsTowardTarget??fy.savingsPaid)<Number(fy.expectedSavingsToDate)){
+      const short=Number(fy.expectedSavingsToDate)-Number(fy.savingsTowardTarget??fy.savingsPaid);
       items.push({tone:"info",title:`${fy.fiscalYear} savings still short`,detail:`${money(short)} needed to stay on target`,action:"member-savings",label:"Submit deposit"});
     }
     if(!items.length)return "";
@@ -385,8 +423,8 @@
     const f=C()?.financialYearProgress,past=C()?.pastYearProgress,currentYear=f?new Date(f.endsOn).getUTCFullYear():new Date().getUTCFullYear(),pastYear=past?new Date(past.periodEnd).getUTCFullYear():currentYear-1;
     const balances=[];
     const add=(year,type,label,balance,force=false)=>{balance=Math.max(0,Number(balance||0));if(balance>0||force)balances.push({year,type,label,balance});};
-    add(currentYear,"savings","Monthly savings / advance",f?Math.max(0,Number(f.expectedSavingsToDate)-Number(f.savingsPaid)):0,true);
-    if(f){add(currentYear,"shares","Annual share contribution",Number(f.annualShareTarget)-Number(f.sharePaid));add(currentYear,"subscription","Annual subscription fee",Number(f.annualSubscriptionFee)-Number(f.subscriptionPaid));}
+    add(currentYear,"savings","Monthly savings / advance",f?Math.max(0,Number(f.expectedSavingsToDate)-Number(f.savingsTowardTarget??f.savingsPaid)):0,true);
+    if(f){add(currentYear,"shares","Annual share contribution",Math.max(0,Number(f.annualShareTarget)-Number(f.sharePaidTowardTarget??f.sharePaid)));add(currentYear,"subscription","Annual subscription fee",Math.max(0,Number(f.annualSubscriptionFee)-Number(f.subscriptionPaid)));}
     if(past&&Number(past.variance)<0)add(pastYear,"savings","Past-year savings arrears",Math.abs(Number(past.variance)));
     const years=[...new Set(balances.map(x=>x.year))],yearLabel=year=>year===currentYear?(f?.fiscalYear||`FY ending ${year}`):(past?.fiscalYear||`FY ending ${year}`);
     const yearOptions=years.map(year=>`<option value="${year}">${esc(yearLabel(year))}${year===pastYear?" - arrears":" - current year"}</option>`).join("");

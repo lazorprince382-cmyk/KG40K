@@ -110,7 +110,7 @@ module.exports = function registerMemberAccountApi({
     const transactionType=contributionTypes[String(req.body.contributionType||"savings")]||contributionTypes.savings;
     const currentPolicy=await one(`SELECT EXTRACT(YEAR FROM ends_on)::int AS year,starts_on AS "startsOn",ends_on AS "endsOn",
       monthly_savings_target::float AS "monthlySavingsTarget",annual_share_target::float AS "annualShareTarget",
-      annual_subscription_fee::float AS "annualSubscriptionFee",
+      annual_subscription_fee::float AS "annualSubscriptionFee",COALESCE(opening_share_credit,0)::float AS "openingShareCredit",
       LEAST(12,GREATEST(0,(EXTRACT(YEAR FROM age(date_trunc('month',LEAST(CURRENT_DATE,ends_on+INTERVAL '1 day')),date_trunc('month',starts_on)))*12+
         EXTRACT(MONTH FROM age(date_trunc('month',LEAST(CURRENT_DATE,ends_on+INTERVAL '1 day')),date_trunc('month',starts_on))))::int)) AS "monthsDue"
       FROM member_financial_year_policies WHERE status='active' AND CURRENT_DATE BETWEEN starts_on AND ends_on ORDER BY starts_on DESC LIMIT 1`);
@@ -140,10 +140,21 @@ module.exports = function registerMemberAccountApi({
     } else if(currentPolicy) {
       const typeTarget=transactionType==='Savings deposit'?Number(currentPolicy.monthlySavingsTarget)*Number(currentPolicy.monthsDue):
         transactionType==='Share purchase'?Number(currentPolicy.annualShareTarget):Number(currentPolicy.annualSubscriptionFee);
-      const paid=Number((await one(`SELECT COALESCE(SUM(amount),0)::float AS amount FROM transactions
+      let paid=Number((await one(`SELECT COALESCE(SUM(amount),0)::float AS amount FROM transactions
         WHERE member_id=$1 AND type=$2 AND status='completed' AND
           (target_fiscal_year=$3 OR (target_fiscal_year IS NULL AND created_at::date BETWEEN $4 AND $5))`,
       [req.user.member_id,transactionType,targetFiscalYear,currentPolicy.startsOn,currentPolicy.endsOn]))?.amount||0);
+      if(transactionType==='Share purchase')paid+=Number(currentPolicy.openingShareCredit||0);
+      if(transactionType==='Savings deposit'){
+        const past=await one(`SELECT COALESCE(legacy.expected_savings,0)::float AS expected,
+          COALESCE(legacy.savings_balance,0)::float+COALESCE((SELECT SUM(t.amount) FROM transactions t
+            WHERE t.member_id=m.id AND t.type='Savings deposit' AND t.status='completed' AND t.target_fiscal_year=EXTRACT(YEAR FROM p.period_end)::int),0)::float AS paid
+          FROM members m
+          LEFT JOIN legacy_member_opening_balances legacy ON legacy.id=m.legacy_opening_balance_id
+          LEFT JOIN financial_reporting_periods p ON p.id=legacy.period_id
+          WHERE m.id=$1`,[req.user.member_id]);
+        paid+=Math.max(0,Number(past?.paid||0)-Number(past?.expected||0));
+      }
       outstanding=Math.max(0,typeTarget-paid);
     } else {
       outstanding=transactionType==="Savings deposit"?Number.POSITIVE_INFINITY:0;
@@ -263,6 +274,7 @@ module.exports = function registerMemberAccountApi({
     const financialYear = await one(`SELECT id,fiscal_year_label AS "fiscalYear",starts_on AS "startsOn",ends_on AS "endsOn",
       monthly_savings_target::float AS "monthlySavingsTarget",annual_share_target::float AS "annualShareTarget",
       annual_subscription_fee::float AS "annualSubscriptionFee",
+      COALESCE(opening_share_credit,0)::float AS "openingShareCredit",
       LEAST(12,GREATEST(0,(EXTRACT(YEAR FROM age(date_trunc('month',LEAST(CURRENT_DATE,ends_on+INTERVAL '1 day')),date_trunc('month',starts_on)))*12+
         EXTRACT(MONTH FROM age(date_trunc('month',LEAST(CURRENT_DATE,ends_on+INTERVAL '1 day')),date_trunc('month',starts_on))))::int)) AS "monthsDue"
       FROM member_financial_year_policies
@@ -285,11 +297,38 @@ module.exports = function registerMemberAccountApi({
       totalPaid: Number(closingPosition.savings) + previousArrearsPaid, expected: Number(closingPosition.expected),
       variance: Number(closingPosition.savings) + previousArrearsPaid - Number(closingPosition.expected)
     } : null;
+    const monthlyTarget = Number(financialYear?.monthlySavingsTarget || 0);
+    const pastSurplus = Math.max(0, Number(pastYearProgress?.variance || 0));
+    const coveredMonthsExact = monthlyTarget > 0 ? pastSurplus / monthlyTarget : 0;
+    const coveredMonths = Math.floor(coveredMonthsExact + 1e-9);
+    const coveredMonthsRemainder = Math.max(0, pastSurplus - (coveredMonths * monthlyTarget));
+    const openingShareCredit = Number(financialYear?.openingShareCredit || 0);
+    const savingsPaidThisYear = Number(yearContributions.savings || 0);
+    const savingsTowardTarget = savingsPaidThisYear + pastSurplus;
+    const sharePaidThisYear = Number(yearContributions.shares || 0);
+    const sharePaidTowardTarget = sharePaidThisYear + openingShareCredit;
+    const subscriptionPaid = Number(yearContributions.subscription || 0);
+    const annualSavingsTarget = monthlyTarget * 12;
+    const annualShareTarget = Number(financialYear?.annualShareTarget || 0);
+    const annualSubscriptionFee = Number(financialYear?.annualSubscriptionFee || 0);
+    const combinedAnnualTarget = annualSavingsTarget + annualShareTarget + annualSubscriptionFee;
+    const combinedAnnualPaid = Math.min(annualSavingsTarget, savingsTowardTarget) + Math.min(annualShareTarget, sharePaidTowardTarget) + Math.min(annualSubscriptionFee, subscriptionPaid);
     const financialYearProgress = financialYear ? {
-      ...financialYear, annualSavingsTarget: Number(financialYear.monthlySavingsTarget) * 12,
-      expectedSavingsToDate: Number(financialYear.monthlySavingsTarget) * Number(financialYear.monthsDue),
-      savingsPaid: Number(yearContributions.savings), sharePaid: Number(yearContributions.shares),
-      subscriptionPaid: Number(yearContributions.subscription)
+      ...financialYear, annualSavingsTarget,
+      expectedSavingsToDate: monthlyTarget * Number(financialYear.monthsDue),
+      savingsPaid: savingsPaidThisYear,
+      savingsTowardTarget,
+      pastYearSurplusApplied: pastSurplus,
+      coveredMonths,
+      coveredMonthsExact: Number(coveredMonthsExact.toFixed(2)),
+      coveredMonthsRemainder,
+      sharePaid: sharePaidThisYear,
+      sharePaidTowardTarget,
+      openingShareCredit,
+      subscriptionPaid,
+      combinedAnnualTarget,
+      combinedAnnualPaid,
+      combinedAnnualRemaining: Math.max(0, combinedAnnualTarget - (savingsTowardTarget + sharePaidTowardTarget + subscriptionPaid))
     } : null;
     const activeLoans = loans.rows.filter(item => ["active", "overdue"].includes(item.status));
     const contributionsTotal = welfareContributions.rows.filter(item => ["verified", "recorded", "completed"].includes(item.status)).reduce((sum, item) => sum + Number(item.amount), 0);
@@ -368,7 +407,7 @@ module.exports = function registerMemberAccountApi({
     const transactionType=contributionTypes[String(req.body.contributionType||"savings")]||contributionTypes.savings;
     const currentPolicy=await one(`SELECT EXTRACT(YEAR FROM ends_on)::int AS year,starts_on AS "startsOn",ends_on AS "endsOn",
       monthly_savings_target::float AS "monthlySavingsTarget",annual_share_target::float AS "annualShareTarget",
-      annual_subscription_fee::float AS "annualSubscriptionFee",
+      annual_subscription_fee::float AS "annualSubscriptionFee",COALESCE(opening_share_credit,0)::float AS "openingShareCredit",
       LEAST(12,GREATEST(0,(EXTRACT(YEAR FROM age(date_trunc('month',LEAST(CURRENT_DATE,ends_on+INTERVAL '1 day')),date_trunc('month',starts_on)))*12+
         EXTRACT(MONTH FROM age(date_trunc('month',LEAST(CURRENT_DATE,ends_on+INTERVAL '1 day')),date_trunc('month',starts_on))))::int)) AS "monthsDue"
       FROM member_financial_year_policies WHERE status='active' AND CURRENT_DATE BETWEEN starts_on AND ends_on ORDER BY starts_on DESC LIMIT 1`);
