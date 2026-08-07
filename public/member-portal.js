@@ -424,10 +424,13 @@
   function syncMemberPending(){if(!C())return;const extra=C().welfare.contributions.filter(x=>["pending","pending_finance_review"].includes(x.status)).length;C().summary.pendingRequests+=extra;}
   function bindMember(){
     document.querySelectorAll("[data-member-page]").forEach(x=>x.onclick=async()=>{state.memberContext=true;state.page=x.dataset.memberPage;if(state.page==="messages"){state.messenger=null;window.render();await loadMessenger();}window.render();window.scrollTo(0,0);});
-    document.querySelector("[data-member-back]")?.addEventListener("click",()=>{
+    document.querySelector("[data-member-back]")?.addEventListener("click",async()=>{
       if(state.memberOversight){
         state.memberOversight=false;state.memberContext=false;state.memberCenter=null;state.page="members";window.render();window.scrollTo(0,0);return;
       }
+      const dept=availableWorkspaces().find(item=>item.type==="department"&&(item.primary||item.role===state.primaryRole||item.role===state.user?.role))
+        ||availableWorkspaces().find(item=>item.type==="department");
+      if(dept&&typeof enterWorkspace==="function"){await enterWorkspace(dept);return;}
       state.memberContext=false;state.page="dashboard";window.render();
     });
     document.querySelectorAll("[data-member-transaction]").forEach(x=>x.addEventListener("click",()=>transactionDetails(x.dataset.memberTransaction)));
@@ -516,12 +519,30 @@
   document.addEventListener("click",async event=>{
     const trigger=event.target.closest?.(".member-context-link");if(!trigger)return;
     event.preventDefault();event.stopImmediatePropagation();
-    try{if(!state.memberCenter){[state.memberCenter,state.memberSelfService]=await Promise.all([api("/api/member/command-center"),api("/api/member/self-service")]);syncMemberPending();}state.memberContext=true;state.page="member-dashboard";window.render();window.scrollTo(0,0);}
+    try{
+      const memberWorkspace=findWorkspace("member");
+      if(memberWorkspace){await enterWorkspace(memberWorkspace);return;}
+      if(!state.memberCenter){[state.memberCenter,state.memberSelfService]=await Promise.all([api("/api/member/command-center"),api("/api/member/self-service")]);syncMemberPending();}
+      state.memberContext=true;state.page="member-dashboard";window.render();window.scrollTo(0,0);
+    }
     catch(error){toast(error.message||"Could not open your linked member account.");}
   },true);
   rolePages.Member=pages;
   const oldRefresh=refreshData;refreshData=async function(){await oldRefresh();if(linked()){state.memberSelfService=await api("/api/member/self-service");syncMemberPending();}if(linked()&&state.role==="Member"&&!pages.includes(state.page))state.page="member-dashboard";};
-  const oldSidebar=window.sidebar;window.sidebar=function(){if(inMemberSpace())return sidebar();let html=oldSidebar();if(linked()&&state.role!=="Member"&&!state.memberOversight)html=html.replace("</nav>",`<button class="nav-item member-context-link" data-member-page="member-dashboard">${icons.users}<span>My Member Account</span></button></nav>`);return html;};
+  const oldSidebar=window.sidebar;window.sidebar=function(){
+    if(inMemberSpace()){
+      let html=sidebar();
+      if(typeof injectWorkspaceSwitcher==="function"&&availableWorkspaces().length>1){
+        const switcher=workspaceSwitcherHtml();
+        if(html.includes("sidebar-bottom"))html=html.replace(`<div class="sidebar-bottom">`,`<div class="sidebar-bottom">${switcher}`);
+        return html;
+      }
+      return html;
+    }
+    let html=oldSidebar();
+    if(linked()&&state.role!=="Member"&&!state.memberOversight&&!workspaceNeedsPicker())html=html.replace("</nav>",`<button class="nav-item member-context-link" data-member-page="member-dashboard">${icons.users}<span>My Member Account</span></button></nav>`);
+    return html;
+  };
   const oldView=window.view;window.view=function(){if(inMemberSpace())return view();const output=oldView();return state.page==="settings"?`${accountSettings()}${output}`:output;};
   const oldSubtitle=window.subtitle;window.subtitle=function(){return pages.includes(state.page)?(state.memberOversight?"Read-only view of this member's account records.":"Only your own membership, financial and support records are shown."):oldSubtitle();};
   const oldRender=window.render;window.render=function(){oldRender();if(pages.includes(state.page)&&state.memberCenter){const eyebrow=document.querySelector(".page-head .eyebrow"),heading=document.querySelector(".page-head h1");if(eyebrow)eyebrow.textContent=state.memberOversight?"Member oversight":"Member Account";if(heading)heading.textContent=labels[state.page];const search=document.getElementById("global-search");if(search)search.placeholder="Search statements, loans and documents...";}};

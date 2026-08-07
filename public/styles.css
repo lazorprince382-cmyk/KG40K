@@ -1601,6 +1601,28 @@ table th,table td{font-size:15px;line-height:1.45}.dept-panel td small,.dept-pan
 .member-next-up-list .button{flex:0 0 auto;white-space:nowrap}
 @media(max-width:640px){.member-next-up-list article{align-items:flex-start;flex-direction:column}}
 
+/* Multi-role workspace picker and switcher */
+.workspace-picker-box{text-align:left}.workspace-picker-box h2,.workspace-picker-box>p{text-align:center}
+.workspace-pick-grid{display:grid;gap:12px;margin:22px 0 18px}
+.workspace-pick-card{display:grid;grid-template-columns:48px minmax(0,1fr);grid-template-rows:auto auto auto;column-gap:14px;row-gap:2px;width:100%;padding:16px 18px;border:1px solid #d7e1d8;border-radius:14px;background:#fff;text-align:left;cursor:pointer;transition:border-color .15s,box-shadow .15s,transform .15s}
+.workspace-pick-card:hover{border-color:#0b3b70;box-shadow:0 10px 24px rgba(11,59,112,.1);transform:translateY(-1px)}
+.workspace-pick-card.member{border-color:rgba(240,180,41,.55);background:linear-gradient(180deg,#fffdf6,#fff)}
+.workspace-pick-icon{grid-row:1/span 3;width:48px;height:48px;display:grid;place-items:center;border-radius:12px;background:#eef3f8;color:#0b3b70}
+.workspace-pick-card.member .workspace-pick-icon{background:#fff4d6;color:#b57b00}
+.workspace-pick-card strong{color:#0b1f3b;font:800 16px Manrope}
+.workspace-pick-card span{color:#667788;font-size:13px}
+.workspace-pick-card em{color:#8a98a5;font-size:12px;font-style:normal}
+.workspace-signout{width:100%}
+.workspace-switcher{margin:0 0 12px;padding:12px;border:1px solid rgba(255,255,255,.12);border-radius:13px;background:rgba(255,255,255,.05)}
+.workspace-switcher label{display:block;margin-bottom:8px;color:#8da99d;font-size:11px;font-weight:700;letter-spacing:.8px;text-transform:uppercase}
+.workspace-switch-list{display:grid;gap:7px}
+.workspace-switch-item{display:flex;align-items:center;gap:10px;width:100%;padding:9px 11px;border:1px solid rgba(255,255,255,.1);border-radius:10px;background:transparent;color:#d7e6dc;text-align:left;cursor:pointer}
+.workspace-switch-item svg{width:16px;height:16px;flex:0 0 auto}
+.workspace-switch-item span{font-size:13px;font-weight:650}
+.workspace-switch-item:hover{background:rgba(255,255,255,.07)}
+.workspace-switch-item.active{border-color:rgba(240,180,41,.55);background:rgba(240,180,41,.12);color:#f0b429}
+.workspace-switch-item.member{color:#f0b429;border-color:rgba(240,180,41,.35)}
+
 /* Financial-year controls and contribution comparisons */
 .dashboard-year-control{display:flex;align-items:center;gap:.65rem;flex-wrap:wrap;justify-content:flex-end}.dashboard-year-control label{font-size:.78rem;font-weight:700;color:#64748b}.dashboard-year-control select{min-width:190px;border:1px solid #d6e1dc;border-radius:10px;background:#fff;color:#17372b;padding:.68rem .85rem;font:inherit;font-weight:700}.credits-year-progress-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem}.credits-year-card{border:1px solid #dbe5e1;border-radius:14px;padding:1rem;background:#fff;min-width:0}.credits-year-card.past{border-top:4px solid #f97316}.credits-year-card.current{border-top:4px solid #d89b00}.credits-year-card header{display:flex;justify-content:space-between;gap:.75rem;align-items:center;margin-bottom:.9rem}.credits-year-card header span{font-weight:800;color:#0b3b70}.credits-year-card header strong{font-size:.9rem;color:#526477}.credits-year-metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.7rem;margin-bottom:.8rem}.credits-year-metrics div{background:#f6f9f7;border-radius:10px;padding:.7rem;min-width:0}.credits-year-metrics span,.credits-lifetime-total span,.credits-lifetime-total small{display:block;color:#718096;font-size:.78rem}.credits-year-metrics strong{display:block;margin-top:.2rem;overflow-wrap:anywhere}.credits-year-card>small{display:block;margin-top:.65rem;font-weight:700}.credits-lifetime-total{margin-top:1rem;padding:.85rem 1rem;border-radius:12px;background:#edf8f0;display:grid;grid-template-columns:1fr auto;gap:.15rem 1rem}.credits-lifetime-total strong{grid-row:1/3;grid-column:2;align-self:center;font-size:1.15rem}.credits-lifetime-total small{grid-column:1}
 @media(max-width:800px){.dashboard-year-control{justify-content:flex-start;width:100%}.dashboard-year-control select{width:100%}.credits-year-progress-grid{grid-template-columns:1fr}.credits-year-metrics{grid-template-columns:1fr 1fr}}

@@ -153,41 +153,6 @@ function normalize(data) {
   data.audit = data.audit.map(a => ({ ...a, id: `AUD-${String(a.id).padStart(5,"0")}`, detail: a.details || `${a.entityType || ""} ${a.entityId || ""}` }));
   return data;
 }
-async function refreshData(seedUser=null) {
-  const knownRole=seedUser?.role||state.user?.role||null;
-  const centerByRole={
-    "Executive Officer":"/api/executive/command-center",
-    "Finance Officer":"/api/finance/command-center",
-    "Credits Officer":"/api/credits/command-center",
-    "Investment Officer":"/api/investment/command-center"
-  };
-  const centerUrl=centerByRole[knownRole]||null;
-  const memberNeeded=Boolean(seedUser?.member_id||state.user?.member_id);
-  const [data,center,memberCenter]=await Promise.all([
-    api("/api/bootstrap"),
-    centerUrl?api(centerUrl):Promise.resolve(null),
-    memberNeeded?api("/api/member/command-center"):Promise.resolve(null)
-  ]);
-  state={...state,...normalize(data),role:data.user.role,page:state.page||"dashboard"};
-  if(memberCenter){
-    state.memberCenter=memberCenter;
-    if(data.user.role==="Member"&&state.page==="dashboard")state.page="member-dashboard";
-  }else if(data.user.member_id){
-    state.memberCenter=await api("/api/member/command-center");
-    if(data.user.role==="Member"&&state.page==="dashboard")state.page="member-dashboard";
-  }
-  if(center){
-    if(data.user.role==="Executive Officer")state.executive=center;
-    if(data.user.role==="Finance Officer")state.finance=center;
-    if(data.user.role==="Credits Officer")state.credits=center;
-    if(data.user.role==="Investment Officer")state.investment=center;
-  }else{
-    if(data.user.role==="Executive Officer")state.executive=await api("/api/executive/command-center");
-    if(data.user.role==="Finance Officer")state.finance=await api("/api/finance/command-center");
-    if(data.user.role==="Credits Officer")state.credits=await api("/api/credits/command-center");
-    if(data.user.role==="Investment Officer")state.investment=await api("/api/investment/command-center");
-  }
-}
 function save() {}
 function money(value) { return `UGX ${Math.abs(Number(value)).toLocaleString("en-US")}`; }
 function initials(name) { return name.split(" ").map(part => part[0]).slice(0, 2).join("").toUpperCase(); }
@@ -227,6 +192,224 @@ function actor() { return state.user?.full_name || "Organization User"; }
 function canWrite() { return state.role!=="Auditor"; }
 function addAudit() {}
 
+const WORKSPACE_CENTER={
+  "Executive Officer":"/api/executive/command-center",
+  "Finance Officer":"/api/finance/command-center",
+  "Credits Officer":"/api/credits/command-center",
+  "Investment Officer":"/api/investment/command-center",
+  "Welfare Officer":"/api/welfare/command-center",
+  "Legal Officer":"/api/legal/command-center",
+  "Auditor":"/api/audit/command-center",
+  "Supervisory Officer":"/api/supervisory/command-center"
+};
+const WORKSPACE_ICONS={
+  executive:"building",finance:"wallet",credits:"loans",investment:"reports",
+  welfare:"shield",legal:"file",audit:"audit",supervisory:"approvals",member:"users",admin:"settings"
+};
+function availableWorkspaces(){ return state.workspaces||state.organization?.workspaces||[]; }
+function workspaceNeedsPicker(list=availableWorkspaces()){ return Array.isArray(list)&&list.length>1; }
+function persistWorkspaceChoice(workspace){
+  try{
+    if(!workspace)sessionStorage.removeItem("kg40k_workspace");
+    else sessionStorage.setItem("kg40k_workspace",JSON.stringify({id:workspace.id,type:workspace.type,code:workspace.code,role:workspace.role}));
+  }catch{}
+}
+function readPersistedWorkspace(){ try{return JSON.parse(sessionStorage.getItem("kg40k_workspace")||"null");}catch{return null;} }
+function findWorkspace(idOrCode,list=availableWorkspaces()){
+  if(!idOrCode)return null;
+  return list.find(item=>item.id===idOrCode||item.code===idOrCode||`${item.type}:${item.code}`===idOrCode)||null;
+}
+function roleToDeptCode(role){
+  return ({
+    "Executive Officer":"executive","Finance Officer":"finance","Credits Officer":"credits",
+    "Investment Officer":"investment","Welfare Officer":"welfare","Legal Officer":"legal",
+    "Auditor":"audit","Supervisory Officer":"supervisory"
+  })[role]||null;
+}
+function workspaceSwitcherHtml(){
+  const list=availableWorkspaces();
+  if(!workspaceNeedsPicker(list))return "";
+  const currentId=state.activeWorkspace?.id||(state.memberContext?"member":`dept:${roleToDeptCode(state.role)}`);
+  const buttons=list.map(item=>{
+    const active=item.id===currentId||(item.type==="member"&&state.memberContext)||(item.type==="department"&&!state.memberContext&&item.role===state.role&&!state.executiveWorkspace);
+    const icon=WORKSPACE_ICONS[item.code]||(item.type==="member"?"users":"dashboard");
+    const label=item.type==="member"?"My Member Account":item.label;
+    return `<button type="button" class="workspace-switch-item ${active?"active":""} ${item.type==="member"?"member":""}" data-workspace-id="${escapeHtml(item.id)}">${icons[icon]||icons.dashboard}<span>${escapeHtml(label)}</span></button>`;
+  }).join("");
+  return `<div class="workspace-switcher compact"><label>Switch workspace</label><div class="workspace-switch-list">${buttons}</div></div>`;
+}
+async function loadWorkspaceCenter(role){
+  const url=WORKSPACE_CENTER[role];
+  if(!url)return;
+  try{
+    const center=await api(url);
+    if(role==="Executive Officer")state.executive=center;
+    if(role==="Finance Officer")state.finance=center;
+    if(role==="Credits Officer")state.credits=center;
+    if(role==="Investment Officer")state.investment=center;
+    if(role==="Welfare Officer")state.welfare=center;
+    if(role==="Legal Officer")state.legal=center;
+    if(role==="Auditor")state.auditCenter=center;
+    if(role==="Supervisory Officer")state.supervisory=center;
+  }catch(error){ console.warn("Workspace center failed",role,error.message); }
+}
+async function enterWorkspace(workspace,{skipRender=false}={}){
+  if(!workspace)return;
+  state.activeWorkspace=workspace;
+  persistWorkspaceChoice(workspace);
+  state.executiveWorkspace=null;
+  if(workspace.type==="member"){
+    if(!state.memberCenter){
+      [state.memberCenter,state.memberSelfService]=await Promise.all([
+        api("/api/member/command-center"),
+        api("/api/member/self-service").catch(()=>({opportunities:[],applications:[]}))
+      ]);
+    }
+    state.memberContext=true;
+    state.memberOversight=false;
+    state.page="member-dashboard";
+    if(state.user?.role&&state.user.role!=="Member")state.role=state.user.role;
+    else state.role="Member";
+  }else{
+    state.memberContext=false;
+    state.memberOversight=false;
+    state.role=workspace.role;
+    state.permissions=workspace.permissions||state.permissions||[];
+    state.page="dashboard";
+    await loadWorkspaceCenter(workspace.role);
+  }
+  if(!skipRender){render();window.scrollTo(0,0);}
+}
+function workspacePickerView(workspaces,error=""){
+  const cards=workspaces.map(item=>{
+    const icon=WORKSPACE_ICONS[item.code]||(item.type==="member"?"users":"dashboard");
+    return `<button type="button" class="workspace-pick-card ${item.type==="member"?"member":""}" data-workspace-id="${escapeHtml(item.id)}">
+      <span class="workspace-pick-icon">${icons[icon]||icons.dashboard}</span>
+      <strong>${escapeHtml(item.title||item.label)}</strong>
+      <span>${escapeHtml(item.subtitle||item.role)}</span>
+      ${item.level?`<em>Authority L${item.level}</em>`:item.type==="member"?`<em>Personal membership</em>`:""}
+    </button>`;
+  }).join("");
+  document.getElementById("app").innerHTML=`<div class="login-page workspace-picker-page">
+    <section class="login-brand">
+      <div class="login-brand-identity"><div class="login-organization-heading"><strong><span>KASANGATI</span> G40</strong><small>KWAGALANA</small></div><img src="/brand-logo-slogan.png?v=51" alt="Kasangati G40 Kwagalana"></div>
+      <div class="login-message"><h1>Choose your<br><em>workspace</em></h1><p>This account has more than one role. Open the dashboard you need now — you can switch later without signing out.</p></div>
+    </section>
+    <section class="login-panel">
+      <div class="login-box workspace-picker-box">
+        <div class="login-organization-heading login-form-heading"><strong><span>KASANGATI</span> G40</strong><small>KWAGALANA</small></div>
+        <h2>Welcome, ${escapeHtml(actor())}</h2>
+        <p>Select a role dashboard to continue.</p>
+        ${error?`<div class="login-error">${escapeHtml(error)}</div>`:""}
+        <div class="workspace-pick-grid">${cards}</div>
+        <button type="button" class="button secondary workspace-signout" data-workspace-signout>Sign out</button>
+      </div>
+    </section>
+  </div>`;
+  document.querySelectorAll("[data-workspace-id]").forEach(button=>button.addEventListener("click",async()=>{
+    const workspace=findWorkspace(button.dataset.workspaceId,workspaces);
+    if(!workspace)return;
+    button.disabled=true;
+    try{
+      document.getElementById("app").innerHTML=`<div class="loading-screen"><div class="loading-mark"><div class="brand-mark">${icons.logo}</div>Opening ${escapeHtml(workspace.label)}<div class="spinner"></div></div></div>`;
+      await enterWorkspace(workspace);
+    }catch(err){workspacePickerView(workspaces,err.message||"Could not open that workspace");}
+  }));
+  document.querySelector("[data-workspace-signout]")?.addEventListener("click",async()=>{
+    try{await api("/api/auth/logout",{method:"POST"});}catch{}
+    persistWorkspaceChoice(null);state.user=null;loginView();
+  });
+}
+function injectWorkspaceSwitcher(html){
+  if(!workspaceNeedsPicker())return html;
+  const block=workspaceSwitcherHtml();
+  if(html.includes('class="role-picker"')){
+    return html.replace(/<div class="role-picker">[\s\S]*?<\/div>\s*<div class="sidebar-user">/,`${block}<div class="sidebar-user">`);
+  }
+  if(html.includes("sidebar-bottom")){
+    return html.replace(`<div class="sidebar-bottom">`,`<div class="sidebar-bottom">${block}`);
+  }
+  return html;
+}
+async function refreshData(seedUser=null) {
+  const knownRole=seedUser?.role||state.activeWorkspace?.role||state.role||state.user?.role||null;
+  const centerByRole=WORKSPACE_CENTER;
+  const centerUrl=centerByRole[knownRole]||null;
+  const memberNeeded=Boolean(seedUser?.member_id||state.user?.member_id);
+  const [data,center,memberCenter]=await Promise.all([
+    api("/api/bootstrap"),
+    centerUrl?api(centerUrl).catch(()=>null):Promise.resolve(null),
+    memberNeeded?api("/api/member/command-center").catch(()=>null):Promise.resolve(null)
+  ]);
+  const previousWorkspace=state.activeWorkspace;
+  const previousMemberContext=state.memberContext;
+  state={...state,...normalize(data),role:previousWorkspace?.type==="department"?previousWorkspace.role:(data.user.role),page:state.page||"dashboard"};
+  state.workspaces=data.workspaces||data.organization?.workspaces||[];
+  state.primaryRole=data.user.role;
+  if(memberCenter){
+    state.memberCenter=memberCenter;
+    if(data.user.role==="Member"&&state.page==="dashboard"&&!previousWorkspace)state.page="member-dashboard";
+  }else if(data.user.member_id){
+    try{state.memberCenter=await api("/api/member/command-center");}catch{}
+    if(data.user.role==="Member"&&state.page==="dashboard"&&!previousWorkspace)state.page="member-dashboard";
+  }
+  if(center){
+    if(knownRole==="Executive Officer"||data.user.role==="Executive Officer")state.executive=center;
+    if(knownRole==="Finance Officer"||data.user.role==="Finance Officer")state.finance=center;
+    if(knownRole==="Credits Officer"||data.user.role==="Credits Officer")state.credits=center;
+    if(knownRole==="Investment Officer"||data.user.role==="Investment Officer")state.investment=center;
+    if(knownRole==="Welfare Officer")state.welfare=center;
+    if(knownRole==="Legal Officer")state.legal=center;
+    if(knownRole==="Auditor")state.auditCenter=center;
+    if(knownRole==="Supervisory Officer")state.supervisory=center;
+  }
+  if(previousWorkspace){
+    state.activeWorkspace=findWorkspace(previousWorkspace.id)||previousWorkspace;
+    if(previousWorkspace.type==="member")state.memberContext=true;
+    else{state.memberContext=false;state.role=previousWorkspace.role;state.permissions=previousWorkspace.permissions||permissionsForRole(previousWorkspace.role)||state.permissions;}
+  }else if(previousMemberContext){
+    state.memberContext=true;
+  }
+}
+function permissionsForRole(role){
+  // Bootstrap permissions stay on primary role; workspace payload carries its own permissions.
+  return null;
+}
+async function login(event) {
+  event.preventDefault();
+  const button=event.currentTarget.querySelector("button[type=submit]"); button.disabled=true; button.innerHTML=`${icons.lock} Signing in...`;
+  try {
+    const values=Object.fromEntries(new FormData(event.currentTarget));
+    const session=await api("/api/auth/login",{method:"POST",body:JSON.stringify(values)});
+    state.user=session.user; state.role=session.user.role; state.permissions=session.permissions||[];
+    state.primaryRole=session.user.role; state.activeWorkspace=null; state.memberContext=false; state.executiveWorkspace=null;
+    persistWorkspaceChoice(null);
+    document.getElementById("app").innerHTML=`<div class="loading-screen"><div class="loading-mark"><div class="brand-mark">${icons.logo}</div>Opening your workspace<div class="spinner"></div></div></div>`;
+    await refreshData(session.user);
+    const workspaces=session.workspaces?.length?session.workspaces:availableWorkspaces();
+    state.workspaces=workspaces;
+    if(workspaceNeedsPicker(workspaces)){
+      workspacePickerView(workspaces);
+      return;
+    }
+    const only=workspaces[0];
+    if(only)await enterWorkspace(only,{skipRender:true});
+    else state.page=session.user.role==="Member"?"member-dashboard":"dashboard";
+    render();
+  } catch(error) { loginView(error.message); }
+}
+async function init() {
+  document.getElementById("app").innerHTML=`<div class="loading-screen"><div class="loading-mark"><div class="brand-mark">${icons.logo}</div>Kasangati G40 Kwagalana<div class="spinner"></div></div></div>`;
+  try {
+    await refreshData();
+    const workspaces=availableWorkspaces();
+    const saved=readPersistedWorkspace();
+    const savedWorkspace=saved?findWorkspace(saved.id,workspaces):null;
+    if(savedWorkspace)await enterWorkspace(savedWorkspace,{skipRender:true});
+    else if(workspaces.length===1)await enterWorkspace(workspaces[0],{skipRender:true});
+    render();
+  } catch { loginView(); }
+}
 function loginView(error = "") {
   document.getElementById("app").innerHTML = `<div class="login-page">
     <section class="login-brand">
@@ -259,28 +442,6 @@ function loginView(error = "") {
   document.getElementById("password-toggle").onclick = () => { const input=document.getElementById("login-password"); input.type=input.type==="password"?"text":"password"; };
   const assistance=document.getElementById("login-assistance");
   document.getElementById("login-forgot").onclick=()=>{assistance.hidden=false;assistance.textContent="Contact the Legal Department or system administrator to reset your password securely.";};
-}
-async function login(event) {
-  event.preventDefault();
-  const button=event.currentTarget.querySelector("button[type=submit]"); button.disabled=true; button.innerHTML=`${icons.lock} Signing in...`;
-  try {
-    const values=Object.fromEntries(new FormData(event.currentTarget));
-    const session=await api("/api/auth/login",{method:"POST",body:JSON.stringify(values)});
-    if(session.user){
-      state.user=session.user; state.role=session.user.role; state.permissions=session.permissions||[];
-      state.page=session.user.role==="Member"?"member-dashboard":"dashboard";
-      document.getElementById("app").innerHTML=`<div class="loading-screen"><div class="loading-mark"><div class="brand-mark">${icons.logo}</div>Opening your workspace<div class="spinner"></div></div></div>`;
-      await refreshData(session.user);
-    }else{
-      document.getElementById("app").innerHTML=`<div class="loading-screen"><div class="loading-mark"><div class="brand-mark">${icons.logo}</div>Opening your workspace<div class="spinner"></div></div></div>`;
-      await refreshData();
-    }
-    render();
-  } catch(error) { loginView(error.message); }
-}
-async function init() {
-  document.getElementById("app").innerHTML=`<div class="loading-screen"><div class="loading-mark"><div class="brand-mark">${icons.logo}</div>Kasangati G40 Kwagalana<div class="spinner"></div></div></div>`;
-  try { await refreshData(); render(); } catch { loginView(); }
 }
 
 function executiveWorkspaceRole() {
@@ -341,17 +502,17 @@ function render() {
 }
 
 function sidebar() {
-  if(state.executiveWorkspace==="credits") return creditsSidebar();
-  if(state.executiveWorkspace==="finance") return financeSidebar();
-  if(state.executiveWorkspace==="investment") return investmentSidebar();
-  if(state.role==="Executive Officer") return executiveSidebar();
-  if(state.role==="Finance Officer") return financeSidebar();
-  if(state.role==="Credits Officer") return creditsSidebar();
-  if(state.role==="Investment Officer") return investmentSidebar();
+  if(state.executiveWorkspace==="credits") return injectWorkspaceSwitcher(creditsSidebar());
+  if(state.executiveWorkspace==="finance") return injectWorkspaceSwitcher(financeSidebar());
+  if(state.executiveWorkspace==="investment") return injectWorkspaceSwitcher(investmentSidebar());
+  if(state.role==="Executive Officer") return injectWorkspaceSwitcher(executiveSidebar());
+  if(state.role==="Finance Officer") return injectWorkspaceSwitcher(financeSidebar());
+  if(state.role==="Credits Officer") return injectWorkspaceSwitcher(creditsSidebar());
+  if(state.role==="Investment Officer") return injectWorkspaceSwitcher(investmentSidebar());
   const labels = { dashboard: "Organization", departments: "Departments", messages: "Messages", users: "User accounts", members: "Members", savings: "Savings", loans: "Loans", withdrawals: "Withdrawals", approvals: "Approvals", reports: "Reports", audit: "Audit log", settings: "Settings" };
   const allowed = rolePages[state.role];
   const badge = state.loans.filter(l => ["pending", "review"].includes(l.status)).length + state.withdrawals.filter(w => w.status === "pending").length;
-  return `<aside class="sidebar" id="sidebar">
+  return injectWorkspaceSwitcher(`<aside class="sidebar" id="sidebar">
     <div class="brand"><div class="brand-mark">${icons.logo}</div><div><div class="brand-name">Kasangati G40</div><div class="brand-sub">Kwagalana</div></div></div>
     <div class="nav-label">Workspace</div>
     <nav class="nav">${allowed.map(page => `<button class="nav-item ${state.page === page ? "active" : ""}" data-page="${page}">${icons[page] || icons.dashboard}<span>${labels[page]}</span>${page === "approvals" && badge ? `<span class="nav-badge">${badge}</span>` : page==="messages"&&state.unreadMessages ? `<span class="nav-badge">${state.unreadMessages}</span>` : ""}</button>`).join("")}</nav>
@@ -359,7 +520,7 @@ function sidebar() {
       <div class="role-picker"><label>Secure session</label><div style="font-size:12px;font-weight:700">${state.role}</div><div style="margin-top:4px;color:#86a397;font-size:12px">${state.organization?.name || "Kasangati G40 Kwagalana"}</div></div>
       <div class="sidebar-user"><div class="avatar">${initials(actor())}</div><div><div class="user-name">${actor()}</div><div class="user-role">${state.role}</div></div></div>
     </div>
-  </aside>`;
+  </aside>`);
 }
 function investmentSidebar() {
   const labels={dashboard:"Dashboard",messages:"Messages","investment-projects":"Projects","investment-portfolio":"Investment Portfolio",
@@ -2793,6 +2954,15 @@ function settingsView() {
 function settingRow(key,title,description,icon) { return `<div class="setting-row"><div class="setting-icon">${icons[icon]}</div><div class="setting-copy"><strong>${title}</strong><span>${description}</span></div><button class="toggle ${state.settings[key]?"on":""}" data-toggle="${key}" aria-label="${title}"></button></div>`; }
 
 function bind() {
+  document.querySelectorAll("[data-workspace-id]").forEach(el=>el.addEventListener("click",async event=>{
+    event.preventDefault();
+    const workspace=findWorkspace(el.dataset.workspaceId);
+    if(!workspace)return;
+    try{
+      el.disabled=true;
+      await enterWorkspace(workspace);
+    }catch(error){el.disabled=false;toast(error.message||"Could not switch workspace");}
+  }));
   document.querySelectorAll('a[href^="/api/documents/"][href$="/view"]').forEach(link=>link.addEventListener("click",event=>{
     event.preventDefault();openDocumentViewer(link);
   }));

@@ -132,6 +132,83 @@ async function canAccessLoanRecords(user) {
   if(hasAnyPermission(user,["loan"])||hasPermission(user,"loan:authorize")||hasPermission(user,"approval:high")||hasPermission(user,"approval:delegated"))return true;
   return Boolean(await departmentPermission(user,"credits","view"));
 }
+const DEPARTMENT_WORKSPACE_ROLES={
+  executive:"Executive Officer",finance:"Finance Officer",credits:"Credits Officer",
+  investment:"Investment Officer",welfare:"Welfare Officer",legal:"Legal Officer",
+  audit:"Auditor",supervisory:"Supervisory Officer"
+};
+function roleToDepartmentCode(role){
+  return Object.entries(DEPARTMENT_WORKSPACE_ROLES).find(([,value])=>value===role)?.[0]||null;
+}
+async function buildAvailableWorkspaces(user){
+  const workspaces=[];
+  const seen=new Set();
+  const push=(workspace)=>{
+    const key=workspace.type==="member"?"member":`dept:${workspace.code}`;
+    if(seen.has(key))return;
+    seen.add(key);
+    workspaces.push({
+      ...workspace,
+      permissions:permissions[workspace.role]||[]
+    });
+  };
+  const assignments=(await query(`SELECT d.code,d.name,da.position_title AS "positionTitle",
+    da.authority_level AS "authorityLevel",da.can_edit AS "canEdit",da.can_approve AS "canApprove",da.is_head AS "isHead"
+    FROM departments d JOIN department_assignments da ON da.department_id=d.id
+    WHERE da.user_id=$1 AND da.active=true AND da.can_view=true AND d.active=true
+    ORDER BY d.sort_order`,[user.id])).rows;
+  for(const row of assignments){
+    const role=DEPARTMENT_WORKSPACE_ROLES[row.code];
+    if(!role)continue;
+    push({
+      id:`dept:${row.code}`,type:"department",code:row.code,role,label:row.name,
+      title:`${row.name} dashboard`,subtitle:row.positionTitle||role,
+      level:Number(row.authorityLevel||1),canEdit:Boolean(row.canEdit),canApprove:Boolean(row.canApprove),
+      isHead:Boolean(row.isHead),fromAssignment:true
+    });
+  }
+  const primaryCode=roleToDepartmentCode(user.role);
+  if(user.role&&user.role!=="Member"&&user.role!=="System Admin"){
+    const assignedPrimary=assignments.find(a=>a.code===primaryCode);
+    push({
+      id:primaryCode?`dept:${primaryCode}`:`role:${user.role}`,
+      type:"department",code:primaryCode||user.role.toLowerCase().replace(/\s+/g,"-"),
+      role:user.role,label:assignedPrimary?.name||user.role.replace(/ Officer$/,""),
+      title:`${assignedPrimary?.name||user.role.replace(/ Officer$/,"")} dashboard`,subtitle:"Primary account role",
+      level:assignedPrimary?Number(assignedPrimary.authorityLevel||1):null,
+      canEdit:true,canApprove:true,isHead:Boolean(assignedPrimary?.isHead),
+      fromAssignment:Boolean(assignedPrimary),primary:true
+    });
+  }else if(user.role==="System Admin"){
+    push({
+      id:"role:system-admin",type:"department",code:"admin",role:"System Admin",label:"System Admin",
+      title:"System administration",subtitle:"Primary account role",
+      level:null,canEdit:true,canApprove:true,isHead:false,fromAssignment:false,primary:true
+    });
+  }
+  if(user.member_id){
+    push({
+      id:"member",type:"member",code:"member",role:"Member",label:"Member account",
+      title:"My Member Account",subtitle:"Savings, loans, shares and personal records",
+      level:null,canEdit:true,canApprove:false,isHead:false,fromAssignment:false
+    });
+  }else if(user.role==="Member"){
+    push({
+      id:"member",type:"member",code:"member",role:"Member",label:"Member account",
+      title:"My Member Account",subtitle:"Primary membership workspace",
+      level:null,canEdit:true,canApprove:false,isHead:false,fromAssignment:false,primary:true
+    });
+  }
+  // Prefer primary department first, then other departments, member last.
+  workspaces.sort((a,b)=>{
+    if(a.type==="member"&&b.type!=="member")return 1;
+    if(b.type==="member"&&a.type!=="member")return -1;
+    if(a.primary&&!b.primary)return -1;
+    if(b.primary&&!a.primary)return 1;
+    return String(a.label).localeCompare(String(b.label));
+  });
+  return workspaces;
+}
 async function organizationContext(user) {
   const organization=await one("SELECT id,name,code,description FROM organizations WHERE active=true ORDER BY id LIMIT 1");
   if(!organization) return null;
@@ -152,7 +229,7 @@ async function organizationContext(user) {
   const leadership=(await query(`SELECT body,position_title AS "positionTitle",leadership_level AS "leadershipLevel",
     starts_on AS "startsOn",ends_on AS "endsOn" FROM leadership_assignments
     WHERE user_id=$1 AND active=true AND (ends_on IS NULL OR ends_on>=CURRENT_DATE) ORDER BY leadership_level DESC`,[user.id])).rows;
-  return {...organization,departments:assignmentRows,leadership};
+  return {...organization,departments:assignmentRows,leadership,workspaces:await buildAvailableWorkspaces(user)};
 }
 async function departmentPermission(user,code,action="view") {
   if(!["view","create","edit","approve"].includes(action)) return null;
@@ -219,14 +296,20 @@ app.post("/api/auth/login",loginLimiter,asyncRoute(async(req,res)=>{
   await query("UPDATE users SET failed_attempts=0,locked_until=NULL,last_login=NOW() WHERE id=$1",[user.id]);
   audit({userId:user.id,action:"LOGIN",details:"Successful login",...metadata(req)}).catch(()=>{});
   const safeUser={id:user.id,email:user.email,full_name:user.full_name,role:user.role,member_id:user.member_id,must_change_password:user.must_change_password,has_profile_photo:Boolean(user.profile_photo_stored_name)};
+  const workspaces=await buildAvailableWorkspaces(user);
   res.cookie("sacco_session",token(user),{httpOnly:true,sameSite:"strict",secure:production,maxAge:8*60*60*1000,path:"/"});
-  res.json({ok:true,user:safeUser,permissions:permissions[user.role]||[]});
+  res.json({ok:true,user:safeUser,permissions:permissions[user.role]||[],workspaces});
 }));
 app.post("/api/auth/logout",auth,asyncRoute(async(req,res)=>{
   await audit({userId:req.user.id,action:"LOGOUT",details:"User signed out",...metadata(req)});
   res.clearCookie("sacco_session",{path:"/"}); res.json({ok:true});
 }));
-app.get("/api/auth/me",auth,(req,res)=>res.json({user:req.user,permissions:permissions[req.user.role]||[]}));
+app.get("/api/auth/me",auth,asyncRoute(async(req,res)=>{
+  res.json({user:req.user,permissions:permissions[req.user.role]||[],workspaces:await buildAvailableWorkspaces(req.user)});
+}));
+app.get("/api/auth/workspaces",auth,asyncRoute(async(req,res)=>{
+  res.json({workspaces:await buildAvailableWorkspaces(req.user)});
+}));
 app.post("/api/auth/change-password",auth,asyncRoute(async(req,res)=>{
   const row=await one("SELECT password_hash FROM users WHERE id=$1",[req.user.id]);
   if(!(await bcrypt.compare(String(req.body.currentPassword||""),row.password_hash))) return res.status(400).json({error:"Current password is incorrect"});
@@ -302,7 +385,7 @@ app.get("/api/bootstrap",auth,asyncRoute(async(req,res)=>{
   let auditRows=[];
   if((permissions[req.user.role]||[]).includes("audit:read")) auditRows=(await query(`SELECT a.id,a.action,a.entity_type AS "entityType",a.entity_id AS "entityId",a.details,a.ip_address AS ip,a.created_at AS time,
     COALESCE(u.full_name,'System') AS actor,COALESCE(u.role,'System') AS role FROM audit_logs a LEFT JOIN users u ON u.id=a.user_id ORDER BY a.id DESC LIMIT 300`)).rows;
-  res.json({user:req.user,permissions:permissions[req.user.role]||[],roles:ROLES,organization:await organizationContext(req.user),members:safeMembers,transactions:txResult.rows,loans:loansResult.rows,
+  res.json({user:req.user,permissions:permissions[req.user.role]||[],roles:ROLES,organization:await organizationContext(req.user),workspaces:await buildAvailableWorkspaces(req.user),members:safeMembers,transactions:txResult.rows,loans:loansResult.rows,
     withdrawals:withdrawalsResult.rows,products:productsResult.rows,settings:Object.fromEntries(settingsResult.rows.map(s=>[s.key,s.value==="true"?true:s.value==="false"?false:s.value])),
     announcements:announcementsResult.rows,notifications:notificationsResult.rows,unreadMessages:unreadResult.rows[0].count,
     guarantorRequests:guarantorRequestsResult.rows,audit:auditRows});
