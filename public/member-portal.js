@@ -70,7 +70,7 @@
   }
   function sidebar(){
     return `<aside class="sidebar executive-sidebar member-sidebar" id="sidebar"><div class="executive-brand"><div class="executive-crest member-crest">${icons.users}</div><div><strong>KASANGATI G40<br>KWAGALANA</strong><span>MEMBER ACCOUNT</span></div></div>
-      <nav class="nav executive-nav">${pages.map(page=>`<button class="nav-item ${state.page===page?"active":""}" data-member-page="${page}">${icons[pageIcons[page]]}<span>${labels[page]}</span>${page==="member-notifications"&&C()?.summary.notifications?`<b class="nav-badge">${C().summary.notifications}</b>`:""}</button>`).join("")}</nav>
+      <nav class="nav executive-nav">${pages.map(page=>`<button class="nav-item ${state.page===page?"active":""}" data-member-page="${page}">${icons[pageIcons[page]]}<span>${labels[page]}</span>${page==="member-guarantorship"&&(C()?.guarantees||[]).some(g=>g.guaranteeStatus==="pending")?`<span class="nav-alert-dot" aria-hidden="true"></span>`:page==="member-notifications"&&C()?.summary.notifications?`<span class="nav-alert-dot" aria-hidden="true"></span>`:page==="member-requests"&&(C()?.summary?.pendingRequests||0)?`<span class="nav-alert-dot" aria-hidden="true"></span>`:""}</button>`).join("")}</nav>
       <div class="sidebar-bottom">${state.role!=="Member"||state.memberOversight?`<button class="executive-quick" data-member-back>${icons.arrowUp}<span>${state.memberOversight?"Back to members":"Back to department"}</span></button>`:""}<div class="sidebar-user"><div class="avatar">${profileImage(state.user.id,actor(),state.user.has_profile_photo)}</div><div><div class="user-name">${esc(state.memberOversight?C()?.member?.fullName:actor())}</div><div class="user-role">${esc(C()?.member?.memberNumber||"Member")}${state.memberOversight?" · oversight":""}</div></div></div></div></aside>`;
   }
   function oversightBanner(){
@@ -186,8 +186,9 @@
         ?`<div class="notice warning"><div>${icons.info}</div><div><strong>Savings must be up to date to guarantee</strong><p>${pastBehind?`Complete ${esc(past.fiscalYear)} first (${money(Math.abs(Number(past.variance)))} remaining).`:`Bring ${esc(fy.fiscalYear)} savings up to date before guaranteeing.`}</p></div></div>`
         :"");
     const canAccept=!running.length&&!pastBehind&&!currentBehind;
-    const rows=C().guarantees.map(x=>`<tr><td><strong>${esc(x.reference)}</strong></td><td>${esc(x.borrower)}</td><td>${money(x.amount)}</td><td>${money(x.balance)}</td><td>${status(x.status)}</td><td>${status(x.guaranteeStatus)}</td><td>${x.guaranteeStatus==="pending"?`<div class="table-actions"><button class="button small secondary" data-member-guarantee="${x.loanId}" data-response="reject">Reject</button><button class="button small primary" data-member-guarantee="${x.loanId}" data-response="accept" ${canAccept?"":"disabled title=\"Not eligible to accept guarantees\""}>Accept</button></div>`:"—"}</td></tr>`).join("");
-    return `${notice}${panel("My guarantorship","Requests and loans secured with your savings capacity",gridTable(["Loan","Borrower","Amount","Outstanding","Loan status","My response","Actions"],rows))}`;
+    const openGuarantees=C().guarantees.filter(x=>!["completed","closed","rejected"].includes(String(x.status||"")));
+    const rows=openGuarantees.map(x=>`<tr><td><strong>${esc(x.reference)}</strong></td><td>${esc(x.borrower)}</td><td>${money(x.amount)}</td><td>${money(x.balance)}</td><td>${status(x.status)}</td><td>${status(x.guaranteeStatus)}</td><td>${x.guaranteeStatus==="pending"?`<div class="table-actions"><button class="button small secondary" data-member-guarantee="${x.loanId}" data-response="reject">Reject</button><button class="button small primary" data-member-guarantee="${x.loanId}" data-response="accept" ${canAccept?"":"disabled title=\"Not eligible to accept guarantees\""}>Accept</button></div>`:(x.guaranteeStatus==="accepted"?`<span class="status active">${esc(x.status||"in progress")}</span>`:"—")}</td></tr>`).join("");
+    return `${notice}${panel("My guarantorship","Pending requests stay until you respond. Accepted guarantees remain with loan status until the loan is completed.",gridTable(["Loan","Borrower","Amount","Outstanding","Loan status","My response","Actions"],rows))}`;
   }
   function investments(){
     const service=S(),portfolio=C().investments.map(x=>`<tr><td><strong>${esc(x.project)}</strong><small>${esc(x.reference)}</small></td><td>${money(x.amountInvested)}</td><td>${x.ownershipPercentage}%</td><td>${money(x.expectedReturns)}</td><td>${money(x.paymentsReceived)}</td><td>${date(x.investmentDate)}</td><td>${status(x.status)}</td></tr>`).join("");
@@ -525,7 +526,17 @@
     document.querySelector("[data-member-welfare-request]")?.addEventListener("submit",e=>submitMultipart(e,"/api/member/welfare/requests","Welfare request submitted:"));
     document.querySelectorAll("[data-member-read]").forEach(x=>x.addEventListener("click",async()=>{await api(`/api/member/notifications/${x.dataset.memberRead}/read`,{method:"PATCH"});await reload();}));
     document.querySelector("[data-member-read-all]")?.addEventListener("click",async()=>{await api("/api/member/notifications/read-all",{method:"POST"});await reload("Notifications marked as read.");});
-    document.querySelectorAll("[data-member-guarantee]").forEach(x=>x.onclick=async()=>{const note=await promptDialog(x.dataset.response==="accept"?"Optional acceptance note:":"Reason for rejecting:","");if(note===null)return;try{await api(`/api/loans/${x.dataset.memberGuarantee}/guarantor-response`,{method:"POST",body:JSON.stringify({decision:x.dataset.response,note})});await reload("Guarantor response recorded.");}catch(error){toast(error.message);}});
+    document.querySelectorAll("[data-member-guarantee]").forEach(x=>x.onclick=async()=>{
+      let note="";
+      if(x.dataset.response==="accept"){
+        if(!await confirmDialog("Accept this guarantee request?"))return;
+      }else{
+        note=await promptDialog("Reason for rejecting:","");
+        if(note===null)return;
+        if(!String(note).trim())return toast("A rejection reason is required.");
+      }
+      try{await api(`/api/loans/${x.dataset.memberGuarantee}/guarantor-response`,{method:"POST",body:JSON.stringify({decision:x.dataset.response,note})});await reload("Guarantor response recorded.");}catch(error){toast(error.message);}
+    });
     document.querySelector("[data-member-support]")?.addEventListener("submit",async e=>{e.preventDefault();try{const result=await api("/api/member/support",{method:"POST",body:JSON.stringify(Object.fromEntries(new FormData(e.currentTarget)))});await reload(`Support request ${result.reference} submitted.`);}catch(error){toast(error.message);}});
   }
   async function submitMemberDeposit(event){

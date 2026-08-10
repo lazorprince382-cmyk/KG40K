@@ -1495,7 +1495,7 @@ app.get("/api/credits/command-center",auth,requireCredits("view"),asyncRoute(asy
       ),0))::numeric,2)::float AS "earlySettlementAmount"
       FROM loans l JOIN members m ON m.id=l.member_id JOIN loan_products p ON p.id=l.product_id
       LEFT JOIN users officer ON officer.id=l.recommended_by ORDER BY l.created_at DESC`),
-    query(`SELECT lg.id,lg.loan_id AS "loanId",l.reference AS "loanReference",borrower.full_name AS borrower,
+    query(`SELECT lg.id,lg.loan_id AS "loanId",l.reference AS "loanReference",l.status AS "loanStatus",borrower.full_name AS borrower,
       guarantor.id AS "memberId",guarantor.member_number AS "memberNumber",guarantor.full_name AS guarantor,
       guarantor.savings_balance::float AS savings,l.amount::float AS "loanAmount",
       COALESCE(lg.guaranteed_amount,0)::float AS "guaranteedAmount",
@@ -2944,6 +2944,44 @@ app.get("/api/users",auth,permit("user:manage"),asyncRoute(async(req,res)=>{
     branches:(await query("SELECT * FROM branches WHERE active=true")).rows,
     departments:(await query("SELECT id,code,name FROM departments WHERE active=true ORDER BY sort_order")).rows});
 }));
+app.post("/api/users",auth,permit("user:manage"),asyncRoute(async(req,res)=>{
+  const b=req.body||{};
+  const fullName=String(b.fullName||"").trim();
+  const email=String(b.email||"").trim().toLowerCase();
+  const phone=String(b.phone||"").trim();
+  const role=String(b.role||"").trim();
+  const branchId=Number(b.branchId||req.user.branch_id);
+  const departmentId=b.departmentId?Number(b.departmentId):null;
+  const positionTitle=String(b.positionTitle||role||"Staff").trim();
+  if(!fullName||fullName.length<2)return res.status(400).json({error:"Full name is required"});
+  if(!email||!email.includes("@"))return res.status(400).json({error:"A valid email is required"});
+  if(!phone)return res.status(400).json({error:"Phone number is required"});
+  if(!ROLES.includes(role))return res.status(400).json({error:"Choose a valid system role"});
+  if(!branchId)return res.status(400).json({error:"Branch is required"});
+  const temporaryPassword=b.password?String(b.password):generateTemporaryPassword();
+  if(!strongPassword(temporaryPassword))return res.status(400).json({error:"Password must include uppercase, lowercase, number and symbol"});
+  try{
+    const created=await transaction(async client=>{
+      const user=(await client.query(`INSERT INTO users
+        (full_name,email,phone,password_hash,role,branch_id,created_by,must_change_password)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,true) RETURNING id,email,role`,
+        [fullName,email,phone,await bcrypt.hash(temporaryPassword,12),role,branchId,req.user.id])).rows[0];
+      if(departmentId){
+        await client.query(`INSERT INTO department_assignments
+          (user_id,department_id,position_title,authority_level,can_view,can_create,can_edit,can_approve,is_head,assigned_by)
+          VALUES ($1,$2,$3,2,true,true,true,false,false,$4)`,
+          [user.id,departmentId,positionTitle,req.user.id]);
+      }
+      return user;
+    });
+    await audit({userId:req.user.id,action:"USER_CREATED",entityType:"user",entityId:String(created.id),
+      details:`${fullName} - ${role} - ${email}`,...metadata(req)});
+    res.status(201).json({id:created.id,email:created.email,role:created.role,temporaryPassword});
+  }catch(error){
+    if(error.code==="23505")return res.status(409).json({error:"An account with this email already exists"});
+    throw error;
+  }
+}));
 app.patch("/api/users/:id/status",auth,permit("user:manage"),asyncRoute(async(req,res)=>{
   if(Number(req.params.id)===Number(req.user.id)) return res.status(400).json({error:"You cannot deactivate your own account"});
   await query("UPDATE users SET active=$1 WHERE id=$2",[Boolean(req.body.active),req.params.id]);
@@ -3307,7 +3345,8 @@ app.post("/api/loans/:id/guarantor-response",auth,asyncRoute(async(req,res)=>{
   const guarantee=await one("SELECT * FROM loan_guarantors WHERE loan_id=$1 AND member_id=$2",[req.params.id,req.user.member_id]);
   if(!loan||!guarantee)return res.status(404).json({error:"Guarantee request not found"});
   if(loan.status!=="pending-guarantors"||guarantee.status!=="pending")return res.status(409).json({error:"This guarantee request has already been resolved"});
-  const accepted=req.body.decision==="accept",note=String(req.body.note||"").slice(0,500);
+  const accepted=req.body.decision==="accept",note=String(req.body.note||"").trim().slice(0,500);
+  if(!accepted&&!note)return res.status(400).json({error:"A rejection reason is required"});
   if(accepted){
     const eligibility=await getGuarantorEligibility(req.user.member_id);
     if(!eligibility.eligible){
@@ -3350,14 +3389,17 @@ app.post("/api/loans/:id/finance-verification",auth,(_req,res)=>res.status(410).
 app.post("/api/loans/:id/disburse",auth,asyncRoute(async(req,res)=>{
   if(req.user.role==="Executive Officer")
     return res.status(403).json({error:"Disbursement is reserved for the Credits Officer (Nakayiza Baraza Olivia). Executive can only authorize."});
+  const disburserEmail=String(req.user.email||"").trim().toLowerCase();
+  if(disburserEmail!=="nakayiza.baraza.olivia@gmail.com")
+    return res.status(403).json({error:"Only Nakayiza Baraza Olivia can disburse approved loans"});
   if(req.user.role!=="Credits Officer"&&req.user.role!=="System Admin")
     return res.status(403).json({error:"Only the Credits Officer can disburse an approved loan"});
   if(!await departmentPermission(req.user,"credits","edit"))
     return res.status(403).json({error:"Credits disbursement authority is required"});
-  const allowedMethods=new Set(["Cash","Mobile Money","Bank transfer"]);
+  const allowedMethods=new Set(["Cash","Mobile Money","Bank transfer","Cheque"]);
   const method=String(req.body.method||"").trim();
   if(!allowedMethods.has(method))
-    return res.status(400).json({error:"Choose how the money will be given: Cash, Mobile Money, or Bank transfer."});
+    return res.status(400).json({error:"Choose how the money will be given: Cash, Mobile Money, Bank transfer, or Cheque."});
   const member=await one("SELECT phone FROM members WHERE id=(SELECT member_id FROM loans WHERE id=$1)",[req.params.id]);
   let destination=String(req.body.destination||"").trim();
   if(method==="Cash") destination=destination||"Handed to member";
@@ -3366,6 +3408,8 @@ app.post("/api/loans/:id/disburse",auth,asyncRoute(async(req,res)=>{
     if(!destination) return res.status(400).json({error:"Enter the mobile money number receiving the disbursement."});
   } else if(method==="Bank transfer") {
     if(!destination) return res.status(400).json({error:"Enter the bank account details receiving the disbursement."});
+  } else if(method==="Cheque") {
+    if(!destination) return res.status(400).json({error:"Enter the cheque number and payee details."});
   }
   const transactionReference=reference("DSB");
   const result=await transaction(async client=>{

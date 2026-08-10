@@ -451,7 +451,14 @@ function isExecutiveReadOnly() {
   return state.role==="Executive Officer"&&Boolean(state.executiveWorkspace);
 }
 function canCreditsDisburse(){
-  return state.role==="Credits Officer"&&!isExecutiveReadOnly()&&Boolean(state.credits?.access?.canEdit);
+  const email=String(state.user?.email||"").trim().toLowerCase();
+  return email==="nakayiza.baraza.olivia@gmail.com"
+    && state.role==="Credits Officer"
+    && !isExecutiveReadOnly()
+    && Boolean(state.credits?.access?.canEdit);
+}
+function navAlertDot(show){
+  return show?`<span class="nav-alert-dot" aria-hidden="true"></span>`:"";
 }
 function render() {
   const workspaceRole=executiveWorkspaceRole();
@@ -537,7 +544,7 @@ function investmentSidebar() {
   const sidebarPages=new Set(["dashboard","messages","investment-projects","investment-proposals","investment-investors","investment-revenue","investment-expenses","investment-assets","investment-contracts","investment-reports","investment-documents","settings"]);
   return `<aside class="sidebar executive-sidebar investment-sidebar" id="sidebar">
     <div class="executive-brand"><div class="executive-crest investment-crest">${icons.reports}</div><div><strong>KASANGATI G40<br>KWAGALANA</strong><span>INVESTMENT DEPARTMENT</span></div></div>
-    <nav class="nav executive-nav">${pages.filter(page=>sidebarPages.has(page)).map(page=>`<button class="nav-item ${state.page===page?"active":""}" data-page="${page}">${icons[iconMap[page]||page]||icons.dashboard}<span>${labels[page]}</span>${page==="investment-proposals"&&pending?`<b class="nav-badge">${pending}</b>`:""}</button>`).join("")}</nav>
+    <nav class="nav executive-nav">${pages.filter(page=>sidebarPages.has(page)).map(page=>`<button class="nav-item ${state.page===page?"active":""}" data-page="${page}">${icons[iconMap[page]||page]||icons.dashboard}<span>${labels[page]}</span>${navAlertDot(page==="investment-proposals"&&pending||page==="messages"&&state.unreadMessages)}</button>`).join("")}</nav>
     <div class="sidebar-bottom">${state.executiveWorkspace?`<button class="executive-quick" data-executive-workspace-exit>${icons.arrowUp}<span>Back to Executive</span></button>`:`<button class="executive-quick" data-action="investment-quick">${icons.arrowUp}<span>Quick Actions</span><b>&gt;</b></button>`}
       <div class="sidebar-user"><div class="avatar blue">${initials(actor())}</div><div><div class="user-name">${actor()}</div><div class="user-role">${state.executiveWorkspace?"Executive read-only view":"Investment Department"}</div></div></div></div>
   </aside>`;
@@ -555,12 +562,17 @@ function creditsSidebar() {
   const c=state.credits,applicationBadge=c?.stats?.pendingApplications||0,recoveryBadge=c?.stats?.overdueLoans||0,activeBadge=c?.stats?.activeLoans||0;
   const repaymentBadge=(c?.transactions||[]).filter(t=>t.type==="Loan repayment"&&t.status==="pending").length;
   const dangerBadge=(c?.loans||[]).filter(l=>l.inDangerPeriod&&Number(l.balance)>0).length;
+  const guarantorBadge=c?.guarantorSummary?.pending||0;
+  const disburseBadge=canCreditsDisburse()?(c?.stats?.awaitingDisbursement||0):0;
+  const approvalBadge=(c?.loans||[]).filter(l=>["committee-review","officer-review"].includes(l.status)).length;
   const pages=rolePages[executiveWorkspaceRole()]||rolePages[state.role];
   const sidebarPages=new Set(["dashboard","messages","credits-members","credits-savings","credits-applications","credits-approvals","credits-active","credits-disbursement","credits-receipts","credits-repayments","credits-guarantors","credits-recovery","credits-reports","credits-documents","credits-notifications","settings"]);
   if(isExecutiveReadOnly()) sidebarPages.delete("credits-disbursement");
+  if(!canCreditsDisburse()) sidebarPages.delete("credits-disbursement");
+  const alertFor=page=>page==="credits-applications"&&applicationBadge||page==="credits-approvals"&&approvalBadge||page==="credits-active"&&activeBadge||page==="credits-disbursement"&&disburseBadge||page==="credits-repayments"&&repaymentBadge||page==="credits-guarantors"&&guarantorBadge||page==="credits-recovery"&&(recoveryBadge||dangerBadge)||page==="messages"&&state.unreadMessages;
   return `<aside class="sidebar executive-sidebar credits-sidebar" id="sidebar">
     <div class="executive-brand"><div class="executive-crest credits-crest">${icons.loans}</div><div><strong>KASANGATI G40<br>KWAGALANA</strong><span>SACCO - CREDITS DEPARTMENT</span></div></div>
-    <nav class="nav executive-nav">${pages.filter(page=>sidebarPages.has(page)).map(page=>`<button class="nav-item ${state.page===page?"active":""}" data-page="${page}">${icons[iconMap[page]||page]||icons.dashboard}<span>${labels[page]}</span>${page==="credits-applications"&&applicationBadge?`<b class="nav-badge">${applicationBadge}</b>`:page==="credits-active"&&activeBadge?`<b class="nav-badge">${activeBadge}</b>`:page==="credits-repayments"&&repaymentBadge?`<b class="nav-badge">${repaymentBadge}</b>`:page==="credits-recovery"&&(recoveryBadge||dangerBadge)?`<b class="nav-badge">${recoveryBadge+dangerBadge}</b>`:""}</button>`).join("")}</nav>
+    <nav class="nav executive-nav">${pages.filter(page=>sidebarPages.has(page)).map(page=>`<button class="nav-item ${state.page===page?"active":""}" data-page="${page}">${icons[iconMap[page]||page]||icons.dashboard}<span>${labels[page]}</span>${navAlertDot(alertFor(page))}</button>`).join("")}</nav>
     <div class="sidebar-bottom">${state.executiveWorkspace?`<button class="executive-quick" data-executive-workspace-exit>${icons.arrowUp}<span>Back to Executive</span></button>`:`<button class="executive-quick" data-action="credits-quick">${icons.arrowUp}<span>Quick Actions</span><b>&gt;</b></button>`}
       <div class="sidebar-user"><div class="avatar blue">${initials(actor())}</div><div><div class="user-name">${actor()}</div><div class="user-role">${state.executiveWorkspace?"Executive read-only view":"Credits Department"}</div></div></div></div>
   </aside>`;
@@ -574,11 +586,14 @@ function financeSidebar() {
     "finance-invoices":"file","finance-budgets":"reports","finance-bank":"building","finance-cashbook":"wallet","finance-assets":"building",
     "finance-procurement":"users","finance-approvals":"approvals","finance-reports":"reports","finance-analytics":"reports","finance-documents":"file"};
   const pending=state.finance?.stats?.pendingPaymentRequests||0;
+  const entryPending=(state.finance?.pendingEntries||state.finance?.entries||[]).filter(x=>x.status==="pending_finance_review").length;
+  const investmentPending=(state.finance?.investmentAnalyses||[]).length;
   const pages=rolePages[executiveWorkspaceRole()]||rolePages[state.role];
   const sidebarPages=new Set(["dashboard","messages","finance-income","finance-expenses","finance-invoices","finance-budgets","finance-bank","finance-assets","finance-procurement","finance-approvals","finance-reports","finance-documents","settings"]);
+  const alertFor=page=>page==="finance-approvals"&&(pending||entryPending||investmentPending)||page==="messages"&&state.unreadMessages;
   return `<aside class="sidebar executive-sidebar finance-sidebar" id="sidebar">
     <div class="executive-brand"><div class="executive-crest finance-crest">${icons.wallet}</div><div><strong>KASANGATI G40<br>KWAGALANA</strong><span>Finance Department</span></div></div>
-    <nav class="nav executive-nav">${pages.filter(page=>sidebarPages.has(page)).map(page=>`<button class="nav-item ${state.page===page?"active":""}" data-page="${page}">${icons[iconsByPage[page]||page]||icons.dashboard}<span>${labels[page]}</span>${page==="finance-approvals"&&pending?`<b class="nav-badge">${pending}</b>`:""}</button>`).join("")}</nav>
+    <nav class="nav executive-nav">${pages.filter(page=>sidebarPages.has(page)).map(page=>`<button class="nav-item ${state.page===page?"active":""}" data-page="${page}">${icons[iconsByPage[page]||page]||icons.dashboard}<span>${labels[page]}</span>${navAlertDot(alertFor(page))}</button>`).join("")}</nav>
     <div class="sidebar-bottom">${state.executiveWorkspace?`<button class="executive-quick" data-executive-workspace-exit>${icons.arrowUp}<span>Back to Executive</span></button>`:`<button class="executive-quick" data-action="finance-quick">${icons.arrowUp}<span>Quick Actions</span><b>&gt;</b></button>`}
       <div class="sidebar-user"><div class="avatar blue">${initials(actor())}</div><div><div class="user-name">${actor()}</div><div class="user-role">${state.executiveWorkspace?"Executive read-only view":"Finance Department"}</div></div></div></div>
   </aside>`;
@@ -594,9 +609,10 @@ function executiveSidebar() {
     notifications:"bell","executive-documents":"file",users:"lock"};
   const pending=state.executive?.stats?.pendingApprovals||((state.executive?.approvals||[]).length+((state.executive?.documents||[]).filter(d=>d.status==="pending_executive").length));
   const sidebarPages=new Set(["dashboard","messages","members","departments","users","executive-approvals","executive-meetings","executive-projects","executive-reports","executive-analytics","notifications","executive-documents","settings"]);
+  const alertFor=page=>page==="executive-approvals"&&pending||page==="messages"&&state.unreadMessages||page==="notifications"&&(state.notifications||[]).some(n=>!n.readAt);
   return `<aside class="sidebar executive-sidebar" id="sidebar">
     <div class="executive-brand"><div class="executive-crest">${icons.shield}</div><div><strong>KASANGATI G40<br>KWAGALANA</strong><span>Executive Department</span></div></div>
-    <nav class="nav executive-nav">${rolePages[state.role].filter(page=>sidebarPages.has(page)).map(page=>`<button class="nav-item ${state.page===page?"active":""}" data-page="${page}">${icons[iconMap[page]||page]||icons.dashboard}<span>${labels[page]}</span>${page==="executive-approvals"&&pending?`<b class="nav-badge">${pending}</b>`:""}</button>`).join("")}</nav>
+    <nav class="nav executive-nav">${rolePages[state.role].filter(page=>sidebarPages.has(page)).map(page=>`<button class="nav-item ${state.page===page?"active":""}" data-page="${page}">${icons[iconMap[page]||page]||icons.dashboard}<span>${labels[page]}</span>${navAlertDot(alertFor(page))}</button>`).join("")}</nav>
     <div class="sidebar-bottom"><button class="executive-quick" data-action="executive-quick">${icons.arrowUp}<span>Quick Actions</span><b>&gt;</b></button>
       <div class="sidebar-user"><div class="avatar blue">${initials(actor())}</div><div><div class="user-name">${actor()}</div><div class="user-role">Executive Department</div></div></div></div>
   </aside>`;
@@ -1276,7 +1292,25 @@ function financeVouchersView() {
     <div class="finance-voucher-list">${f.vouchers.map(v=>`<article><div class="finance-voucher-main"><span>${v.voucherNumber} - ${v.department}</span><h3>${v.supplier}</h3><p>${v.description} - ${v.category} - ${v.budgetLine}</p><small>Requested by ${v.requestedBy}${v.reviewedBy?` - Reviewed by ${v.reviewedBy}`:""}</small></div><div class="finance-voucher-value"><strong>${money(v.amount)}</strong>${status(v.status)}</div><div class="finance-voucher-actions">${financeApprovalActions(v)}${["executive_approved"].includes(v.status)?`<button class="process" data-finance-process="${v.id}">Process payment</button>`:""}<button data-finance-voucher-detail="${v.id}">Details</button></div></article>`).join("")}</div>`;
 }
 function financeInvestmentAnalysisQueue(f){const items=f.investmentAnalyses||[];return `<section class="finance-panel finance-analysis-queue"><div class="finance-panel-head"><div><h3>Investment Financial Analysis</h3><p>Finance feasibility review required before a proposal reaches Executive</p></div><strong>${items.length} waiting</strong></div>${items.map(p=>`<article><div><span>${p.reference} - ${escapeHtml(p.category)}</span><h3>${escapeHtml(p.title)}</h3><p>${escapeHtml(p.description)}</p><small>Submitted by ${escapeHtml(p.createdBy)} - Risk: ${escapeHtml(p.riskAssessment)}</small></div><div><strong>${money(p.estimatedCost)}</strong><small>Expected revenue ${money(p.expectedRevenue)} - ROI ${p.expectedRoi}%</small>${p.supportingDocument?`<a href="${p.supportingDocument}" target="_blank">${icons.file} Evidence</a>`:""}</div><div class="record-actions"><button data-finance-investment="${p.id}" data-decision="approve">Approve analysis</button><button data-finance-investment="${p.id}" data-decision="more_information">More information</button><button class="danger-action" data-finance-investment="${p.id}" data-decision="reject">Reject</button></div></article>`).join("")||`<div class="exec-empty">No investment proposals await Finance analysis.</div>`}</section>`;}
-async function financeInvestmentDecision(id,decision){const analysis=await promptDialog("Financial analysis (affordability, cash flow, funding and budget impact):","");if(!analysis)return;const recommendation=await promptDialog("Finance recommendation:",decision==="approve"?"Financially viable and recommended for Executive review.":"");if(!recommendation)return;try{const result=await api(`/api/finance/investment-proposals/${id}/review`,{method:"POST",body:JSON.stringify({decision,analysis,recommendation})});state.finance=await api("/api/finance/command-center");render();toast(result.status==="executive_approval"?"Finance analysis completed; proposal sent to Executive.":"Finance decision recorded.");}catch(error){toast(error.message);}}
+async function financeInvestmentDecision(id,decision){
+  let analysis="",recommendation="";
+  if(decision==="approve"){
+    if(!await confirmDialog("Approve this financial analysis and send the proposal to Executive?"))return;
+    analysis="Financial analysis reviewed and accepted.";
+    recommendation="Financially viable and recommended for Executive review.";
+  }else{
+    const reason=await promptDialog(decision==="more_information"?"What additional information is required?":"Reason for rejecting:","");
+    if(reason===null)return;
+    if(!String(reason).trim())return toast("A reason is required.");
+    analysis=String(reason).trim();
+    recommendation=decision==="more_information"?"More information required before Finance can recommend.":analysis;
+  }
+  try{
+    const result=await api(`/api/finance/investment-proposals/${id}/review`,{method:"POST",body:JSON.stringify({decision,analysis,recommendation})});
+    state.finance=await api("/api/finance/command-center");render();
+    toast(result.status==="executive_approval"?"Finance analysis completed; proposal sent to Executive.":"Finance decision recorded.");
+  }catch(error){toast(error.message);}
+}
 function financeReceiptsView() {
   const rows=state.finance.entries.filter(x=>x.entryType==="income");
   return financeDataTable("Issued organization receipts",["Receipt number","Date","Received from","Category","Method","Amount","Actions"],rows.map(x=>[x.receiptNumber||x.reference,new Date(x.transactionDate).toLocaleDateString(),x.counterparty||"?",x.category,x.paymentMethod||"?",money(x.amount),`<button class="button small secondary" data-finance-receipt="${x.id}">Download receipt</button>`]));
@@ -2034,8 +2068,8 @@ function creditsLoanRow(l,actions=false) {
   </article>`;
 }
 function creditsDisbursementView() {
-  if(isExecutiveReadOnly()){
-    return `<div class="notice"><div>${icons.shield}</div><div><strong>Credits Officer disbursement only</strong><p>Authorized loans are disbursed only by the Credits Officer (Nakayiza Baraza Olivia). Executive authorization ends when the loan reaches ready for disbursement.</p></div></div>`;
+  if(isExecutiveReadOnly()||!canCreditsDisburse()){
+    return `<div class="notice"><div>${icons.shield}</div><div><strong>Credits Officer disbursement only</strong><p>Authorized loans can be disbursed only by Nakayiza Baraza Olivia (${escapeHtml("nakayiza.baraza.olivia@gmail.com")}). This screen is hidden from other Credits accounts.</p></div></div>`;
   }
   const rows=state.credits.loans.filter(l=>["ready-disbursement","executive-authorization"].includes(l.status));
   const receipts=(state.credits.transactions||[]).filter(t=>t.type==="Loan disbursement"&&t.status==="completed");
@@ -2074,8 +2108,13 @@ function creditsRepaymentsView() {
 }
 function creditsGuarantorsView() {
   const c=state.credits;
-  return `<div class="exec-module-metrics">${executiveModuleMetric("Pending",c.guarantorSummary.pending,"orange")}${executiveModuleMetric("Accepted",c.guarantorSummary.accepted,"green")}${executiveModuleMetric("Declined",c.guarantorSummary.rejected,"red")}${executiveModuleMetric("Over-guaranteed",c.guarantorSummary.overGuaranteed,"violet")}</div>
-    ${financeDataTable("Guarantor register",["Guarantor","Membership","Borrower","Loan","Guaranteed share","Savings capacity","Available capacity","Response","Date"],c.guarantors.map(g=>{const committed=c.guarantors.filter(x=>x.memberId===g.memberId&&x.status==="accepted").reduce((n,x)=>n+x.guaranteedAmount,0);return [g.guarantor,g.memberNumber,g.borrower,g.loanReference,money(g.guaranteedAmount),money(g.savings),money(Math.max(0,g.savings-committed)),status(g.status),g.respondedAt?new Date(g.respondedAt).toLocaleDateString():"Pending"];}))}`;
+  const activeRows=(c.guarantors||[]).filter(g=>!["completed","closed","rejected"].includes(String(g.loanStatus||"")));
+  const pending=activeRows.filter(g=>g.status==="pending").length;
+  const accepted=activeRows.filter(g=>g.status==="accepted").length;
+  const declined=activeRows.filter(g=>g.status==="rejected").length;
+  return `<div class="exec-module-metrics">${executiveModuleMetric("Pending",pending,"orange")}${executiveModuleMetric("Accepted",accepted,"green")}${executiveModuleMetric("Declined",declined,"red")}${executiveModuleMetric("Over-guaranteed",c.guarantorSummary.overGuaranteed,"violet")}</div>
+    <div class="notice"><div>${icons.info}</div><div><strong>Active guarantee track</strong><p>Accepted guarantees stay here with loan status until the loan is completed. Pending requests needing a response show a red alert on the Guarantors tab.</p></div></div>
+    ${financeDataTable("Guarantor register",["Guarantor","Membership","Borrower","Loan","Loan status","Guaranteed share","Savings capacity","Available capacity","Response","Date"],activeRows.map(g=>{const committed=activeRows.filter(x=>x.memberId===g.memberId&&x.status==="accepted").reduce((n,x)=>n+x.guaranteedAmount,0);return [g.guarantor,g.memberNumber,g.borrower,g.loanReference,status(g.loanStatus||"—"),money(g.guaranteedAmount),money(g.savings),money(Math.max(0,g.savings-committed)),status(g.status),g.respondedAt?new Date(g.respondedAt).toLocaleDateString():"Pending"];}))}`;
 }
 function creditsRecoveryView() {
   const c=state.credits;
@@ -2232,6 +2271,7 @@ async function creditsDisburse(id) {
             <option value="Cash">Cash</option>
             <option value="Mobile Money">Mobile Money</option>
             <option value="Bank transfer">Bank transfer</option>
+            <option value="Cheque">Cheque</option>
           </select>
         </div>
         <div class="field full" data-disburse-destination-wrap>
@@ -2265,15 +2305,21 @@ async function creditsDisburse(id) {
     }else if(method==="Bank transfer"){
       destLabel.textContent="Bank account details";
       destInput.required=true;
-      if(destInput.value==="Handed to member"||destInput.value===phone) destInput.value="";
+      if(destInput.value==="Handed to member"||destInput.value===phone||/^Cheque/i.test(destInput.value)) destInput.value="";
       destInput.placeholder="Bank name · account name · account number";
       destHelp.textContent="Enter the receiving bank account.";
+    }else if(method==="Cheque"){
+      destLabel.textContent="Cheque details";
+      destInput.required=true;
+      if(destInput.value==="Handed to member"||destInput.value===phone) destInput.value="";
+      destInput.placeholder="Cheque number · payee name · bank";
+      destHelp.textContent="Enter the cheque number and payee details.";
     }else{
       destLabel.textContent="Destination";
       destInput.required=false;
       destInput.value="";
       destInput.placeholder="Choose a method first";
-      destHelp.textContent="Select Cash, Mobile Money, or Bank transfer.";
+      destHelp.textContent="Select Cash, Mobile Money, Bank transfer, or Cheque.";
     }
   };
   methodSelect.addEventListener("change",syncDestination);
@@ -2285,7 +2331,7 @@ async function creditsDisburse(id) {
     const method=methodSelect.value;
     const destination=String(destInput.value||"").trim();
     if(!method)return toast("Choose how the money will be given.");
-    if(method!=="Cash"&&!destination)return toast(method==="Mobile Money"?"Enter the mobile money number.":"Enter the bank account details.");
+    if(method!=="Cash"&&!destination)return toast(method==="Mobile Money"?"Enter the mobile money number.":method==="Cheque"?"Enter the cheque details.":"Enter the bank account details.");
     const button=form.querySelector("button[type=submit]");button.disabled=true;button.textContent="Disbursing…";
     try{
       const result=await api(`/api/loans/${id}/disburse`,{method:"POST",body:JSON.stringify({method,destination})});
@@ -2931,7 +2977,7 @@ function usersView() {
   const recent=users.filter(u=>u.lastLogin).length;
   const deptFilter=filter.department||filter.role||"all";
   const roster=state.departmentRoster||[];
-  const deptChips=[["all","All accounts",users.length],...roster.map(d=>[d.code,d.name,d.accountCount]),["other","Other accounts",state.otherAccounts||0]];
+  const deptChips=[["all","All accounts",users.length],...roster.map(d=>[d.code,d.name,d.accountCount])];
   const deptLabel=deptFilter==="all"?"":deptFilter==="other"?"Other accounts":(roster.find(d=>d.code===deptFilter)||{}).name||deptFilter;
   const statCards=[["all","User accounts",users.length,"users","dark","All secure login accounts"],["active","Active accounts",active,"check","green",`${users.length-active} inactive`],["staff","Department runners",rosterStaff,"shield","blue","Official committee accounts"],["recent","Recent logins",recent,"clock","orange","Recorded with IP and device"]];
   return `<div class="bio-page system-accounts-page">
@@ -3380,10 +3426,15 @@ async function decide(kind,id,decision) {
   } catch(error) { toast(error.message); }
 }
 async function respondToGuarantee(loanId,decision) {
-  const note=await promptDialog(decision==="accept"?"Optional note for accepting this guarantee:":"Give a reason for rejecting this guarantee:","");
-  if(note===null)return;
+  let note="";
+  if(decision==="accept"){
+    if(!await confirmDialog("Accept this guarantee request?"))return;
+  }else{
+    note=await promptDialog("Reason for rejecting this guarantee:","");
+    if(note===null)return;
+    if(!String(note).trim())return toast("A rejection reason is required.");
+  }
   try {
-    const loan=state.guarantorRequests.find(item=>String(item.databaseId)===String(loanId));
     await api(`/api/loans/${loanId}/guarantor-response`,{method:"POST",body:JSON.stringify({decision,note})});
     await refreshData();render();toast(`Guarantee request ${decision==="accept"?"accepted":"rejected"}.`);
   } catch(error){toast(error.message);}
