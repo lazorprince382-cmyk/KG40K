@@ -45,24 +45,24 @@ const statementLines=[
 ];
 
 const members=[
-  [1,'Charles Oketcho',434993],
-  [2,'Joshua Ssewanyana',1302451],
-  [3,'Francis Banumba',3224954],
-  [4,'Josephine Babirye Kyobe',3619971],
-  [5,'Denis Tugume',3749954],
-  [6,'Tabula Robert',4844936],
-  [7,'Ntono Moreen',4850436],
-  [8,'Ritah Nakyanzi',7503927],
-  [9,'Mary Babirye',7861512],
-  [10,'Nakayiza Baraza Olivia',7900000],
-  [11,'Jude Tadieus Kyobe',7945071],
-  [12,'Brian Mutiga',7975000],
-  [13,'Justine Kaudha Inhensiko',8000456],
-  [14,'Paul Kalemba',8150000],
-  [15,'Dan Rwebingira Ssalongo',8162431],
-  [16,'Christopher Muhoozi',8712431],
-  [17,'Ralph Masaba',8976949],
-  [18,'Ezrah Nayoga',10612431]
+  [1,'Charles Oketcho',434993,2000000,251251.82],
+  [2,'Joshua Ssewanyana',1302451,2000000,null],
+  [3,'Francis Banumba',3224954,2000000,545208.97],
+  [4,'Josephine Babirye Kyobe',3619971,2000000,586427.86],
+  [5,'Denis Tugume',3749954,2000000,599991.22],
+  [6,'Tabula Robert',4844936,2000000,714249.45],
+  [7,'Ntono Moreen',4850436,2000000,714823.36],
+  [8,'Ritah Nakyanzi',7503927,2000000,991707.54],
+  [9,'Mary Babirye',7861512,2000000,1029020.51],
+  [10,'Nakayiza Baraza Olivia',7900000,2000000,1033036.62],
+  [11,'Jude Tadieus Kyobe',7945071,2000000,1037739.65],
+  [12,'Brian Mutiga',7975000,2000000,1040862.65],
+  [13,'Justine Kaudha Inhensiko',8000456,2000000,1043518.91],
+  [14,'Paul Kalemba',8150000,2000000,1059123.40],
+  [15,'Dan Rwebingira Ssalongo',8162431,2000000,1060420.54],
+  [16,'Christopher Muhoozi',8712431,2040000,1117811.46],
+  [17,'Ralph Masaba',8976949,2040000,1149587.05],
+  [18,'Ezrah Nayoga',10612431,2000000,1316071.02]
 ];
 
 const investmentEntries=[
@@ -103,12 +103,12 @@ async function main(){
       ON CONFLICT(period_id,statement_type,line_code) DO UPDATE SET line_name=EXCLUDED.line_name,
       note_number=EXCLUDED.note_number,current_amount=EXCLUDED.current_amount,prior_amount=EXCLUDED.prior_amount,
       variance=EXCLUDED.variance,sort_order=EXCLUDED.sort_order`,[period.id,...line]);
-    for(const [sourceRow,name,savings] of members)await client.query(`INSERT INTO legacy_member_opening_balances
-      (period_id,source_row,member_name,share_capital,savings_balance,expected_savings,deficit_surplus)
-      VALUES ($1,$2,$3,2000000,$4::numeric,8300000,$4::numeric-8300000)
+    for(const [sourceRow,name,savings,shareCapital,proposedDividend] of members)await client.query(`INSERT INTO legacy_member_opening_balances
+      (period_id,source_row,member_name,share_capital,savings_balance,expected_savings,deficit_surplus,proposed_dividend)
+      VALUES ($1,$2,$3,$4::numeric,$5::numeric,8300000,$5::numeric-8300000,$6)
       ON CONFLICT(period_id,member_name) DO UPDATE SET source_row=EXCLUDED.source_row,share_capital=EXCLUDED.share_capital,
       savings_balance=EXCLUDED.savings_balance,expected_savings=EXCLUDED.expected_savings,
-      deficit_surplus=EXCLUDED.deficit_surplus`,[period.id,sourceRow,name,savings]);
+      deficit_surplus=EXCLUDED.deficit_surplus,proposed_dividend=EXCLUDED.proposed_dividend`,[period.id,sourceRow,name,shareCapital,savings,proposedDividend]);
     for(const [transactionId,date,type,amount] of investmentEntries)await client.query(`INSERT INTO historical_investment_ledger
       (period_id,transaction_id,transaction_date,account_name,account_code,entry_type,amount,source_reference)
       VALUES ($1,$2,$3,'Unit Trust Fund Investment','4500',$4,$5,'Photographed Unit Trust ledger')
@@ -118,8 +118,9 @@ async function main(){
       VALUES ('HISTORICAL_OPENING_DATA_IMPORTED','financial_reporting_period',$1,$2)`,[String(period.id),
       `FY2026 draft snapshot: 18 member balance rows, savings UGX ${savingsTotal}, investment ledger UGX ${investmentTotal.toFixed(2)}`]);
   });
-  console.log(JSON.stringify({periodEnd,members:members.length,savingsTotal,shareCapital:members.length*2000000,
-    investmentLedgerTotal:investmentTotal,dividendAllocationStatus:'withheld_pending_reconciliation'},null,2));
+  const shareCapitalTotal=members.reduce((sum,row)=>sum+row[3],0);
+  console.log(JSON.stringify({periodEnd,members:members.length,savingsTotal,shareCapital:shareCapitalTotal,
+    investmentLedgerTotal:investmentTotal,dividendAllocationStatus:'loaded_from_share_capital_schedule'},null,2));
   await db.pool.end();
 }
 

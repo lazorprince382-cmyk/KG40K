@@ -3977,10 +3977,10 @@ app.get("/api/department-reports/:scope.:format",auth,asyncRoute(async(req,res)=
     const report=requestedTitle.toLowerCase();
     if(report.includes("opening savings")) {
       result=await query(`SELECT p.period_end,b.source_row,b.member_name,b.share_capital::float,b.savings_balance::float,
-        b.expected_savings::float,b.deficit_surplus::float,b.status
+        b.expected_savings::float,b.deficit_surplus::float,b.proposed_dividend::float,b.status
         FROM legacy_member_opening_balances b JOIN financial_reporting_periods p ON p.id=b.period_id
         ORDER BY p.period_end DESC,b.source_row`);
-      columns=["period_end","source_row","member_name","share_capital","savings_balance","expected_savings","deficit_surplus","status"];
+      columns=["period_end","source_row","member_name","share_capital","savings_balance","expected_savings","deficit_surplus","proposed_dividend","status"];
     } else if(report.includes("saving")||report.includes("daily transaction")) {
       result=await query(`SELECT t.reference,t.receipt_number,m.member_number,m.full_name AS member,t.type,t.method,
         t.external_reference AS payment_reference,t.amount::float,t.status,t.created_at,t.verified_at
