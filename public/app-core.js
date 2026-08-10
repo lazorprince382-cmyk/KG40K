@@ -2068,8 +2068,9 @@ function creditsLoanRow(l,actions=false) {
   </article>`;
 }
 function creditsDisbursementView() {
-  if(isExecutiveReadOnly()||!canCreditsDisburse()){
-    return `<div class="notice"><div>${icons.shield}</div><div><strong>Credits Officer disbursement only</strong><p>Authorized loans can be disbursed only by Nakayiza Baraza Olivia (${escapeHtml("nakayiza.baraza.olivia@gmail.com")}). This screen is hidden from other Credits accounts.</p></div></div>`;
+  if(!canCreditsDisburse()){
+    state.page="credits-receipts";
+    return creditsReceiptsView();
   }
   const rows=state.credits.loans.filter(l=>["ready-disbursement","executive-authorization"].includes(l.status));
   const receipts=(state.credits.transactions||[]).filter(t=>t.type==="Loan disbursement"&&t.status==="completed");
