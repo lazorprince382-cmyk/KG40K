@@ -22,7 +22,6 @@
     const f=C()?.financialYearProgress;if(!f)return "";
     const savingsToward=Number(f.savingsTowardTarget??f.savingsPaid);
     const shareToward=Number(f.sharePaidTowardTarget??f.sharePaid);
-    const completedMet=savingsToward>=Number(f.expectedSavingsToDate)-0.005;
     const annualMet=savingsToward>=Number(f.annualSavingsTarget)-0.005;
     const annualSurplus=Math.max(0,savingsToward-Number(f.annualSavingsTarget));
     const covered=Number(f.coveredMonths||0);
@@ -32,17 +31,15 @@
       :"";
     const advanceNote=annualMet&&annualSurplus>0
       ?`<div class="member-policy-note member-advance-note"><b>Annual savings target met.</b> Extra ${money(annualSurplus)} remains as surplus toward future months.</div>`
-      :completedMet&&!annualMet?`<div class="member-policy-note">You are up to date on completed months. Keep saving toward the full-year target of ${money(f.annualSavingsTarget)}.</div>`:"";
-    const shareNote="";
+      :"";
     return panel(`${f.fiscalYear} contribution progress`,
-      `${f.monthsDue} completed month${Number(f.monthsDue)===1?"":"s"} due since 1 July  -  the current month counts only after it ends`,
-      `${targetLine("Savings for completed months",savingsToward,f.expectedSavingsToDate)}
-       ${targetLine("Full-year savings target",savingsToward,f.annualSavingsTarget,{surplusLabel:"Surplus toward future months"})}
+      `Annual targets for ${esc(f.fiscalYear)}  -  monthly savings ${money(f.monthlySavingsTarget)}`,
+      `${targetLine("Full-year savings target",savingsToward,f.annualSavingsTarget,{surplusLabel:"Surplus toward future months"})}
        ${targetLine("Annual share contribution",shareToward,f.annualShareTarget)}
        ${targetLine("Annual subscription fee",f.subscriptionPaid,f.annualSubscriptionFee)}
        ${targetLine("Combined annual contribution",Number(f.combinedAnnualPaid||0),Number(f.combinedAnnualTarget||0))}
        <div class="member-policy-note"><b>Monthly savings:</b> ${money(f.monthlySavingsTarget)}  -  <b>Full-year savings:</b> ${money(f.annualSavingsTarget)}  -  <b>Shares:</b> ${money(f.annualShareTarget)}  -  <b>Subscription:</b> ${money(f.annualSubscriptionFee)}  -  <b>Combined target:</b> ${money(f.combinedAnnualTarget||0)}</div>
-       ${surplusNote}${shareNote}${advanceNote}`);
+       ${surplusNote}${advanceNote}`);
   }
   function closingPositionPanel(){
     const x=C()?.pastYearProgress;if(!x)return "";
