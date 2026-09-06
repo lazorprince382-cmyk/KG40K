@@ -114,6 +114,10 @@ a,.link-button,.dept-link{color:#16558f!important}
 .loan-security-summary strong{display:block;color:#082e57;margin-bottom:4px}
 .loan-security-summary p{margin:4px 0 0;color:#4b5d73;font-size:13px;line-height:1.45}
 .loan-security-summary b{color:#082e57}
+.guarantors-inactive > label,
+.guarantors-inactive > small,
+.guarantors-inactive [data-guarantor-picker]{display:none!important}
+.guarantors-inactive .loan-security-summary{margin-bottom:0}
 .group-member-option em{display:block;margin-top:2px;color:#607084;font-size:12px;font-style:normal}
 .group-member-option.guarantor-unavailable{opacity:.62;background:#f8fafc}
 .group-member-option.guarantor-unavailable em{color:#a15c12}

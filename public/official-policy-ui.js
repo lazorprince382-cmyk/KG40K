@@ -60,9 +60,11 @@ function bindLoanSecurityCalculator(form, { borrowerSavings = 0, candidates = []
     if (!summary) return;
     const security = securitySelect?.value || "";
     const isSavings = security === "savings" || security === "savings_and_shares";
+    const guarantorBox = form.querySelector("[data-official-guarantors], [data-guarantor-fields]");
     if (!isSavings) {
       summary.hidden = true;
       summary.innerHTML = "";
+      if (guarantorBox) guarantorBox.classList.add("guarantors-inactive");
       return;
     }
     summary.hidden = false;
@@ -76,6 +78,15 @@ function bindLoanSecurityCalculator(form, { borrowerSavings = 0, candidates = []
       Number(input.dataset.guarantorSavings || 0)
     );
     const selectedCover = window.LoanSecurity.selectedCover(selected);
+    const guarantorsNeeded = amount > 0 && estimate.remaining > 0;
+    if (guarantorBox) {
+      guarantorBox.classList.toggle("guarantors-inactive", !guarantorsNeeded);
+      if (!guarantorsNeeded) {
+        form.querySelectorAll("[name=guarantorIds]").forEach((input) => {
+          input.checked = false;
+        });
+      }
+    }
     if (!amount) {
       summary.innerHTML = `<strong>Savings security</strong><p>Your 75% security capacity is ${money(window.LoanSecurity.capacity(currentBorrowerSavings))}. Enter an amount to see how many guarantors you need.</p>`;
       return;
@@ -92,9 +103,10 @@ function bindLoanSecurityCalculator(form, { borrowerSavings = 0, candidates = []
 
   const applySecurityVisibility = () => {
     const collateral = securitySelect?.value === "collateral";
+    const isSavings = securitySelect?.value === "savings" || securitySelect?.value === "savings_and_shares";
     const guarantorBox = form.querySelector("[data-official-guarantors], [data-guarantor-fields]");
     const collateralBox = form.querySelector("[data-official-collateral], [data-collateral-fields]");
-    if (guarantorBox) guarantorBox.hidden = collateral || !securitySelect?.value;
+    if (guarantorBox) guarantorBox.hidden = !isSavings;
     if (collateralBox) collateralBox.hidden = !collateral;
     form
       .querySelectorAll(
@@ -150,8 +162,8 @@ function officialLoanPolicyFields(memberOptionsHtml) {
       <small>Select enough guarantors so 75% of their savings covers what the borrower's 75% does not. Call them to accept from their dashboards.</small>
     </div>
     <div class="field full" data-official-collateral hidden><div class="form-grid"><div class="field full"><label>Collateral description</label><textarea name="collateralDescription"></textarea></div><div class="field"><label>Collateral value (UGX)</label><input name="collateralValue" type="number" min="0"></div><div class="field"><label>Collateral owner</label><input name="collateralOwner"></div><div class="field"><label>Collateral owner phone number</label><input name="collateralOwnerPhone" type="tel"></div><label class="field full check-field"><input name="collateralOwnerConsent" type="checkbox" value="accepted"> Owner consent is confirmed.</label></div></div>
-    <div class="field full"><label>Supporting evidence</label><input name="supportingDocument" type="file" accept="image/jpeg,image/png,image/webp,application/pdf,.doc,.docx"><small>Attach a land title, vehicle logbook, collateral evidence, quotation or other relevant document.</small></div>
-    <label class="field full check-field loan-overdue-check"><input type="checkbox" name="overdueDeclaration" value="accepted" required><span>I understand that after a 5-day grace from the due date, unpaid principal attracts a 5% late-payment penalty (interest is not included in the penalty base), plus recovery costs and security enforcement.</span></label>`;
+    <div class="field full"><label>Supporting evidence</label><input name="supportingDocument" type="file" multiple accept="image/jpeg,image/png,image/webp,application/pdf,.doc,.docx"><small>Attach one or more files — land title, owner photo annex, vehicle logbook, collateral evidence, quotation, etc.</small></div>
+    <label class="field full check-field loan-overdue-check"><input type="checkbox" name="overdueDeclaration" value="accepted" required><span>I understand that from the day after the due date, unpaid principal attracts a 5% late-payment penalty (interest is not included in the penalty base), plus recovery costs and security enforcement.</span></label>`;
 }
 
 function bindOfficialLoanSecurity(form) {
@@ -216,7 +228,7 @@ openCreditsModal = async function (type, context = "") {
   state.guarantorCandidates = [];
   document.body.insertAdjacentHTML(
     "beforeend",
-    `<div class="modal-backdrop" id="modal-backdrop"><div class="modal"><div class="modal-head"><div><h2>New loan application</h2><p>Equal principal with 2% monthly interest charged by the organization.</p></div><button class="modal-close" data-close>${icons.x}</button></div><form class="form" data-credits-form="loan" enctype="multipart/form-data"><div class="form-grid">${officialLoanPolicyFields(creditsMemberOptions())}</div>${formActions("Submit loan application")}</form></div></div>`
+    `<div class="modal-backdrop" id="modal-backdrop"><div class="modal"><div class="modal-head"><div><h2>New loan application</h2><p>Equal total repayments with 2% monthly interest charged by the organization.</p></div><button class="modal-close" data-close>${icons.x}</button></div><form class="form" data-credits-form="loan" enctype="multipart/form-data"><div class="form-grid">${officialLoanPolicyFields(creditsMemberOptions())}</div>${formActions("Submit loan application")}</form></div></div>`
   );
   document.querySelector("[data-close]").onclick = closeModal;
   const form = document.querySelector("[data-credits-form]");

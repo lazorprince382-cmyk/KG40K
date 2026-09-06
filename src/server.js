@@ -34,6 +34,23 @@ if (production && (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32
 }
 const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(48).toString("hex");
 const asyncRoute = fn => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+const roundMoney = (value) => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+/** Calendar YYYY-MM-DD in Africa/Kampala (avoids UTC date-shift on DATE values). */
+const kampalaDateKey = (value) => {
+  if (value == null || value === "") return "";
+  if (typeof value === "string") {
+    const match = value.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (match) return match[1];
+  }
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleDateString("en-CA", { timeZone: "Africa/Kampala" });
+};
+const kampalaTodayKey = () => new Date().toLocaleDateString("en-CA", { timeZone: "Africa/Kampala" });
+const isPastDueDate = (dueValue, todayKey = kampalaTodayKey()) => {
+  const dueKey = kampalaDateKey(dueValue);
+  return Boolean(dueKey && todayKey && dueKey < todayKey);
+};
 const publicDir=path.join(projectRoot,"public");
 const uploadsDir=path.join(projectRoot,"storage","uploads");
 fs.mkdirSync(uploadsDir,{recursive:true});
@@ -1470,22 +1487,56 @@ app.get("/api/credits/command-center",auth,requireCredits("view"),asyncRoute(asy
       COALESCE((SELECT SUM(s.paid_amount) FROM loan_repayment_schedule s WHERE s.loan_id=l.id),0)::float AS "totalPaid",
       COALESCE((SELECT SUM(s.interest) FROM loan_repayment_schedule s WHERE s.loan_id=l.id),
         ROUND((l.amount*(p.annual_rate/1200.0)*(l.term_months+1)/2.0)::numeric,2))::float AS "totalInterest",
-      COALESCE((SELECT SUM(GREATEST(0,c.amount-c.paid_amount)) FROM loan_charges c WHERE c.loan_id=l.id AND c.status IN ('outstanding','partial') AND c.charge_type <> 'Processing fee'),0)::float AS "outstandingCharges",
+      COALESCE((SELECT SUM(GREATEST(0,c.amount-c.paid_amount)) FROM loan_charges c WHERE c.loan_id=l.id AND c.status IN ('outstanding','partial') AND c.charge_type <> 'Processing fee' AND c.charge_type <> 'Late payment penalty'),0)::float
+        + COALESCE((SELECT SUM(GREATEST(0,c.amount-c.paid_amount)) FROM loan_charges c
+            LEFT JOIN loan_repayment_schedule ps ON ps.id=c.schedule_id
+            WHERE c.loan_id=l.id AND c.status IN ('outstanding','partial') AND c.charge_type='Late payment penalty'
+              AND (c.schedule_id IS NULL OR ps.due_date < (CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date)),0)::float AS "outstandingCharges",
+      COALESCE((SELECT SUM(GREATEST(0,c.amount-c.paid_amount)) FROM loan_charges c
+        LEFT JOIN loan_repayment_schedule ps ON ps.id=c.schedule_id
+        WHERE c.loan_id=l.id AND c.status IN ('outstanding','partial') AND c.charge_type='Late payment penalty'
+          AND (c.schedule_id IS NULL OR ps.due_date < (CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date)),0)::float AS "penaltyAmount",
       l.purpose,l.status,l.created_at AS "createdAt",l.due_date AS "dueDate",l.verified_amount::float AS "verifiedAmount",
       COALESCE(officer.full_name,'Unassigned') AS "officerHandling",
       COALESCE((SELECT MIN(s.due_date) FROM loan_repayment_schedule s
-        WHERE s.loan_id=l.id AND s.status IN ('due','partial','upcoming') AND s.paid_amount<s.total_due),l.due_date) AS "nextDueDate",
-      COALESCE((SELECT ROUND(((s.interest-s.interest_paid)+(s.principal-s.principal_paid))::numeric,2)::float
-        FROM loan_repayment_schedule s WHERE s.loan_id=l.id AND s.status<>'paid'
-        ORDER BY s.installment_number LIMIT 1),0)::float AS "nextPaymentAmount",
+        WHERE s.loan_id=l.id AND s.status IN ('due','partial','upcoming','overdue') AND s.paid_amount<s.total_due),l.due_date) AS "nextDueDate",
+      (
+        COALESCE((SELECT ROUND(SUM(GREATEST(0,s.interest-s.interest_paid)+GREATEST(0,s.principal-s.principal_paid))::numeric,2)::float
+          FROM loan_repayment_schedule s
+          WHERE s.loan_id=l.id AND s.status<>'paid'
+            AND s.due_date <= (CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date),0)
+        + COALESCE((SELECT SUM(GREATEST(0,c.amount-c.paid_amount)) FROM loan_charges c
+            WHERE c.loan_id=l.id AND c.status IN ('outstanding','partial') AND c.charge_type <> 'Processing fee' AND c.charge_type <> 'Late payment penalty'),0)
+        + COALESCE((SELECT SUM(GREATEST(0,c.amount-c.paid_amount)) FROM loan_charges c
+            LEFT JOIN loan_repayment_schedule ps ON ps.id=c.schedule_id
+            WHERE c.loan_id=l.id AND c.status IN ('outstanding','partial') AND c.charge_type='Late payment penalty'
+              AND (c.schedule_id IS NULL OR ps.due_date < (CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date)),0)
+        + COALESCE((SELECT ROUND(GREATEST(0,s.principal)*p.late_penalty_rate/100,2)::float
+          FROM loan_repayment_schedule s
+          WHERE s.loan_id=l.id AND s.status='overdue' AND s.paid_amount<s.total_due
+            AND NOT EXISTS (
+              SELECT 1 FROM loan_charges c
+              WHERE c.loan_id=l.id AND c.schedule_id=s.id AND c.charge_type='Late payment penalty'
+            )
+          ORDER BY s.installment_number LIMIT 1),0)
+      )::float AS "nextPaymentAmount",
+      COALESCE((SELECT ROUND(s.principal*p.late_penalty_rate/100,2)::float
+        FROM loan_repayment_schedule s
+        WHERE s.loan_id=l.id AND s.status='overdue' AND s.paid_amount<s.total_due
+          AND NOT EXISTS (
+            SELECT 1 FROM loan_charges c
+            WHERE c.loan_id=l.id AND c.schedule_id=s.id AND c.charge_type='Late payment penalty'
+              AND c.status IN ('outstanding','partial','settled')
+          )
+        ORDER BY s.installment_number LIMIT 1),0)::float AS "pendingPenaltyAmount",
       (SELECT COUNT(*)::int FROM loan_repayment_schedule s WHERE s.loan_id=l.id) AS "totalInstallments",
       (SELECT COUNT(*)::int FROM loan_repayment_schedule s WHERE s.loan_id=l.id AND s.status='paid') AS "paidInstallments",
       GREATEST(0,CURRENT_DATE-(COALESCE((SELECT MIN(s.due_date) FROM loan_repayment_schedule s
-        WHERE s.loan_id=l.id AND s.status<>'paid' AND s.due_date+5<CURRENT_DATE),CURRENT_DATE)))::int AS "daysOverdue",
+        WHERE s.loan_id=l.id AND s.status<>'paid' AND s.due_date<(CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date),(CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date)))::int AS "daysOverdue",
       EXISTS (
         SELECT 1 FROM loan_repayment_schedule s
-        WHERE s.loan_id=l.id AND s.status IN ('due','partial')
-          AND s.due_date<=CURRENT_DATE AND s.due_date+5>=CURRENT_DATE
+        WHERE s.loan_id=l.id AND s.status IN ('due','partial','overdue')
+          AND s.due_date<(CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date AND s.paid_amount<s.total_due
       ) AS "inDangerPeriod",
       COALESCE((SELECT ROUND(GREATEST(0,s.interest-COALESCE(s.interest_paid,0))::numeric,2)::float
         FROM loan_repayment_schedule s WHERE s.loan_id=l.id AND s.installment_number=1),0)::float AS "firstMonthInterestRemaining",
@@ -1657,8 +1708,8 @@ app.get("/api/credits/command-center",auth,requireCredits("view"),asyncRoute(asy
     notifications:[
       pendingRepaymentVerifications.length&&{level:"warning",title:`${pendingRepaymentVerifications.length} loan repayment${pendingRepaymentVerifications.length===1?"":"s"} awaiting Credits Officer approval`,detail:`Review on Repayments${primaryCreditsOfficer?.name?` — ${primaryCreditsOfficer.name}`:""}`,target:"credits-repayments",transactionId:pendingRepaymentVerifications[0]?.id,createdAt:pendingRepaymentVerifications[0]?.createdAt},
       pendingContributionVerifications.length&&{level:"info",title:`${pendingContributionVerifications.length} member contribution${pendingContributionVerifications.length===1?"":"s"} awaiting verification`,detail:"Review on Savings",target:"credits-savings",transactionId:pendingContributionVerifications[0]?.id,createdAt:pendingContributionVerifications[0]?.createdAt},
-      dangerRows.length&&{level:"danger",title:`${dangerRows.length} loan${dangerRows.length===1?"":"s"} in the 5-day grace danger window — remind members before the 5% principal penalty`,createdAt:dangerRows[0]?.nextDueDate||dangerRows[0]?.dueDate||dangerRows[0]?.createdAt},
-      overdueRows.length&&{level:"danger",title:`${overdueRows.length} loan${overdueRows.length===1?" is":"s are"} overdue (after grace) and need recovery follow-up`,createdAt:overdueRows[0]?.dueDate||overdueRows[0]?.createdAt},
+      dangerRows.length&&{level:"danger",title:`${dangerRows.length} loan${dangerRows.length===1?"":"s"} past due — remind members before the 5% principal penalty grows`,createdAt:dangerRows[0]?.nextDueDate||dangerRows[0]?.dueDate||dangerRows[0]?.createdAt},
+      overdueRows.length&&{level:"danger",title:`${overdueRows.length} loan${overdueRows.length===1?" is":"s are"} overdue and need recovery follow-up`,createdAt:overdueRows[0]?.dueDate||overdueRows[0]?.createdAt},
       underReview.length&&{level:"info",title:`${underReview.length} loan applications are moving through approval`,createdAt:underReview[0]?.createdAt},
       Number(guarantorSummary.rows[0].pending)>0&&{level:"warning",title:`${guarantorSummary.rows[0].pending} guarantor confirmations are pending`,createdAt:guarantors.rows.find(x=>x.status==="pending")?.createdAt},
       Number(savingsThisMonth)>0&&{level:"success",title:`Savings deposits this month total UGX ${Number(savingsThisMonth).toLocaleString()}`,createdAt:transactionsResult.rows.find(x=>x.type==="Savings deposit"&&x.status==="completed")?.verifiedAt||transactionsResult.rows.find(x=>x.type==="Savings deposit"&&x.status==="completed")?.createdAt},
@@ -1776,14 +1827,26 @@ async function applyLoanRepayment(client,loanId,amount,options={}){
     await client.query("UPDATE loans SET balance=$1,status='active' WHERE id=$2",[newBalance,loan.id]);
     return {loan,chargeApplied,interestApplied,principalApplied,newBalance,settledEarlyFull:true,settledPrincipalOnly:true};
   }
+  let payingCurrentInstallment=true;
   for(const schedule of schedules){
     if(remaining<=0)break;
+    let interestPart=0,principalPart=0;
     const interestDue=Math.max(0,Number(schedule.interest)-Number(schedule.interest_paid||0));
-    const interestPart=Math.min(remaining,interestDue);
-    remaining-=interestPart; interestApplied+=interestPart;
     const principalDue=Math.max(0,Number(schedule.principal)-Number(schedule.principal_paid||0));
-    const principalPart=Math.min(remaining,principalDue);
-    remaining-=principalPart; principalApplied+=principalPart;
+    if(payingCurrentInstallment){
+      interestPart=Math.min(remaining,interestDue);
+      remaining-=interestPart;
+      principalPart=Math.min(remaining,principalDue);
+      remaining-=principalPart;
+      payingCurrentInstallment=false;
+    }else{
+      // Surplus after the current installment reduces the next month's principal first.
+      principalPart=Math.min(remaining,principalDue);
+      remaining-=principalPart;
+      interestPart=Math.min(remaining,interestDue);
+      remaining-=interestPart;
+    }
+    interestApplied+=interestPart; principalApplied+=principalPart;
     const newInterest=Number(schedule.interest_paid||0)+interestPart;
     const newPrincipal=Number(schedule.principal_paid||0)+principalPart;
     const newPaid=newInterest+newPrincipal;
@@ -3062,7 +3125,7 @@ app.post("/api/transactions/:id/verify",auth,requireCredits("approve"),asyncRout
     entityId:String(tx.id),details:`${tx.reference} - ${comment||tx.statusValue}`,...metadata(req)});
   res.json({ok:true,status:tx.statusValue,receiptNumber:tx.receipt});
 }));
-app.post("/api/loans",auth,upload.single("supportingDocument"),(req,res,next)=>{
+app.post("/api/loans",auth,upload.array("supportingDocument",10),(req,res,next)=>{
   if(req.user.member_id||(permissions[req.user.role]||[]).some(permission=>["loan:create","loan:manage"].includes(permission)))return next();
   return res.status(403).json({error:"A linked member account or Credits loan authority is required"});
 },asyncRoute(async(req,res)=>{
@@ -3074,6 +3137,8 @@ app.post("/api/loans",auth,upload.single("supportingDocument"),(req,res,next)=>{
   if(!member||!product||!amount||!term||!declaration||!overdueDeclaration||(!savingsSecurity&&!collateralSecurity))return res.status(400).json({error:"Complete the required loan fields and accept the Kwagalana loan policy"});
   const customProductName=String(b.customProductName||"").trim().slice(0,120);
   if(/^other loan$/i.test(product.name)&&!customProductName)return res.status(400).json({error:"Type the loan product name when selecting Other Loan"});
+  const supportingFiles=[...(Array.isArray(req.files)?req.files:[]),req.file].filter(Boolean);
+  const primaryDoc=supportingFiles[0]||null;
   const processingFeeRate=Number(product.processing_fee_rate||2);
   const processingFee=Math.round((amount*processingFeeRate/100+Number.EPSILON)*100)/100;
   const existing=await one(`SELECT COALESCE(SUM(balance),0)::float AS balance,
@@ -3134,11 +3199,12 @@ app.post("/api/loans",auth,upload.single("supportingDocument"),(req,res,next)=>{
   if(term>Number(product.max_term))return res.status(400).json({error:`Maximum term is ${product.max_term} months`});
   const collateralDescription=String(b.collateralDescription||"").trim(),collateralOwner=String(b.collateralOwner||"").trim(),collateralOwnerPhone=String(b.collateralOwnerPhone||"").trim(),collateralValue=Number(b.collateralValue||0),collateralConsent=["accepted","true","on"].includes(String(b.collateralOwnerConsent||"").toLowerCase());
   if(collateralSecurity&&(!collateralDescription||!collateralOwner||!collateralOwnerPhone||collateralValue<=0||!collateralConsent))return res.status(400).json({error:"Collateral applications require a description, value, owner, owner phone number and consent"});
-  const guarantorIds=savingsSecurity?[...new Set([...(Array.isArray(b.guarantorIds)?b.guarantorIds:[]),b.guarantorId].map(Number).filter(Boolean))]:[];
-  if(guarantorIds.includes(Number(memberId)))return res.status(400).json({error:"A member cannot guarantee their own loan"});
   const borrowerSavings=Number(member.savings_balance||0);
   const borrowerCover=Math.min(amount, securityCapacity(borrowerSavings));
   const remainingToCover=Math.max(0, Math.round((amount-borrowerCover)*100)/100);
+  // When the borrower's 75% savings security fully covers the loan, guarantors are not required.
+  const guarantorIds=savingsSecurity&&remainingToCover>0?[...new Set([...(Array.isArray(b.guarantorIds)?b.guarantorIds:[]),b.guarantorId].map(Number).filter(Boolean))]:[];
+  if(guarantorIds.includes(Number(memberId)))return res.status(400).json({error:"A member cannot guarantee their own loan"});
   const guarantors=guarantorIds.length?(await query(`SELECT m.id,m.full_name,m.savings_balance::float AS savings,u.id AS user_id,
     COALESCE((SELECT COUNT(*) FROM loan_guarantors active_guarantee
       JOIN loans active_loan ON active_loan.id=active_guarantee.loan_id
@@ -3176,18 +3242,30 @@ app.post("/api/loans",auth,upload.single("supportingDocument"),(req,res,next)=>{
   const storedSecurityType=savingsSecurity?"savings_and_shares":securityType;
   const ref=reference("LN"),initialStatus=savingsSecurity&&pledges.length?"pending-guarantors":"officer-review";
   const eligibilityNote=savingsSecurity
-    ?`Savings security at ${SECURITY_RATE*100}%: borrower covers UGX ${borrowerCover.toLocaleString()}; guarantors cover UGX ${remainingToCover.toLocaleString()}`
+    ?(remainingToCover>0
+      ?`Savings security at ${SECURITY_RATE*100}%: borrower covers UGX ${borrowerCover.toLocaleString()}; guarantors cover UGX ${remainingToCover.toLocaleString()}`
+      :`Savings security at ${SECURITY_RATE*100}%: borrower fully covers UGX ${borrowerCover.toLocaleString()} — no guarantors required`)
     :`Open to all members up to UGX ${policyMaximum.toLocaleString()}`;
   const row=await transaction(async client=>{
-    const created=(await client.query(`INSERT INTO loans (reference,member_id,product_id,amount,balance,term_months,purpose,status,savings_at_application,existing_loan_balance,eligibility_result,security_type,collateral_description,collateral_value,collateral_owner,collateral_owner_phone,collateral_owner_consent,borrower_declaration_accepted,overdue_declaration_accepted,supporting_document_stored_name,supporting_document_original_name,supporting_document_mime_type,processing_fee,custom_product_name,policy_reference) VALUES ($1,$2,$3,$4,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,true,true,$17,$18,$19,$20,$21,$22) RETURNING id`,[ref,memberId,b.productId,amount,term,String(b.purpose||"").trim(),initialStatus,member.savings_balance,existing.balance,eligibilityNote,storedSecurityType,collateralSecurity?collateralDescription:null,collateralSecurity?collateralValue:null,collateralSecurity?collateralOwner:null,collateralSecurity?collateralOwnerPhone:null,collateralSecurity?collateralConsent:false,req.file?.filename||null,req.file?.originalname||null,req.file?.mimetype||null,processingFee,customProductName||null,product.policy_reference||"AGM-2025-LOAN-RESOLUTION"])).rows[0];
+    const created=(await client.query(`INSERT INTO loans (reference,member_id,product_id,amount,balance,term_months,purpose,status,savings_at_application,existing_loan_balance,eligibility_result,security_type,collateral_description,collateral_value,collateral_owner,collateral_owner_phone,collateral_owner_consent,borrower_declaration_accepted,overdue_declaration_accepted,supporting_document_stored_name,supporting_document_original_name,supporting_document_mime_type,processing_fee,custom_product_name,policy_reference) VALUES ($1,$2,$3,$4,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,true,true,$17,$18,$19,$20,$21,$22) RETURNING id`,[ref,memberId,b.productId,amount,term,String(b.purpose||"").trim(),initialStatus,member.savings_balance,existing.balance,eligibilityNote,storedSecurityType,collateralSecurity?collateralDescription:null,collateralSecurity?collateralValue:null,collateralSecurity?collateralOwner:null,collateralSecurity?collateralOwnerPhone:null,collateralSecurity?collateralConsent:false,primaryDoc?.filename||null,primaryDoc?.originalname||null,primaryDoc?.mimetype||null,processingFee,customProductName||null,product.policy_reference||"AGM-2025-LOAN-RESOLUTION"])).rows[0];
+    for(let i=0;i<supportingFiles.length;i++){
+      const file=supportingFiles[i];
+      await client.query(
+        `INSERT INTO loan_supporting_documents (loan_id,stored_name,original_name,mime_type,sort_order)
+         VALUES ($1,$2,$3,$4,$5)`,
+        [created.id,file.filename,file.originalname||file.filename,file.mimetype||null,i+1]
+      );
+    }
     for(const guarantor of pledges){await client.query("INSERT INTO loan_guarantors (loan_id,member_id,guaranteed_amount) VALUES ($1,$2,$3)",[created.id,guarantor.id,guarantor.pledge]);await client.query("INSERT INTO notifications (user_id,title,message) VALUES ($1,'Loan guarantee request',$2)",[guarantor.user_id,`${member.full_name} asked you to guarantee loan ${ref} for UGX ${guarantor.pledge.toLocaleString()} (75% of your savings capacity).`]);}
     const nextNote=collateralSecurity
       ?`Collateral offered by ${collateralOwner}; Credit Committee appraisal required`
-      :`Savings security: borrower 75% = UGX ${borrowerCover.toLocaleString()}; ${pledges.length} guarantor(s) for remaining UGX ${remainingToCover.toLocaleString()}. Processing fee ${processingFee.toLocaleString()} (2%) deducted at disbursement.`;
+      :(pledges.length
+        ?`Savings security: borrower 75% = UGX ${borrowerCover.toLocaleString()}; ${pledges.length} guarantor(s) for remaining UGX ${remainingToCover.toLocaleString()}. Processing fee ${processingFee.toLocaleString()} (2%) deducted at disbursement.`
+        :`Savings security: borrower 75% fully covers UGX ${borrowerCover.toLocaleString()} — no guarantors required. Processing fee ${processingFee.toLocaleString()} (2%) deducted at disbursement.`);
     await client.query("INSERT INTO loan_workflow_events (loan_id,stage,action,actor_id,comment) VALUES ($1,'application','submitted',$2,$3)",[created.id,req.user.id,nextNote]);return created;
   });
   await audit({userId:req.user.id,action:"LOAN_APPLIED",entityType:"loan",entityId:String(row.id),details:`${ref} - UGX ${amount}`,...metadata(req)});
-  res.status(201).json({id:row.id,reference:ref,status:initialStatus,maximumEligible:policyMaximum,processingFee,borrowerCover,remainingToCover,guarantorsRequired:pledges.length});
+  res.status(201).json({id:row.id,reference:ref,status:initialStatus,maximumEligible:policyMaximum,processingFee,borrowerCover,remainingToCover,guarantorsRequired:pledges.length,supportingDocuments:supportingFiles.length});
 }));app.post("/api/loans/:id/decision",auth,asyncRoute(async(req,res)=>{
   const loan=await one("SELECT * FROM loans WHERE id=$1",[req.params.id]);
   if(!loan) return res.status(404).json({error:"Loan not found"});
@@ -3377,12 +3455,26 @@ app.post("/api/loans/:id/guarantor-response",auth,asyncRoute(async(req,res)=>{
 }));
 app.post("/api/loans/:id/finance-verification",auth,(_req,res)=>res.status(410).json({error:"Finance does not approve loans. Credit Committee approval is sent directly to Executive."}));async function createRepaymentSchedule(client,loan,amount) {
   const product=(await client.query("SELECT annual_rate FROM loan_products WHERE id=$1",[loan.product_id])).rows[0];
-  // Equal principal repayments with reducing-balance monthly interest (same as loan calculator).
-  const monthlyRate=Number(product.annual_rate)/1200,n=Number(loan.term_months),round=value=>Math.round((value+Number.EPSILON)*100)/100,regularPrincipal=round(amount/n);
+  // Equal total payments (amortizing EMI) with reducing-balance monthly interest.
+  const monthlyRate=Number(product.annual_rate)/1200,n=Number(loan.term_months),round=value=>Math.round((value+Number.EPSILON)*100)/100;
+  let payment;
+  if(monthlyRate===0)payment=round(amount/n);
+  else{
+    const factor=Math.pow(1+monthlyRate,n);
+    payment=round(amount*monthlyRate*factor/(factor-1));
+  }
+  const startDate=loan.disbursed_at?new Date(loan.disbursed_at):new Date();
+  const startIso=startDate.toISOString().slice(0,10);
   let balance=round(amount);
   for(let installment=1;installment<=n;installment++){
-    const openingBalance=balance,principal=installment===n?openingBalance:Math.min(regularPrincipal,openingBalance),interest=round(openingBalance*monthlyRate),total=round(principal+interest);
-    await client.query(`INSERT INTO loan_repayment_schedule (loan_id,installment_number,due_date,opening_balance,principal,interest,total_due,status) VALUES ($1,$2::int,(CURRENT_DATE+($2::int::text||' months')::interval)::date,$3,$4,$5,$6,CASE WHEN $2::int=1 THEN 'due' ELSE 'upcoming' END)`,[loan.id,installment,openingBalance,principal,interest,total]);
+    const openingBalance=balance;
+    const interest=round(openingBalance*monthlyRate);
+    let principal=installment===n?openingBalance:round(payment-interest);
+    if(principal>openingBalance)principal=openingBalance;
+    const total=round(principal+interest);
+    await client.query(`INSERT INTO loan_repayment_schedule (loan_id,installment_number,due_date,opening_balance,principal,interest,total_due,status)
+      VALUES ($1,$2::int,($3::date+($2::int::text||' months')::interval)::date,$4,$5,$6,$7,CASE WHEN $2::int=1 THEN 'due' ELSE 'upcoming' END)`,
+      [loan.id,installment,startIso,openingBalance,principal,interest,total]);
     balance=round(Math.max(0,openingBalance-principal));
   }
 }
@@ -3453,37 +3545,148 @@ app.post("/api/loans/:id/disburse",auth,asyncRoute(async(req,res)=>{
   await audit({userId:req.user.id,action:"LOAN_DISBURSED",entityType:"loan",entityId:String(result.loan.id),details:`${transactionReference} · ${result.method}`,...metadata(req)});
   res.json({ok:true,status:"active",transactionReference,netCash:result.netCash,processingFee:result.processingFee,principal:result.fullAmount,method:result.method,destination:result.destination});
 }));app.get("/api/loans/:id/supporting-document",auth,asyncRoute(async(req,res)=>{
-  const loan=await one("SELECT member_id,supporting_document_stored_name AS stored,supporting_document_original_name AS original,supporting_document_mime_type AS mime FROM loans WHERE id=$1",[req.params.id]);
-  if(!loan?.stored)return res.status(404).json({error:"Loan supporting document not found"});
+  const loan=await one("SELECT id,member_id,supporting_document_stored_name AS stored,supporting_document_original_name AS original,supporting_document_mime_type AS mime FROM loans WHERE id=$1",[req.params.id]);
+  if(!loan)return res.status(404).json({error:"Loan not found"});
   const isBorrower=Number(req.user.member_id)===Number(loan.member_id),isGuarantor=req.user.member_id&&await one("SELECT 1 FROM loan_guarantors WHERE loan_id=$1 AND member_id=$2",[req.params.id,req.user.member_id]);
   if(!isBorrower&&!isGuarantor&&!await canAccessLoanRecords(req.user))return res.status(403).json({error:"Loan document access denied"});
-  const file=path.join(uploadsDir,path.basename(loan.stored));if(!fs.existsSync(file))return res.status(404).json({error:"Stored loan document is missing"});
-  res.type(loan.mime||"application/octet-stream");res.set("Content-Disposition",`inline; filename="${String(loan.original||"loan-document").replaceAll('"','')}"`);res.sendFile(file);
+  const docId=Number(req.query.docId||req.query.id||0);
+  const index=Math.max(1,Number(req.query.index||1));
+  let doc=null;
+  if(docId){
+    doc=await one(`SELECT stored_name AS stored,original_name AS original,mime_type AS mime
+      FROM loan_supporting_documents WHERE loan_id=$1 AND id=$2`,[loan.id,docId]);
+  }else{
+    doc=await one(`SELECT stored_name AS stored,original_name AS original,mime_type AS mime
+      FROM loan_supporting_documents WHERE loan_id=$1 ORDER BY sort_order,id
+      OFFSET $2 LIMIT 1`,[loan.id,index-1]);
+  }
+  if(!doc&&index===1&&loan.stored)doc={stored:loan.stored,original:loan.original,mime:loan.mime};
+  if(!doc?.stored)return res.status(404).json({error:"Loan supporting document not found"});
+  const storedName=path.basename(doc.stored);
+  const seedDir=path.join(projectRoot,"storage","seed-supporting");
+  const candidates=[
+    path.join(uploadsDir,storedName),
+    path.join(seedDir,storedName),
+    storedName.startsWith("seed-")?path.join(seedDir,storedName.slice(5)):null
+  ].filter(Boolean);
+  let file=candidates.find(candidate=>fs.existsSync(candidate));
+  if(!file)return res.status(404).json({error:"Stored loan document is missing"});
+  const uploadTarget=path.join(uploadsDir,storedName);
+  if(file!==uploadTarget){
+    try{fs.mkdirSync(uploadsDir,{recursive:true});fs.copyFileSync(file,uploadTarget);file=uploadTarget;}catch(_){/* serve from seed path */}
+  }
+  res.type(doc.mime||"application/octet-stream");
+  if(doc.mime)res.set("X-Document-Mime-Type",doc.mime);
+  res.set("Content-Disposition",`inline; filename="${String(doc.original||"loan-document").replaceAll('"','')}"`);
+  res.sendFile(path.resolve(file));
 }));app.get("/api/loans/:id/details",auth,asyncRoute(async(req,res)=>{
+  const loanId=Number(req.params.id);
+  if(!Number.isInteger(loanId))return res.status(400).json({error:"Invalid loan id"});
   const loan=await one(`SELECT l.*,m.full_name AS member,m.member_number,
     CASE WHEN NULLIF(l.custom_product_name,'') IS NOT NULL THEN p.name||' ('||l.custom_product_name||')' ELSE p.name END AS product,
-    p.annual_rate,l.custom_product_name,l.processing_fee
-    FROM loans l JOIN members m ON m.id=l.member_id JOIN loan_products p ON p.id=l.product_id WHERE l.id=$1`,[req.params.id]);
+    p.annual_rate,p.late_penalty_rate::float AS late_penalty_rate,l.custom_product_name,l.processing_fee
+    FROM loans l JOIN members m ON m.id=l.member_id JOIN loan_products p ON p.id=l.product_id WHERE l.id=$1`,[loanId]);
   if(!loan)return res.status(404).json({error:"Loan not found"});
   const isBorrower=Number(req.user.member_id)===Number(loan.member_id);
   const isGuarantor=req.user.member_id&&await one("SELECT 1 FROM loan_guarantors WHERE loan_id=$1 AND member_id=$2",[loan.id,req.user.member_id]);
   const hasStaffAccess=req.user.role!=="Member"&&await canAccessLoanRecords(req.user);
   if(!isBorrower&&!isGuarantor&&!hasStaffAccess)return res.status(403).json({error:"Loan access denied"});
   const helpers=await getLoanApprovals();
-  const [guarantors,events,schedule,disbursement,creditsProgress,executiveProgress]=await Promise.all([
+  const [guarantors,events,schedule,repayments,disbursement,creditsProgress,executiveProgress,supportingDocuments]=await Promise.all([
     query(`SELECT lg.id,m.full_name AS name,m.member_number AS "memberNumber",lg.status,lg.response_note AS note,lg.responded_at AS "respondedAt"
       FROM loan_guarantors lg JOIN members m ON m.id=lg.member_id WHERE lg.loan_id=$1`,[loan.id]),
     query(`SELECT e.id,e.stage,e.action,e.comment,e.created_at AS "createdAt",COALESCE(u.full_name,'System') AS actor
       FROM loan_workflow_events e LEFT JOIN users u ON u.id=e.actor_id WHERE e.loan_id=$1 ORDER BY e.id`,[loan.id]),
-    query(`SELECT installment_number AS installment,due_date AS "dueDate",opening_balance::float AS "openingBalance",
-      principal::float,interest::float,total_due::float AS "totalDue",paid_amount::float AS "paidAmount",status
-      FROM loan_repayment_schedule WHERE loan_id=$1 ORDER BY installment_number`,[loan.id]),
+    query(`SELECT s.id AS "scheduleId",s.installment_number AS installment,s.due_date AS "dueDate",
+      s.opening_balance::float AS "openingBalance",s.principal::float,s.interest::float,
+      s.total_due::float AS "totalDue",s.paid_amount::float AS "paidAmount",
+      s.principal_paid::float AS "principalPaid",s.interest_paid::float AS "interestPaid",s.status,
+      CASE
+        WHEN s.status='paid' THEN 0
+        WHEN s.due_date < (CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date THEN
+          COALESCE(NULLIF((SELECT ROUND(c.amount::numeric,2) FROM loan_charges c
+            WHERE c.schedule_id=s.id AND c.charge_type='Late payment penalty'
+              AND c.status IN ('outstanding','partial','settled')
+            ORDER BY c.id DESC LIMIT 1),0),
+            ROUND((s.principal*(SELECT p.late_penalty_rate FROM loans lx JOIN loan_products p ON p.id=lx.product_id WHERE lx.id=s.loan_id)/100.0)::numeric,2))
+        ELSE 0
+      END::float AS "penalty",
+      CASE
+        WHEN s.status='paid' THEN 0
+        WHEN s.due_date < (CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date THEN
+          COALESCE((SELECT ROUND(GREATEST(0,c.amount-c.paid_amount)::numeric,2) FROM loan_charges c
+            WHERE c.schedule_id=s.id AND c.charge_type='Late payment penalty'
+              AND c.status IN ('outstanding','partial')
+            ORDER BY c.id DESC LIMIT 1),
+            ROUND((s.principal*(SELECT p.late_penalty_rate FROM loans lx JOIN loan_products p ON p.id=lx.product_id WHERE lx.id=s.loan_id)/100.0)::numeric,2))
+        ELSE 0
+      END::float AS "penaltyOutstanding"
+      FROM loan_repayment_schedule s WHERE s.loan_id=$1 ORDER BY s.installment_number`,[loan.id]),
+    query(`SELECT amount::float, created_at AS "createdAt"
+      FROM transactions
+      WHERE loan_id=$1 AND type='Loan repayment' AND status='completed'
+      ORDER BY created_at,id`,[loan.id]),
     one(`SELECT amount::float,method,destination,status,transaction_reference AS "transactionReference",
       prepared_at AS "preparedAt",authorized_at AS "authorizedAt",disbursed_at AS "disbursedAt" FROM loan_disbursements WHERE loan_id=$1`,[loan.id]),
     helpers.approvalProgress(loan.id,"credits"),
-    helpers.approvalProgress(loan.id,"executive")
+    helpers.approvalProgress(loan.id,"executive"),
+    query(`SELECT id,original_name AS "originalName",mime_type AS "mimeType",sort_order AS "sortOrder"
+      FROM loan_supporting_documents WHERE loan_id=$1 ORDER BY sort_order,id`,[loan.id])
   ]);
-  res.json({loan,guarantors:guarantors.rows,events:events.rows,schedule:schedule.rows,disbursement,
+  let docs=supportingDocuments.rows.map(doc=>({
+    ...doc,
+    url:`/api/loans/${loan.id}/supporting-document?docId=${doc.id}`
+  }));
+  if(!docs.length&&loan.supporting_document_stored_name){
+    docs=[{id:null,originalName:loan.supporting_document_original_name||"Supporting document",mimeType:loan.supporting_document_mime_type,sortOrder:1,url:`/api/loans/${loan.id}/supporting-document`}];
+  }
+  const todayKey=kampalaTodayKey();
+  const repaymentAmounts=(repayments.rows||[]).map(tx=>Number(tx.amount||0));
+  let repaymentCursor=0;
+  const scheduleRows=schedule.rows.map((row)=>{
+    const isPaid=row.status==="paid";
+    // Penalty only after due date, and never on a fully paid installment.
+    const penaltyActive=!isPaid&&isPastDueDate(row.dueDate,todayKey);
+    const principal=Number(row.principal||0);
+    const interest=Number(row.interest||0);
+    const emi=roundMoney(principal+interest);
+    const rate=Number(loan.late_penalty_rate||5);
+    const assessed=roundMoney(principal*(rate/100));
+    const rawPenalty=penaltyActive?(Number(row.penalty||0)||assessed):0;
+    const rawOutstanding=penaltyActive?(Number(row.penaltyOutstanding||0)||assessed):0;
+    const schedulePaid=Number(row.paidAmount||0);
+    let amountPaid=schedulePaid;
+    let surplusPaid=0;
+    if(schedulePaid>0.005){
+      if(isPaid&&repaymentCursor<repaymentAmounts.length){
+        amountPaid=roundMoney(repaymentAmounts[repaymentCursor]);
+        surplusPaid=roundMoney(Math.max(0,amountPaid-emi));
+        repaymentCursor+=1;
+      }else{
+        amountPaid=roundMoney(schedulePaid);
+      }
+    }
+    const remainingPrincipal=Math.max(0,principal-Number(row.principalPaid||0));
+    const remainingInterest=Math.max(0,interest-Number(row.interestPaid||0));
+    const outstanding=isPaid?0:roundMoney(remainingPrincipal+remainingInterest+rawPenalty);
+    const remaining=Math.max(0,Number(row.totalDue||0)-schedulePaid);
+    const totalDueWithPenalty=roundMoney(emi+rawPenalty);
+    const amountDue=roundMoney(remaining+rawOutstanding);
+    return {
+      ...row,
+      dueDate:kampalaDateKey(row.dueDate)||row.dueDate,
+      emiTotal:emi,
+      penalty:rawPenalty,
+      penaltyOutstanding:rawOutstanding,
+      totalDueWithPenalty,
+      outstanding,
+      amountDue,
+      amountPaid,
+      surplusPaid
+    };
+  });
+  res.json({loan,guarantors:guarantors.rows,events:events.rows,schedule:scheduleRows,disbursement,
+    supportingDocuments:docs,
     approvalQueues:{credits:creditsProgress,executive:executiveProgress},
     canCurrentUserDecide:{
       credits:helpers.canUserDecide(creditsProgress,req.user.id),
@@ -4221,48 +4424,47 @@ app.patch("/api/settings/:key",auth,permit("system:manage"),asyncRoute(async(req
 }));
 
 async function runScheduledMaintenance() {
-  const graceDays=5;
+  const graceDays=0;
   await transaction(async client=>{
-    // Grace period: installment becomes overdue only 5 days after due date.
+    // No grace window: unpaid installments become overdue the day after the due date.
     await client.query(`UPDATE loan_repayment_schedule SET status='due'
-      WHERE status='upcoming' AND due_date<=CURRENT_DATE AND paid_amount<total_due`);
+      WHERE status='upcoming' AND due_date<=(CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date AND paid_amount<total_due`);
     await client.query(`UPDATE loan_repayment_schedule SET status='overdue'
-      WHERE status IN ('due','partial') AND due_date + $1::int < CURRENT_DATE AND paid_amount<total_due`,[graceDays]);
+      WHERE status IN ('due','partial') AND due_date < (CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date AND paid_amount<total_due`);
     await client.query(`UPDATE loans SET status='overdue'
       WHERE status='active' AND balance>0
         AND EXISTS (
           SELECT 1 FROM loan_repayment_schedule s
           WHERE s.loan_id=loans.id AND s.status='overdue'
         )`);
-    // 5% penalty on overdue principal only (not interest), after grace period.
+    // 5% penalty once per overdue installment (day after due date) — not every later month.
     await client.query(`INSERT INTO loan_charges (loan_id,charge_type,amount,status,reason,schedule_id,penalty_period)
-      SELECT s.loan_id,'Late payment penalty',ROUND(GREATEST(s.principal-s.principal_paid,0)*p.late_penalty_rate/100,2),'outstanding',
-        'Automatic 5% penalty on overdue principal after '||$1||'-day grace',s.id,date_trunc('month',CURRENT_DATE)::date
+      SELECT s.loan_id,'Late payment penalty',ROUND(s.principal*p.late_penalty_rate/100,2),'outstanding',
+        'Automatic 5% penalty on the principal due after the due date',s.id,s.due_date
       FROM loan_repayment_schedule s JOIN loans l ON l.id=s.loan_id JOIN loan_products p ON p.id=l.product_id
-      WHERE s.status='overdue' AND s.principal>s.principal_paid
-      ON CONFLICT (loan_id,schedule_id,penalty_period,charge_type) WHERE charge_type='Late payment penalty' AND schedule_id IS NOT NULL AND penalty_period IS NOT NULL DO NOTHING`,[graceDays]);
-    await client.query("UPDATE legal_contracts SET status='expired',updated_at=NOW() WHERE ends_on<CURRENT_DATE AND status IN ('approved','legal_approved','active')");
-    await client.query("UPDATE investment_contracts SET status='expired' WHERE ends_on<CURRENT_DATE AND status='active'");
-    // Danger-window alerts: due date reached through end of grace (due today … due+5).
+      WHERE s.status='overdue' AND s.due_date < (CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date
+        AND s.paid_amount<s.total_due
+        AND NOT EXISTS (
+          SELECT 1 FROM loan_charges c
+          WHERE c.loan_id=s.loan_id AND c.schedule_id=s.id AND c.charge_type='Late payment penalty'
+        )
+      ON CONFLICT (loan_id,schedule_id,charge_type) WHERE charge_type='Late payment penalty' AND schedule_id IS NOT NULL DO NOTHING`);
+    await client.query(`UPDATE loan_charges c SET amount=ROUND(s.principal*p.late_penalty_rate/100,2),
+        reason='Automatic 5% penalty on the principal due after the due date'
+      FROM loan_repayment_schedule s JOIN loans l ON l.id=s.loan_id JOIN loan_products p ON p.id=l.product_id
+      WHERE c.schedule_id=s.id AND c.charge_type='Late payment penalty' AND c.status IN ('outstanding','partial')`);
+    await client.query("UPDATE legal_contracts SET status='expired',updated_at=NOW() WHERE ends_on<(CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date AND status IN ('approved','legal_approved','active')");
+    await client.query("UPDATE investment_contracts SET status='expired' WHERE ends_on<(CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date AND status='active'");
     await client.query(`INSERT INTO notifications (user_id,title,message)
-      SELECT u.id,'Loan installment in danger period',
-        'Loan '||l.reference||' installment due '||to_char(s.due_date,'DD/MM/YYYY')||' is unpaid. Grace ends '||to_char(s.due_date+$1::int,'DD/MM/YYYY')||'. After that a 5% penalty applies on principal only.'
-      FROM loan_repayment_schedule s JOIN loans l ON l.id=s.loan_id JOIN users u ON u.member_id=l.member_id AND u.active=true
-      WHERE s.due_date<=CURRENT_DATE AND s.due_date+$1::int>=CURRENT_DATE AND s.status IN ('due','partial')
-      AND NOT EXISTS (SELECT 1 FROM notifications n WHERE n.user_id=u.id AND n.title='Loan installment in danger period'
-        AND n.message LIKE 'Loan '||l.reference||'%' AND n.created_at>=CURRENT_DATE)`,[graceDays]);
-    await client.query(`INSERT INTO notifications (user_id,title,message)
-      SELECT DISTINCT u.id,'Active loan in danger period',
-        'Loan '||l.reference||' ('||m.full_name||') is unpaid. Due '||to_char(s.due_date,'DD/MM/YYYY')||'; grace ends '||to_char(s.due_date+$1::int,'DD/MM/YYYY')||'. Remind the member — 5% penalty on principal starts after grace.'
-      FROM loan_repayment_schedule s
-      JOIN loans l ON l.id=s.loan_id
-      JOIN members m ON m.id=l.member_id
-      JOIN departments d ON d.code='credits'
-      JOIN department_assignments da ON da.department_id=d.id AND da.active=true AND da.can_view=true
-      JOIN users u ON u.id=da.user_id AND u.active=true
-      WHERE s.due_date<=CURRENT_DATE AND s.due_date+$1::int>=CURRENT_DATE AND s.status IN ('due','partial')
-      AND NOT EXISTS (SELECT 1 FROM notifications n WHERE n.user_id=u.id AND n.title='Active loan in danger period'
-        AND n.message LIKE 'Loan '||l.reference||'%' AND n.created_at>=CURRENT_DATE)`,[graceDays]);
+      SELECT u.id,'Loan repayment overdue',
+        'Loan '||l.reference||' installment due '||to_char(s.due_date,'DD/MM/YYYY')||' is unpaid. Late penalty of UGX '||
+        TRIM(TO_CHAR(ROUND(s.principal*p.late_penalty_rate/100,2),'FM999,999,999,990.00'))||
+        ' (5% of the principal due) applies.'
+      FROM loan_repayment_schedule s JOIN loans l ON l.id=s.loan_id JOIN loan_products p ON p.id=l.product_id
+      JOIN users u ON u.member_id=l.member_id AND u.active=true
+      WHERE s.status='overdue' AND s.due_date=(CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date-1
+      AND NOT EXISTS (SELECT 1 FROM notifications n WHERE n.user_id=u.id AND n.title='Loan repayment overdue'
+        AND n.message LIKE 'Loan '||l.reference||'%' AND n.created_at>=(CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date)`);
     await client.query(`INSERT INTO notifications (user_id,title,message)
       SELECT u.id,'Loan repayment due tomorrow','Loan '||l.reference||' has an installment due tomorrow.'
       FROM loan_repayment_schedule s JOIN loans l ON l.id=s.loan_id JOIN users u ON u.member_id=l.member_id AND u.active=true

@@ -5,6 +5,8 @@ data/
 .edge-smoke-profile/
 storage/uploads/*
 !storage/uploads/.gitkeep
+!storage/seed-supporting/**
+storage/seed-supporting/.gitkeep
 backups/*
 !backups/.gitkeep
 storage/quarantine/*
@@ -12,4 +14,8 @@ storage/quarantine/*
 private/
 scripts/_patch-*.js
 scripts/_member-*.js
+scripts/_inspect-*.js
+scripts/_verify-*.js
+database/dumps/_*.json
+database/dumps/railway-live.dump
 

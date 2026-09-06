@@ -18,8 +18,8 @@
   const metric=(name,value,icon,target,sub="")=>`<button class="member-summary-card" data-member-page="${target}"><span>${icons[icon]}</span><div><small>${name}</small><strong>${value}</strong><em>${sub}</em></div></button>`;
   const panel=(title,sub,body)=>`<section class="card member-panel"><div class="card-head"><div><h2 class="card-title">${title}</h2><p class="card-subtitle">${sub}</p></div></div>${body}</section>`;
   const targetLine=(label,paid,target,options={})=>{const p=Number(paid),t=Number(target),percent=t?Math.min(100,Math.round(p/t*100)):0,variance=p-t,surplusLabel=options.surplusLabel||"Ahead by";let statusClass="met",statusText="Target met";if(variance<-0.005){statusClass="behind";statusText=`Short by ${money(Math.abs(variance))}`;}else if(variance>0.005){statusClass="ahead";statusText=`${surplusLabel} ${money(variance)}`;}const barTone=statusClass==="met"?"met":statusClass;return `<div class="member-target-line ${statusClass}"><div><strong>${label}</strong><span>${money(paid)} paid of ${money(t)}</span></div><b>${percent}%</b><i class="${barTone}"><em style="width:${percent}%"></em></i><small class="${statusClass}">${statusText}</small></div>`;};
-  function financialYearPanel(){
-    const f=C()?.financialYearProgress;if(!f)return "";
+  function currentContributionBody(){
+    const f=C()?.financialYearProgress;if(!f)return `<div class="member-empty">No contribution targets for this year yet.</div>`;
     const savingsToward=Number(f.savingsTowardTarget??f.savingsPaid);
     const shareToward=Number(f.sharePaidTowardTarget??f.sharePaid);
     const annualMet=savingsToward>=Number(f.annualSavingsTarget)-0.005;
@@ -32,17 +32,16 @@
     const advanceNote=annualMet&&annualSurplus>0
       ?`<div class="member-policy-note member-advance-note"><b>Annual savings target met.</b> Extra ${money(annualSurplus)} remains as surplus toward future months.</div>`
       :"";
-    return panel(`${f.fiscalYear} contribution progress`,
-      `Annual targets for ${esc(f.fiscalYear)}  -  monthly savings ${money(f.monthlySavingsTarget)}`,
-      `${targetLine("Full-year savings target",savingsToward,f.annualSavingsTarget,{surplusLabel:"Surplus toward future months"})}
-       ${targetLine("Annual share contribution",shareToward,f.annualShareTarget)}
-       ${targetLine("Annual subscription fee",f.subscriptionPaid,f.annualSubscriptionFee)}
-       ${targetLine("Combined annual contribution",Number(f.combinedAnnualPaid||0),Number(f.combinedAnnualTarget||0))}
-       <div class="member-policy-note"><b>Monthly savings:</b> ${money(f.monthlySavingsTarget)}  -  <b>Full-year savings:</b> ${money(f.annualSavingsTarget)}  -  <b>Shares:</b> ${money(f.annualShareTarget)}  -  <b>Subscription:</b> ${money(f.annualSubscriptionFee)}  -  <b>Combined target:</b> ${money(f.combinedAnnualTarget||0)}</div>
-       ${surplusNote}${advanceNote}`);
+    return `<p class="member-reveal-sub">Annual targets for ${esc(f.fiscalYear)} · monthly savings ${money(f.monthlySavingsTarget)}</p>
+      ${targetLine("Full-year savings target",savingsToward,f.annualSavingsTarget,{surplusLabel:"Surplus toward future months"})}
+      ${targetLine("Annual share contribution",shareToward,f.annualShareTarget)}
+      ${targetLine("Annual subscription fee",f.subscriptionPaid,f.annualSubscriptionFee)}
+      ${targetLine("Combined annual contribution",Number(f.combinedAnnualPaid||0),Number(f.combinedAnnualTarget||0))}
+      <div class="member-policy-note"><b>Monthly savings:</b> ${money(f.monthlySavingsTarget)} · <b>Full-year savings:</b> ${money(f.annualSavingsTarget)} · <b>Shares:</b> ${money(f.annualShareTarget)} · <b>Subscription:</b> ${money(f.annualSubscriptionFee)} · <b>Combined target:</b> ${money(f.combinedAnnualTarget||0)}</div>
+      ${surplusNote}${advanceNote}`;
   }
-  function closingPositionPanel(){
-    const x=C()?.pastYearProgress;if(!x)return "";
+  function pastContributionBody(){
+    const x=C()?.pastYearProgress;if(!x)return `<div class="member-empty">No previous-year contribution record yet.</div>`;
     const variance=Number(x.variance||0),percent=x.expected?Math.min(100,Math.round(x.totalPaid/x.expected*100)):0;
     const f=C()?.financialYearProgress;
     const monthly=Number(f?.monthlySavingsTarget||0);
@@ -51,9 +50,57 @@
     const carryNote=variance>0
       ?`<p class="member-policy-note member-advance-note"><b>Surplus carries forward:</b> ${money(variance)} jumps into ${esc(f?.fiscalYear||"this year")} savings and covers about <b>${covered} month${covered===1?"":"s"}</b>${remainder>0?` plus ${money(remainder)}`:""}.</p>`
       :`<p class="member-policy-note">Your lifetime savings balance includes every verified savings payment from all years.</p>`;
-    return panel(`${x.fiscalYear} closing-target progress`,`Year ended ${date(x.periodEnd)} - later arrears payments reduce the shortfall without changing the original closing report`,`${targetLine("Adjusted past-year savings",x.totalPaid,x.expected)}<div class="member-closing-grid"><div><span>Paid by 30 June</span><strong>${money(x.paidAtClose)}</strong></div><div><span>Arrears cleared later</span><strong>${money(x.arrearsPaid)}</strong></div><div><span>Expected target</span><strong>${money(x.expected)}</strong></div><div><span>Progress</span><strong>${percent}%</strong></div><div class="${variance<0?"behind":"ahead"}"><span>Remaining position</span><strong>${variance<0?`Still owing ${money(Math.abs(variance))}`:`Surplus ${money(variance)}`}</strong></div></div>${carryNote}`);
+    return `<p class="member-reveal-sub">${esc(x.fiscalYear)} closed ${date(x.periodEnd)}</p>
+      ${targetLine("Adjusted past-year savings",x.totalPaid,x.expected)}
+      <div class="member-closing-grid"><div><span>Paid by 30 June</span><strong>${money(x.paidAtClose)}</strong></div><div><span>Arrears cleared later</span><strong>${money(x.arrearsPaid)}</strong></div><div><span>Expected target</span><strong>${money(x.expected)}</strong></div><div><span>Progress</span><strong>${percent}%</strong></div><div class="${variance<0?"behind":"ahead"}"><span>Remaining position</span><strong>${variance<0?`Still owing ${money(Math.abs(variance))}`:`Surplus ${money(variance)}`}</strong></div></div>${carryNote}`;
   }
-
+  function contributionProgressReveal(){
+    const current=C()?.financialYearProgress,past=C()?.pastYearProgress;
+    if(!current&&!past)return "";
+    const yearTabs=`<div class="member-year-tabs">
+      ${current?`<button type="button" class="member-year-tab active" data-member-year-tab="current">${esc(current.fiscalYear)}</button>`:""}
+      ${past?`<button type="button" class="member-year-tab ${current?"":"active"}" data-member-year-tab="past">${esc(past.fiscalYear)}</button>`:""}
+    </div>`;
+    return `<section class="member-reveal-card">
+      <button type="button" class="member-reveal-toggle" data-member-reveal="contribution" aria-expanded="false">
+        <span>${icons.savings}</span>
+        <div><strong>Contribution progress</strong><small>Check savings, shares and subscription by year</small></div>
+        <em data-member-reveal-chevron>Show</em>
+      </button>
+      <div class="member-reveal-panel" data-member-reveal-panel="contribution" hidden>
+        ${yearTabs}
+        <div data-member-year-panel="current" ${current?"":"hidden"}>${currentContributionBody()}</div>
+        <div data-member-year-panel="past" ${current?"hidden":""}>${pastContributionBody()}</div>
+      </div>
+    </section>`;
+  }
+  function recentActivityReveal(){
+    const items=C()?.recentActivity||[];
+    return `<section class="member-reveal-card">
+      <button type="button" class="member-reveal-toggle" data-member-reveal="activity" aria-expanded="false">
+        <span>${icons.bell}</span>
+        <div><strong>Recent activity</strong><small>Your latest account events</small></div>
+        <em data-member-reveal-chevron>Show</em>
+      </button>
+      <div class="member-reveal-panel member-activity-scroll" data-member-reveal-panel="activity" hidden>
+        <div class="member-list">${items.map(x=>`<article><span>${icons[x.type==="notification"?"bell":"receipt"]}</span><div><strong>${esc(x.title)}</strong><p>${esc(x.detail)}</p></div><time>${date(x.date)}</time></article>`).join("")||`<div class="member-empty">No activity yet.</div>`}</div>
+      </div>
+    </section>`;
+  }
+  function loanNeedCta(c){
+    const activeLoan=(c.loans||[]).find(x=>["active","overdue"].includes(x.status));
+    if(activeLoan){
+      return `<div class="member-loan-cta-body">
+        <p class="member-loan-cta-label">YOU HAVE AN ACTIVE LOAN</p>
+        <p class="member-loan-cta-copy">${esc(activeLoan.reference)} · next ${money(activeLoan.nextPaymentAmount||0)}${activeLoan.nextDueDate?` on ${date(activeLoan.nextDueDate)}`:""}</p>
+        ${canActOnMember()?`<button type="button" class="button member-loan-cta-btn" data-member-repay="${activeLoan.id}" data-settle="0">${icons.receipt}Pay loan</button>`:`<button type="button" class="button member-loan-cta-btn secondary" data-member-page="member-loans">${icons.loans}View my loans</button>`}
+      </div>`;
+    }
+    return `<div class="member-loan-cta-body">
+      <p class="member-loan-cta-label">DO YOU NEED A LOAN?</p>
+      ${canActOnMember()&&!readOnlyMember()?`<button type="button" class="button member-loan-cta-btn" data-member-action="apply-loan">${icons.loans}Apply for a loan</button>`:`<button type="button" class="button member-loan-cta-btn secondary" data-member-page="member-loans">${icons.loans}View loans</button>`}
+    </div>`;
+  }
   function accountSettings(){
     const photo=state.user?.has_profile_photo,m=C()?.member;
     return `<section class="account-settings"><div class="account-settings-head"><div><p class="eyebrow">Personal account</p><h2>Account & security</h2><p>Edit your profile information, profile picture and password.</p></div><div class="account-photo">${photo?`<img src="/api/account/profile-photo?v=${state.profilePhotoVersion||0}" alt="Profile photo">`:`<span>${initials(actor())}</span>`}</div></div>
@@ -90,23 +137,17 @@
     const fy=c.financialYearProgress;
     if(fy&&Number(fy.expectedSavingsToDate)>0&&Number(fy.savingsTowardTarget??fy.savingsPaid)<Number(fy.expectedSavingsToDate)){
       const short=Number(fy.expectedSavingsToDate)-Number(fy.savingsTowardTarget??fy.savingsPaid);
-      items.push({tone:"info",title:`${fy.fiscalYear} savings still short`,detail:`${money(short)} needed to stay on target`,action:"member-savings",label:"Submit deposit"});
+      items.push({tone:"info",title:`${fy.fiscalYear} savings still short`,detail:`${money(short)} needed to stay on target`,action:"member-savings",label:""});
     }
     if(!items.length)return "";
-    return `<section class="member-next-up"><div class="member-next-up-head"><h3>Next for you</h3><p>Only what needs attention now</p></div><div class="member-next-up-list">${items.slice(0,2).map(item=>`<article class="${item.tone}"><div><strong>${esc(item.title)}</strong><span>${esc(item.detail)}</span></div><button type="button" class="button small ${item.tone==="danger"?"primary":"secondary"}" data-member-page="${item.action}">${item.label}</button></article>`).join("")}</div></section>`;
-  }
-  function dashboardActions(c){
-    if(!canActOnMember())return `<button class="button secondary" data-member-page="member-profile">View profile</button>`;
-    const activeLoan=(c.loans||[]).find(x=>["active","overdue"].includes(x.status));
-    return `<button class="button primary" data-member-action="deposit">${icons.plus}Submit deposit</button>${activeLoan?`<button class="button secondary" data-member-repay="${activeLoan.id}" data-settle="0">${icons.receipt}Pay loan</button>`:`<button class="button secondary" data-member-action="apply-loan">${icons.loans}Apply for a loan</button>`}`;
+    return `<section class="member-next-up"><div class="member-next-up-head"><h3>Next for you</h3><p>Only what needs attention now</p></div><div class="member-next-up-list">${items.slice(0,2).map(item=>`<button type="button" class="member-next-up-item ${item.tone}" data-member-page="${item.action}"><div><strong>${esc(item.title)}</strong><span>${esc(item.detail)}</span></div>${item.label?`<em>${esc(item.label)}</em>`:""}</button>`).join("")}</div></section>`;
   }
   function dashboard(){
     const c=C(),m=c.member,s=c.summary,h=new Date().getHours(),g=h<12?"Good morning":h<18?"Good afternoon":"Good evening";
-    return `${oversightBanner()}<div class="member-portal"><section class="member-welcome"><div><span>${g}</span><h2>${esc(m.fullName)}</h2><p>Member ID: <b>${esc(m.memberNumber)}</b> - Status: <b>${esc(m.status)}</b> - Joined ${date(m.joinedAt)}</p></div><div class="module-actions">${dashboardActions(c)}</div></section>
+    return `${oversightBanner()}<div class="member-portal"><section class="member-welcome member-hero-card"><div class="member-welcome-top"><span>${g}</span><h2>${esc(m.fullName)}</h2></div>${loanNeedCta(c)}</section>
       <div class="member-summary-grid">${metric("My Savings",money(s.savings),"savings","member-savings","Current carried-forward balance")}${metric("Share Capital",money(s.shares),"building","member-savings","Current share balance")}${metric("Total Member Funds",money(s.totalMemberFunds),"wallet","member-savings","Savings plus share capital")}${metric("Active Loan Balance",money(s.activeLoanBalance),"loans","member-loans","Remaining total repayment including interest")}</div>
       ${dashboardNextUp(c)}
-      <div class="member-target-layout">${financialYearPanel()}${closingPositionPanel()}</div>
-      ${panel("Recent activity","Your latest account events",`<div class="member-list">${(c.recentActivity||[]).slice(0,5).map(x=>`<article><span>${icons[x.type==="notification"?"bell":"receipt"]}</span><div><strong>${esc(x.title)}</strong><p>${esc(x.detail)}</p></div><time>${date(x.date)}</time></article>`).join("")||`<div class="member-empty">No activity.</div>`}</div>`)}</div>`;
+      <div class="member-dashboard-reveals">${contributionProgressReveal()}${recentActivityReveal()}</div></div>`;
   }
   function profile(){
     const m=C().member,items=[["Member ID",m.memberNumber],["Membership status",m.status],["National ID",m.nationalId],["Phone",m.phone],["Email",m.email||"Not recorded"],["Joined",date(m.joinedAt)],["Date of birth",date(m.dateOfBirth)],["Gender",m.gender||"Not recorded"],["Nationality",m.nationality||"Not recorded"],["Address",m.address||"Not recorded"],["Occupation",m.occupation||"Not recorded"],["Employer",m.employer||"Not recorded"],["Next of kin",m.nextOfKin||"Not recorded"],["Emergency contact",`${m.emergencyContactName||"Not recorded"} ${m.emergencyContactPhone||""}`]];
@@ -146,7 +187,10 @@
           <span>Interest (2%/mo) <strong>${money(totalInterest)}</strong></span>
         </div>
         <div class="member-next-repayment"><span>Next repayment<strong>${money(x.nextPaymentAmount||0)}</strong></span><span>Due date<strong>${date(x.nextDueDate)}</strong></span></div>
-        ${x.inDangerPeriod?`<div class="member-loan-danger">Danger period — pay before grace ends or a 5% penalty applies on principal only.</div>`:""}
+        ${(()=>{const penalty=Math.max(0,Number(x.penaltyAmount||0))+Math.max(0,Number(x.pendingPenaltyAmount||0));
+          if(penalty>0) return `<div class="member-loan-danger">Late payment penalty ${money(penalty)} — 5% of unpaid principal${Number(x.penaltyAmount||0)>0?" (already assessed and included in next repayment)":" will be charged automatically"}.</div>`;
+          if(x.inDangerPeriod) return `<div class="member-loan-danger">Installment overdue — a 5% penalty applies on unpaid principal.</div>`;
+          return "";})()}
         ${lastPaid}
         <small class="member-loan-fee-note">Pay in full: principal ${money(x.balance)} + first-month interest ${money(x.firstMonthInterestRemaining||0)}.</small>
         ${canActOnMember()?`<div class="member-loan-actions"><button class="button primary" data-member-repay="${x.id}" data-settle="0">${icons.receipt}Pay loan</button><button class="button secondary" data-member-repay="${x.id}" data-settle="1">${icons.check}Pay in full</button></div>`:""}</article>`;
@@ -337,8 +381,8 @@
           }).join("")||`<div class="member-empty">No eligible guarantor accounts are currently available.</div>`}</div>
           <small>Select enough guarantors so 75% of their savings covers what your own 75% does not. Call them to accept from their dashboards.</small>
         </div>
-        <div class="field full record-file-field"><label>Supporting document (optional)</label><input name="supportingDocument" type="file" accept="image/jpeg,image/png,image/webp,application/pdf,.doc,.docx"><small>Attach a land title, vehicle logbook, collateral evidence, quotation or other relevant document.</small></div>
-        <label class="field full check-field loan-overdue-check"><input type="checkbox" name="overdueDeclaration" value="accepted" required><span>I understand that after a 5-day grace from the due date, unpaid principal attracts a 5% late-payment penalty (interest is not included in the penalty base), plus recovery costs and security enforcement.</span></label>
+        <div class="field full record-file-field"><label>Supporting documents (optional)</label><input name="supportingDocument" type="file" multiple accept="image/jpeg,image/png,image/webp,application/pdf,.doc,.docx"><small>You can attach more than one file (land title, owner photo, logbook, quotation, etc.).</small></div>
+        <label class="field full check-field loan-overdue-check"><input type="checkbox" name="overdueDeclaration" value="accepted" required><span>I understand that from the day after the due date, unpaid principal attracts a 5% late-payment penalty (interest is not included in the penalty base), plus recovery costs and security enforcement.</span></label>
       </div><div class="member-form-message" data-loan-message aria-live="polite"></div><div class="form-actions"><button type="button" class="button secondary" data-close-modal>Cancel</button><button type="submit" class="button primary">Submit loan application</button></div></form>`);
       const form=document.querySelector("[data-member-loan-form]");
       if(typeof bindLoanSecurityCalculator==="function")bindLoanSecurityCalculator(form,{borrowerSavings,candidates});
@@ -457,7 +501,29 @@
   }
   function syncMemberPending(){if(!C())return;const extra=C().welfare.contributions.filter(x=>["pending","pending_finance_review"].includes(x.status)).length;C().summary.pendingRequests+=extra;}
   function bindMember(){
-    document.querySelectorAll("[data-member-page]").forEach(x=>x.onclick=async()=>{state.memberContext=true;state.page=x.dataset.memberPage;if(state.page==="messages"){state.messenger=null;window.render();await loadMessenger();}window.render();window.scrollTo(0,0);});
+    document.querySelectorAll("[data-member-page]").forEach(x=>x.onclick=async()=>{if(typeof window.setSidebarOpen==="function")window.setSidebarOpen(false);state.memberContext=true;state.page=x.dataset.memberPage;if(state.page==="messages"){state.messenger=null;window.render();await loadMessenger();}window.render();window.scrollTo(0,0);});
+    document.querySelectorAll("[data-member-reveal]").forEach(btn=>{
+      btn.addEventListener("click",()=>{
+        const key=btn.dataset.memberReveal;
+        const panel=document.querySelector(`[data-member-reveal-panel="${key}"]`);
+        const chevron=btn.querySelector("[data-member-reveal-chevron]");
+        if(!panel)return;
+        const open=panel.hasAttribute("hidden");
+        panel.toggleAttribute("hidden",!open);
+        btn.setAttribute("aria-expanded",open?"true":"false");
+        btn.classList.toggle("open",open);
+        if(chevron)chevron.textContent=open?"Hide":"Show";
+      });
+    });
+    document.querySelectorAll("[data-member-year-tab]").forEach(tab=>{
+      tab.addEventListener("click",()=>{
+        const key=tab.dataset.memberYearTab;
+        document.querySelectorAll("[data-member-year-tab]").forEach(t=>t.classList.toggle("active",t===tab));
+        document.querySelectorAll("[data-member-year-panel]").forEach(panel=>{
+          panel.toggleAttribute("hidden",panel.dataset.memberYearPanel!==key);
+        });
+      });
+    });
     document.querySelector("[data-member-back]")?.addEventListener("click",async()=>{
       if(state.memberOversight){
         state.memberOversight=false;state.memberContext=false;state.memberCenter=null;state.page="members";window.render();window.scrollTo(0,0);return;
@@ -584,8 +650,31 @@
     return html;
   };
   const oldView=window.view;window.view=function(){if(inMemberSpace())return view();const output=oldView();return state.page==="settings"?`${accountSettings()}${output}`:output;};
-  const oldSubtitle=window.subtitle;window.subtitle=function(){return pages.includes(state.page)?(state.memberOversight?"Read-only view of this member's account records.":"Only your own membership, financial and support records are shown."):oldSubtitle();};
-  const oldRender=window.render;window.render=function(){oldRender();if(pages.includes(state.page)&&state.memberCenter){const eyebrow=document.querySelector(".page-head .eyebrow"),heading=document.querySelector(".page-head h1");if(eyebrow)eyebrow.textContent=state.memberOversight?"Member oversight":"Member Account";if(heading)heading.textContent=labels[state.page];const search=document.getElementById("global-search");if(search)search.placeholder="Search statements, loans and documents...";}};
+  const oldSubtitle=window.subtitle;window.subtitle=function(){return pages.includes(state.page)?"":oldSubtitle();};
+  const oldRender=window.render;window.render=function(){
+    oldRender();
+    if(pages.includes(state.page)&&state.memberCenter){
+      const head=document.querySelector(".page-head > div");
+      const eyebrow=document.querySelector(".page-head .eyebrow");
+      const heading=document.querySelector(".page-head h1");
+      let sub=document.querySelector(".page-head .page-subtitle");
+      if(heading)heading.textContent=labels[state.page];
+      if(eyebrow){eyebrow.textContent="";eyebrow.hidden=true;}
+      if(!sub&&head&&heading){
+        sub=document.createElement("p");
+        sub.className="page-subtitle member-page-tag";
+        heading.insertAdjacentElement("afterend",sub);
+      }
+      if(sub){
+        sub.textContent=state.memberOversight?"Member oversight":"Member Account";
+        sub.hidden=false;
+        sub.classList.add("member-page-tag");
+        if(heading&&sub.previousElementSibling!==heading)heading.insertAdjacentElement("afterend",sub);
+      }
+      const search=document.getElementById("global-search");
+      if(search)search.placeholder="Search statements, loans and documents...";
+    }
+  };
   const oldBind=window.bind;window.bind=function(){oldBind();bindMember();if(!readOnlyMember())bindAccount();};
   window.MemberPortal={pages,accountSettings,syncMemberPending};
 })();

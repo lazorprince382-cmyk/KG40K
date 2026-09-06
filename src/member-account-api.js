@@ -211,9 +211,45 @@ module.exports = function registerMemberAccountApi({
         COALESCE((SELECT SUM(s.paid_amount) FROM loan_repayment_schedule s WHERE s.loan_id=l.id),0)::float AS "totalPaid",
         COALESCE((SELECT SUM(s.interest) FROM loan_repayment_schedule s WHERE s.loan_id=l.id),
           ROUND((l.amount*(p.annual_rate/1200.0)*(l.term_months+1)/2.0)::numeric,2))::float AS "totalInterest",
-        COALESCE((SELECT SUM(GREATEST(0,c.amount-c.paid_amount)) FROM loan_charges c WHERE c.loan_id=l.id AND c.status IN ('outstanding','partial') AND c.charge_type <> 'Processing fee'),0)::float AS "outstandingCharges",
-        (SELECT MIN(due_date) FROM loan_repayment_schedule WHERE loan_id=l.id AND status<>'paid') AS "nextDueDate",
-        COALESCE((SELECT (total_due-paid_amount)::float FROM loan_repayment_schedule WHERE loan_id=l.id AND status<>'paid' ORDER BY installment_number LIMIT 1),0)::float AS "nextPaymentAmount",
+        COALESCE((SELECT SUM(GREATEST(0,c.amount-c.paid_amount)) FROM loan_charges c WHERE c.loan_id=l.id AND c.status IN ('outstanding','partial') AND c.charge_type <> 'Processing fee' AND c.charge_type <> 'Late payment penalty'),0)::float
+          + COALESCE((SELECT SUM(GREATEST(0,c.amount-c.paid_amount)) FROM loan_charges c
+              LEFT JOIN loan_repayment_schedule ps ON ps.id=c.schedule_id
+              WHERE c.loan_id=l.id AND c.status IN ('outstanding','partial') AND c.charge_type='Late payment penalty'
+                AND (c.schedule_id IS NULL OR ps.due_date < (CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date)),0)::float AS "outstandingCharges",
+        COALESCE((SELECT SUM(GREATEST(0,c.amount-c.paid_amount)) FROM loan_charges c
+          LEFT JOIN loan_repayment_schedule ps ON ps.id=c.schedule_id
+          WHERE c.loan_id=l.id AND c.status IN ('outstanding','partial') AND c.charge_type='Late payment penalty'
+            AND (c.schedule_id IS NULL OR ps.due_date < (CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date)),0)::float AS "penaltyAmount",
+        (SELECT MIN(due_date) FROM loan_repayment_schedule WHERE loan_id=l.id AND status<>'paid' AND paid_amount<total_due) AS "nextDueDate",
+        (
+          COALESCE((SELECT ROUND(SUM(GREATEST(0,s.interest-s.interest_paid)+GREATEST(0,s.principal-s.principal_paid))::numeric,2)::float
+            FROM loan_repayment_schedule s
+            WHERE s.loan_id=l.id AND s.status<>'paid'
+              AND s.due_date <= (CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date),0)
+          + COALESCE((SELECT SUM(GREATEST(0,c.amount-c.paid_amount)) FROM loan_charges c
+            WHERE c.loan_id=l.id AND c.status IN ('outstanding','partial') AND c.charge_type <> 'Processing fee' AND c.charge_type <> 'Late payment penalty'),0)
+          + COALESCE((SELECT SUM(GREATEST(0,c.amount-c.paid_amount)) FROM loan_charges c
+              LEFT JOIN loan_repayment_schedule ps ON ps.id=c.schedule_id
+              WHERE c.loan_id=l.id AND c.status IN ('outstanding','partial') AND c.charge_type='Late payment penalty'
+                AND (c.schedule_id IS NULL OR ps.due_date < (CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date)),0)
+          + COALESCE((SELECT ROUND(s.principal*p.late_penalty_rate/100,2)::float
+            FROM loan_repayment_schedule s
+            WHERE s.loan_id=l.id AND s.status='overdue' AND s.paid_amount<s.total_due
+              AND NOT EXISTS (
+                SELECT 1 FROM loan_charges c
+                WHERE c.loan_id=l.id AND c.schedule_id=s.id AND c.charge_type='Late payment penalty'
+              )
+            ORDER BY s.installment_number LIMIT 1),0)
+        )::float AS "nextPaymentAmount",
+        COALESCE((SELECT ROUND(s.principal*p.late_penalty_rate/100,2)::float
+          FROM loan_repayment_schedule s
+          WHERE s.loan_id=l.id AND s.status='overdue' AND s.paid_amount<s.total_due
+            AND NOT EXISTS (
+              SELECT 1 FROM loan_charges c
+              WHERE c.loan_id=l.id AND c.schedule_id=s.id AND c.charge_type='Late payment penalty'
+                AND c.status IN ('outstanding','partial','settled')
+            )
+          ORDER BY s.installment_number LIMIT 1),0)::float AS "pendingPenaltyAmount",
         (SELECT COUNT(*)::int FROM loan_repayment_schedule WHERE loan_id=l.id) AS "totalInstallments",
         (SELECT COUNT(*)::int FROM loan_repayment_schedule WHERE loan_id=l.id AND status='paid') AS "paidInstallments",
         COALESCE((SELECT ROUND(GREATEST(0,s.interest-COALESCE(s.interest_paid,0))::numeric,2)::float
@@ -224,11 +260,11 @@ module.exports = function registerMemberAccountApi({
         ),0))::numeric,2)::float AS "earlySettlementAmount",
         EXISTS (
           SELECT 1 FROM loan_repayment_schedule s
-          WHERE s.loan_id=l.id AND s.status IN ('due','partial')
-            AND s.due_date<=CURRENT_DATE AND s.due_date+5>=CURRENT_DATE
+          WHERE s.loan_id=l.id AND s.status IN ('due','partial','overdue')
+            AND s.due_date<(CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date AND s.paid_amount<s.total_due
         ) AS "inDangerPeriod",
-        GREATEST(0,CURRENT_DATE-(COALESCE((SELECT MIN(s.due_date) FROM loan_repayment_schedule s
-          WHERE s.loan_id=l.id AND s.status<>'paid' AND s.due_date+5<CURRENT_DATE),CURRENT_DATE)))::int AS "daysOverdue",
+        GREATEST(0,(CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date-(COALESCE((SELECT MIN(s.due_date) FROM loan_repayment_schedule s
+          WHERE s.loan_id=l.id AND s.status<>'paid' AND s.due_date<(CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date),(CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date)))::int AS "daysOverdue",
         (SELECT t.amount::float FROM transactions t
           WHERE t.loan_id=l.id AND t.type='Loan repayment' AND t.status='completed'
           ORDER BY COALESCE(t.verified_at,t.created_at) DESC,t.id DESC LIMIT 1) AS "lastPaidAmount",

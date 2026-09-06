@@ -17,8 +17,12 @@ const icons = {
   help: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M9.8 9a2.4 2.4 0 1 1 3.7 2c-1.5.9-1.5 1.5-1.5 2.5M12 17h.01"/></svg>`,
   menu: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16"/></svg>`,
   plus: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>`,
+  arrowLeft: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>`,
   arrowUp: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m18 15-6-6-6 6"/></svg>`,
+  arrowLeft: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>`,
   arrowDown: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>`,
+  logout: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5M21 12H9"/></svg>`,
+  logout: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M10 17v1a3 3 0 0 0 3 3h6a3 3 0 0 0 3-3V6a3 3 0 0 0-3-3h-6a3 3 0 0 0-3 3v1"/><path d="M15 12H3m0 0 3-3m-3 3 3 3"/></svg>`,
   users: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="8" r="3"/><path d="M3 19v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2M16 5a3 3 0 0 1 0 6M17 13a4 4 0 0 1 4 4v2"/></svg>`,
   wallet: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 5h14a2 2 0 0 1 2 2v12H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h13"/><path d="M15 11h7v5h-7a2.5 2.5 0 0 1 0-5Z"/></svg>`,
   receipt: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Z"/><path d="M9 8h6M9 12h6"/></svg>`,
@@ -107,6 +111,9 @@ let executiveSearchTimer = null;
 let financeSearchTimer = null;
 let creditsSearchTimer = null;
 let investmentSearchTimer = null;
+let pageHistory = [];
+let previousNavKey = null;
+let navigatingBack = false;
 
 async function api(url, options = {}) {
   const isFormData=options.body instanceof FormData;
@@ -215,6 +222,129 @@ function persistWorkspaceChoice(workspace){
   }catch{}
 }
 function readPersistedWorkspace(){ try{return JSON.parse(sessionStorage.getItem("kg40k_workspace")||"null");}catch{return null;} }
+function persistUiState(){
+  try{
+    sessionStorage.setItem("kg40k_ui",JSON.stringify({
+      page:state.page,
+      executiveWorkspace:state.executiveWorkspace||null,
+      memberContext:Boolean(state.memberContext),
+      searchTerm:searchTerm||""
+    }));
+  }catch{}
+}
+function readUiState(){ try{return JSON.parse(sessionStorage.getItem("kg40k_ui")||"null");}catch{return null;} }
+function navKey(){ return `${state.executiveWorkspace||""}::${state.memberContext?"m":"d"}::${state.page||"dashboard"}`; }
+function historySnapshot(){
+  return {kg40k:true,page:state.page,executiveWorkspace:state.executiveWorkspace||null,memberContext:Boolean(state.memberContext)};
+}
+function historyUrl(){
+  const ctx=state.memberContext?"member":"app";
+  const ws=encodeURIComponent(state.executiveWorkspace||"home");
+  const page=encodeURIComponent(state.page||"dashboard");
+  return `${location.pathname}${location.search}#/${ctx}/${ws}/${page}`;
+}
+function writeBrowserHistory(replace){
+  if(!state.user)return;
+  const url=historyUrl();
+  try{
+    if(replace)history.replaceState(historySnapshot(),"",url);
+    else history.pushState(historySnapshot(),"",url);
+  }catch{}
+}
+function overlayOpen(){
+  return Boolean(
+    document.querySelector(".document-viewer-backdrop")||
+    document.getElementById("document-viewer-backdrop")||
+    document.getElementById("modal-backdrop")||
+    document.getElementById("sidebar")?.classList.contains("open")
+  );
+}
+function homePage(){
+  return state.memberContext||state.role==="Member"?"member-dashboard":"dashboard";
+}
+function canGoBackInApp(){
+  if(overlayOpen())return true;
+  if(pageHistory.length)return true;
+  if(state.executiveWorkspace)return true;
+  return state.page!==homePage();
+}
+function trackNavigation(){
+  const key=navKey();
+  if(previousNavKey&&previousNavKey!==key&&!navigatingBack){
+    const parts=previousNavKey.split("::");
+    const page=parts.length>=3?parts.slice(2).join("::"):(parts[1]||"dashboard");
+    const ew=parts[0]||null;
+    const memberContext=parts.length>=3?parts[1]==="m":Boolean(state.memberContext);
+    pageHistory.push({page:page||"dashboard",executiveWorkspace:ew||null,memberContext});
+    if(pageHistory.length>40)pageHistory.shift();
+    writeBrowserHistory(false);
+  }else if(!navigatingBack&&state.user){
+    writeBrowserHistory(true);
+  }
+  navigatingBack=false;
+  previousNavKey=key;
+  persistUiState();
+}
+function goBackNavigation(){
+  const viewer=document.querySelector(".document-viewer-backdrop")||document.getElementById("document-viewer-backdrop");
+  if(viewer){viewer.remove();return true;}
+  if(document.getElementById("modal-backdrop")){closeModal();return true;}
+  const side=document.getElementById("sidebar");
+  if(side?.classList.contains("open")){if(typeof window.setSidebarOpen==="function")window.setSidebarOpen(false);else side.classList.remove("open");return true;}
+  const prev=pageHistory.pop();
+  if(prev){
+    navigatingBack=true;
+    state.page=prev.page||"dashboard";
+    state.executiveWorkspace=prev.executiveWorkspace||null;
+    if("memberContext" in prev)state.memberContext=Boolean(prev.memberContext);
+    persistUiState();
+    render();
+    window.scrollTo(0,0);
+    return true;
+  }
+  if(state.executiveWorkspace){exitExecutiveWorkspace();return true;}
+  if(state.page!==homePage()){
+    navigatingBack=true;
+    state.page=homePage();
+    persistUiState();
+    render();
+    window.scrollTo(0,0);
+    return true;
+  }
+  toast("You're at the home screen.");
+  return false;
+}
+function handleInAppBack(){
+  if(overlayOpen())return goBackNavigation();
+  if(canGoBackInApp()){
+    history.back();
+    return true;
+  }
+  toast("You're at the home screen.");
+  return false;
+}
+function onBrowserBack(){
+  if(!state.user)return;
+  if(overlayOpen()){
+    goBackNavigation();
+    writeBrowserHistory(false);
+    return;
+  }
+  if(canGoBackInApp()){
+    goBackNavigation();
+    return;
+  }
+}
+async function restoreExecutiveWorkspace(code){
+  if(!code||state.role!=="Executive Officer")return;
+  const endpoints={credits:"/api/credits/command-center",finance:"/api/finance/command-center",investment:"/api/investment/command-center",welfare:"/api/welfare/command-center",legal:"/api/legal/command-center",audit:"/api/audit/command-center",supervisory:"/api/supervisory/command-center"};
+  const stateKeys={credits:"credits",finance:"finance",investment:"investment",welfare:"welfare",legal:"legal",audit:"auditCenter",supervisory:"supervisory"};
+  if(!endpoints[code])return;
+  try{
+    state[stateKeys[code]]=await api(endpoints[code]);
+    state.executiveWorkspace=code;
+  }catch(error){console.warn("Could not restore executive workspace",code,error.message);}
+}
 function findWorkspace(idOrCode,list=availableWorkspaces()){
   if(!idOrCode)return null;
   return list.find(item=>item.id===idOrCode||item.code===idOrCode||`${item.type}:${item.code}`===idOrCode)||null;
@@ -253,11 +383,11 @@ async function loadWorkspaceCenter(role){
     if(role==="Supervisory Officer")state.supervisory=center;
   }catch(error){ console.warn("Workspace center failed",role,error.message); }
 }
-async function enterWorkspace(workspace,{skipRender=false}={}){
+async function enterWorkspace(workspace,{skipRender=false,preserveNavigation=false}={}){
   if(!workspace)return;
   state.activeWorkspace=workspace;
   persistWorkspaceChoice(workspace);
-  state.executiveWorkspace=null;
+  if(!preserveNavigation)state.executiveWorkspace=null;
   if(workspace.type==="member"){
     if(!state.memberCenter){
       [state.memberCenter,state.memberSelfService]=await Promise.all([
@@ -267,7 +397,7 @@ async function enterWorkspace(workspace,{skipRender=false}={}){
     }
     state.memberContext=true;
     state.memberOversight=false;
-    state.page="member-dashboard";
+    if(!preserveNavigation)state.page="member-dashboard";
     if(state.user?.role&&state.user.role!=="Member")state.role=state.user.role;
     else state.role="Member";
   }else{
@@ -275,9 +405,10 @@ async function enterWorkspace(workspace,{skipRender=false}={}){
     state.memberOversight=false;
     state.role=workspace.role;
     state.permissions=workspace.permissions||state.permissions||[];
-    state.page="dashboard";
+    if(!preserveNavigation)state.page="dashboard";
     await loadWorkspaceCenter(workspace.role);
   }
+  persistUiState();
   if(!skipRender){render();window.scrollTo(0,0);}
 }
 function workspacePickerView(workspaces,error=""){
@@ -317,7 +448,8 @@ function workspacePickerView(workspaces,error=""){
   }));
   document.querySelector("[data-workspace-signout]")?.addEventListener("click",async()=>{
     try{await api("/api/auth/logout",{method:"POST"});}catch{}
-    persistWorkspaceChoice(null);state.user=null;loginView();
+    try{sessionStorage.removeItem("kg40k_ui");sessionStorage.removeItem("kg40k_workspace");}catch{}
+    pageHistory=[];previousNavKey=null;state.user=null;state.activeWorkspace=null;state.executiveWorkspace=null;loginView();
   });
 }
 function injectWorkspaceSwitcher(html){
@@ -404,9 +536,19 @@ async function init() {
     await refreshData();
     const workspaces=availableWorkspaces();
     const saved=readPersistedWorkspace();
+    const ui=readUiState();
     const savedWorkspace=saved?findWorkspace(saved.id,workspaces):null;
-    if(savedWorkspace)await enterWorkspace(savedWorkspace,{skipRender:true});
-    else if(workspaces.length===1)await enterWorkspace(workspaces[0],{skipRender:true});
+    if(savedWorkspace)await enterWorkspace(savedWorkspace,{skipRender:true,preserveNavigation:true});
+    else if(workspaces.length===1)await enterWorkspace(workspaces[0],{skipRender:true,preserveNavigation:true});
+    else if(workspaceNeedsPicker(workspaces)&&!savedWorkspace){
+      workspacePickerView(workspaces);
+      return;
+    }
+    if(ui?.page)state.page=ui.page;
+    if(ui?.searchTerm)searchTerm=ui.searchTerm;
+    if(ui?.executiveWorkspace)await restoreExecutiveWorkspace(ui.executiveWorkspace);
+    previousNavKey=navKey();
+    pageHistory=[];
     render();
   } catch { loginView(); }
 }
@@ -467,6 +609,7 @@ function render() {
   if (!allowed.includes(state.page) && !linkedMemberPage && !(state.role==="Executive Officer"&&!state.executiveWorkspace&&state.page==="executive-search") &&
     !(state.role==="Finance Officer"&&state.page==="finance-search") && !(state.role==="Credits Officer"&&state.page==="credits-search") &&
     !(state.role==="Investment Officer"&&state.page==="investment-search")) state.page = allowed[0] || "dashboard";
+  trackNavigation();
   let [eyebrow, title] = pageMeta[state.page]||["Organization","Dashboard"];
   if(state.page==="dashboard"&&state.role==="Executive Officer"&&!state.executiveWorkspace)[eyebrow,title]=["Executive Department","Executive Command Center"];
   if(state.page==="dashboard"&&(state.role==="Finance Officer"||state.executiveWorkspace==="finance"))[eyebrow,title]=["Finance Department","Finance Dashboard"];
@@ -478,16 +621,18 @@ function render() {
       ${sidebar()}
       <main class="main">
         <header class="topbar">
-          <button class="mobile-menu" data-action="menu">${icons.menu}</button>
+          <button class="mobile-menu" data-action="menu" title="Menu" aria-label="Open menu">${icons.menu}</button>
+          <button class="mobile-back" data-action="nav-back" title="Back" aria-label="Go back">${icons.arrowLeft}</button>
           <div class="top-search">${icons.search}<input id="global-search" value="${searchTerm}" placeholder="${state.role==="Executive Officer"&&!state.executiveWorkspace?"Search anything - members, loans, contracts, meetings...":state.role==="Finance Officer"||state.executiveWorkspace==="finance"?"Search receipts, vouchers, suppliers, invoices, amounts...":state.role==="Credits Officer"||state.executiveWorkspace==="credits"?"Search member, account, loan, guarantor, receipt...":state.role==="Investment Officer"||state.executiveWorkspace==="investment"?"Search projects, investors, proposals, contracts...":"Search members, departments, records..."}"></div>
           <div class="top-actions">
-            ${state.executiveWorkspace?`<button class="button secondary" data-executive-workspace-exit>${icons.arrowUp} Back to Executive</button>`:""}
-            <button class="icon-button" data-action="help">${icons.help}</button>
-            <button class="icon-button" data-action="notifications">${icons.bell}<span class="notification-dot"></span></button>
+            ${state.executiveWorkspace?`<button class="button secondary desktop-only-back" data-executive-workspace-exit>${icons.arrowUp} Back to Executive</button>`:""}
+            <button class="icon-button" data-action="help" title="Help">${icons.help}</button>
+            <button class="icon-button" data-action="notifications" title="Notifications">${icons.bell}<span class="notification-dot"></span></button>
             ${state.role==="Executive Officer"?`<button class="icon-button exec-calendar-button" data-executive-page="executive-meetings">${icons.clock}</button><div class="exec-top-profile"><div class="avatar blue">${initials(actor())}</div><div><strong>${actor()}</strong><span>${state.executiveWorkspace?`Viewing ${state.executiveWorkspace} (read only)`:"Executive Department"}</span></div></div>`:""}
             ${state.role==="Finance Officer"?`<div class="exec-top-profile"><div class="avatar blue">${initials(actor())}</div><div><strong>${actor()}</strong><span>Finance Department</span></div></div>`:""}
             ${state.role==="Credits Officer"?`<div class="exec-top-profile"><div class="avatar blue">${initials(actor())}</div><div><strong>${actor()}</strong><span>Credits Department</span></div></div>`:""}
             ${state.role==="Investment Officer"?`<div class="exec-top-profile"><div class="avatar blue">${initials(actor())}</div><div><strong>${actor()}</strong><span>Investment Department</span></div></div>`:""}
+            <button class="icon-button mobile-signout" data-action="logout" title="Sign out" aria-label="Sign out">${icons.logout}</button>
             <button class="date-chip" data-action="logout">Sign out</button>
           </div>
         </header>
@@ -506,6 +651,8 @@ function render() {
     if(node)node.innerHTML=`${profileImage(other.id,other.fullName,other.hasProfilePhoto)}${other.online?"<i></i>":""}`;
   }
   bind();
+  if(typeof setSidebarOpen==="function")setSidebarOpen(false);
+  if(state.page==="executive-credits") ensureExecutiveCreditsDesk();
 }
 
 function sidebar() {
@@ -1012,17 +1159,18 @@ function executiveDepartmentsView() {
     <div class="exec-mini-stat"><span class="green">${icons.check}</span><div><small>Active Departments</small><strong>${activeDepartments}</strong><em>${activeDepartments===totalDepartments?"100% active":`${totalDepartments-activeDepartments} inactive`}</em></div></div>
     <div class="exec-mini-stat"><span class="violet">${icons.reports}</span><div><small>Performing Well</small><strong>${performingWell}</strong><em>85% or above</em></div></div>
     <div class="exec-mini-stat"><span class="orange">${icons.info}</span><div><small>Need Attention</small><strong>${needAttention}</strong><em>Below 85% target</em></div></div></div>
-    <div class="exec-department-layout"><div class="exec-department-cards">${modules.map(m=>`<article class="exec-department-card"><div class="exec-dept-title"><span class="${m[9]}">${icons[departmentIcon(m[0])]}</span><div><h3>${m[1]}</h3><p>${m[2]}</p></div></div><div class="exec-dept-values"><div><small>${m[3]}</small><strong>${m[4]}</strong><small>${m[5]}</small><strong>${m[6]}</strong></div><div class="exec-ring" style="--score:${m[7]}"><span>${m[7]}%</span></div></div><div class="exec-dept-actions"><button data-executive-page="${m[8]}">View summary <b>&gt;</b></button></div></article>`).join("")}</div>${executivePerformanceWidget(e)}</div>
+    <div class="exec-department-layout"><div class="exec-department-cards">${modules.map(m=>`<article class="exec-department-card"><div class="exec-dept-title"><span class="${m[9]}">${icons[departmentIcon(m[0])]}</span><div><h3>${m[1]}</h3><p>${m[2]}</p></div></div><div class="exec-dept-values"><div><small>${m[3]}</small><strong>${m[4]}</strong><small>${m[5]}</small><strong>${m[6]}</strong></div><div class="exec-ring" style="--score:${m[7]}"><span>${m[7]}%</span></div></div><div class="exec-dept-actions"><button data-executive-page="${m[8]}">View summary <b>&gt;</b></button>${m[10]?`<button class="primary" data-executive-workspace="${m[10]}">Open desk <b>&gt;</b></button>`:""}</div></article>`).join("")}</div>${executivePerformanceWidget(e)}</div>
     <div class="exec-panel exec-dept-chart"><div class="exec-panel-head"><div><h3>Department Performance Chart</h3><p>Live scores from current operations</p></div></div><div class="exec-wide-bars">${modules.map(m=>`<div><div><i style="height:${Math.max(2,Number(m[7]||0))}%"></i></div><span>${m[0]} - ${m[7]}%</span></div>`).join("")}</div></div>`;
 }
 function executiveModuleView(module) {
   const e=state.executive;
   if(module==="finance") return executiveFinanceSummary(e);
   if(module==="credits") {
-    const active=(e.recentLoans||[]).filter(x=>["active","overdue"].includes(x.status));
+    const hasCreditsDesk=Boolean(state.credits?.loans);
     return `<div class="exec-module-metrics">${executiveModuleMetric("Total savings",money(e.stats.totalSavings),"green")}${executiveModuleMetric("Outstanding loans",money(e.stats.outstandingLoans),"red")}${executiveModuleMetric("Active loans",e.loans.active,"blue")}${executiveModuleMetric("Recovery rate",`${e.loans.recoveryRate}%`,"violet")}</div>
-      ${executiveRecordTable("Active and recent loans by Legal-registered member",["Loan","Member","Product","Amount","Balance","Status"],e.recentLoans.map(x=>[x.reference,x.member,x.product,money(x.amount),money(x.balance),status(x.status)]))}
-      ${active.length?`<section class="exec-panel"><div class="exec-panel-head"><div><h3>Borrowers needing follow-up</h3><p>People currently holding active SACCO facilities</p></div></div><div class="credits-loan-list">${active.map(x=>`<article><div class="credits-loan-main"><span>${escapeHtml(x.reference)}</span><h3>${escapeHtml(x.member)}</h3><p>${escapeHtml(x.product)}</p></div><div><strong>${money(x.amount)}</strong><small>Balance ${money(x.balance)}</small></div>${status(x.status)}</article>`).join("")}</div></section>`:""}`;
+      <section class="exec-panel" style="margin-bottom:16px"><div class="exec-panel-head"><div><h3>Active loans (Credits desk view)</h3><p>Same live cards Credits officers see — including overdue 5% principal penalties</p></div>
+        <button class="button primary" data-executive-workspace="credits">${icons.loans} Open full Credits desk</button></div>
+        ${hasCreditsDesk?creditsActiveLoansView():`<div class="exec-empty">Loading Credits portfolio… Open the Credits desk if this stays empty.</div>`}</section>`;
   }
   if(module==="investments") return executiveProjectsView();
   if(module==="welfare") return `<div class="exec-module-metrics">${executiveModuleMetric("Fund balance",money(e.welfare.fundBalance),"green")}${executiveModuleMetric("Pending requests",e.welfare.pending,"orange")}${executiveModuleMetric("Approved requests",e.welfare.approved,"blue")}${executiveModuleMetric("Monthly contributions",money(e.welfare.monthlyContributions),"violet")}</div>${executiveRecordTable("Welfare request summary",["Reference","Member","Request","Amount","Status"],e.welfareRequests.map(x=>[x.reference,x.member,x.requestType,money(x.amount),status(x.status)]))}`;
@@ -1915,10 +2063,10 @@ function creditsSavingsOverviewWidget(c) {
 function creditsRecoveryWidget(c) {
   const danger=c.loans.filter(l=>l.inDangerPeriod&&Number(l.balance)>0).slice(0,5);
   const rows=c.loans.filter(l=>l.status==="overdue"||l.daysOverdue>0&&l.balance>0).slice(0,5);
-  return `<section class="finance-panel"><div class="finance-panel-head"><div><h3>Loan Recovery & danger alerts</h3><p>5-day grace window, then 5% on principal only</p></div><button data-credits-page="credits-recovery">Recovery desk ></button></div>
-    ${danger.length?`<div class="credits-danger-banner"><strong>${danger.length} loan${danger.length===1?"":"s"} in danger period</strong><small>Due date reached — grace ends in up to 5 days. Remind members before the principal penalty.</small></div>
-      <div class="credits-recovery-list danger">${danger.map(l=>`<div><div><strong>${l.member}</strong><small>${l.reference} · due ${l.nextDueDate?new Date(l.nextDueDate).toLocaleDateString():"—"} · next ${money(l.nextPaymentAmount||0)}</small></div><b>${money(l.balance)}</b><button data-credits-recover="${l.id}">Remind</button></div>`).join("")}</div>`:""}
-    <div class="credits-recovery-list">${rows.map(l=>`<div><div><strong>${l.member}</strong><small>${l.reference} - ${l.daysOverdue} days overdue (after grace)</small></div><b>${money(l.balance)}</b><button data-credits-recover="${l.id}">Follow up</button></div>`).join("")||(danger.length?"":`<div class="exec-empty">No overdue loans.</div>`)}</div></section>`;
+  return `<section class="finance-panel"><div class="finance-panel-head"><div><h3>Loan Recovery & overdue alerts</h3><p>Penalty starts the day after due date — 5% of unpaid principal, once per installment</p></div><button data-credits-page="credits-recovery">Recovery desk ></button></div>
+    ${danger.length?`<div class="credits-danger-banner"><strong>${danger.length} loan${danger.length===1?"":"s"} past due</strong><small>Penalty starts the day after the due date — 5% of unpaid principal, once per overdue installment.</small></div>
+      <div class="credits-recovery-list danger">${danger.map(l=>{const penalty=Math.max(0,Number(l.penaltyAmount||0))+Math.max(0,Number(l.pendingPenaltyAmount||0));return `<div><div><strong>${l.member}</strong><small>${l.reference} · due ${l.nextDueDate?new Date(l.nextDueDate).toLocaleDateString():"—"} · next ${money(l.nextPaymentAmount||0)}${penalty?` · penalty ${money(penalty)}`:""}</small></div><b>${money(l.balance)}</b><button data-credits-recover="${l.id}">Remind</button></div>`;}).join("")}</div>`:""}
+    <div class="credits-recovery-list">${rows.map(l=>`<div><div><strong>${l.member}</strong><small>${l.reference} - ${l.daysOverdue} days overdue</small></div><b>${money(l.balance)}</b><button data-credits-recover="${l.id}">Follow up</button></div>`).join("")||(danger.length?"":`<div class="exec-empty">No overdue loans.</div>`)}</div></section>`;
 }
 function creditsGuarantorWidget(c) {
   const g=c.guarantorSummary;
@@ -2002,13 +2150,27 @@ function loanRepaymentProgress(l) {
   const progressPct=totalDue?Math.min(100,Math.round(totalPaid/totalDue*100)):0;
   return {totalDue,totalPaid,totalInterest,remaining,progressPct};
 }
+function loanLatePenaltyAmount(l){
+  return Math.max(0,Number(l.penaltyAmount||0))+Math.max(0,Number(l.pendingPenaltyAmount||0));
+}
+function loanPenaltyBanner(l){
+  const penalty=loanLatePenaltyAmount(l);
+  if(!(l.inDangerPeriod||l.status==="overdue"||penalty>0)) return "";
+  if(penalty>0){
+    const assessed=Number(l.penaltyAmount||0)>0;
+    return `<div class="credits-danger-banner"><strong>${escapeHtml(l.member||"Member")} — late payment penalty ${money(penalty)}</strong><small>${assessed?"5% of unpaid principal is already assessed and included in the next amount due.":"Installment is past due — 5% of unpaid principal will be charged automatically."}</small></div>`;
+  }
+  return `<div class="credits-danger-banner"><strong>${escapeHtml(l.member||"Member")} — installment past due</strong><small>From the day after the due date, a 5% penalty applies on unpaid principal.</small></div>`;
+}
 function creditsActiveLoansView() {
-  const rows=state.credits.loans.filter(l=>["active","overdue"].includes(l.status));
-  return `<div class="exec-module-metrics">${executiveModuleMetric("Active loans",rows.length,"blue")}${executiveModuleMetric("Outstanding principal",money(rows.reduce((n,l)=>n+Number(l.balance||0),0)),"violet")}${executiveModuleMetric("Total repayment",money(rows.reduce((n,l)=>n+Number(l.totalDue||l.amount||0),0)),"orange")}${executiveModuleMetric("Cash disbursed",money(rows.reduce((n,l)=>n+Math.max(0,Number(l.amount||0)-Number(l.processingFee||0)),0)),"green")}</div>
+  const rows=state.credits?.loans?.filter(l=>["active","overdue"].includes(l.status))||[];
+  const penaltyWatch=rows.filter(l=>l.inDangerPeriod||l.status==="overdue"||loanLatePenaltyAmount(l)>0).length;
+  return `<div class="exec-module-metrics">${executiveModuleMetric("Active loans",rows.length,"blue")}${executiveModuleMetric("Outstanding principal",money(rows.reduce((n,l)=>n+Number(l.balance||0),0)),"violet")}${executiveModuleMetric("Total repayment",money(rows.reduce((n,l)=>n+Number(l.totalDue||l.amount||0),0)),"orange")}${executiveModuleMetric(penaltyWatch?"Late / penalty watch":"Cash disbursed",penaltyWatch?penaltyWatch:money(rows.reduce((n,l)=>n+Math.max(0,Number(l.amount||0)-Number(l.processingFee||0)),0)),penaltyWatch?"orange":"green")}</div>
     <div class="credits-loan-list">${rows.map(l=>{
       const p=loanRepaymentProgress(l);
       const fee=Number(l.processingFee||0),netDisbursed=Math.max(0,Number(l.amount||0)-fee);
-      return `<article class="credits-active-loan">
+      const penalty=loanLatePenaltyAmount(l);
+      return `<article class="credits-active-loan${l.inDangerPeriod||l.status==="overdue"||penalty>0?" danger-period":""}">
         <div class="credits-loan-main">
           <span>${escapeHtml(l.reference)} · ${escapeHtml(l.product)}</span>
           <h3>${escapeHtml(l.member)}</h3>
@@ -2022,7 +2184,8 @@ function creditsActiveLoansView() {
         </div>
         ${status(l.status)}
         <div class="credits-row-progress"><div><span>Repayment progress</span><strong>${p.progressPct}%</strong></div><i><u style="width:${p.progressPct}%"></u></i>
-          <small>Paid ${money(p.totalPaid)} of ${money(p.totalDue)} · Fee ${money(fee)} · Next ${money(l.nextPaymentAmount||0)}${l.nextDueDate?` on ${new Date(l.nextDueDate).toLocaleDateString()}`:""}</small></div>
+          <small>Paid ${money(p.totalPaid)} of ${money(p.totalDue)} · Fee ${money(fee)} · Next ${money(l.nextPaymentAmount||0)}${l.nextDueDate?` on ${new Date(l.nextDueDate).toLocaleDateString()}`:""} (principal + interest + penalty)</small></div>
+        ${loanPenaltyBanner(l)}
         <div class="credits-loan-actions"><button data-credits-member="${l.memberId}">${icons.users} Member</button><button data-loan-detail-id="${l.id}">View details</button>${!isExecutiveReadOnly()&&state.credits?.access?.canEdit?`<button class="approve" data-credits-modal="repayment">Record repayment</button>`:""}</div>
       </article>`;
     }).join("")||`<div class="exec-empty">No active loans.</div>`}</div>`;
@@ -2121,10 +2284,10 @@ function creditsRecoveryView() {
   const c=state.credits;
   const danger=c.loans.filter(l=>l.inDangerPeriod&&Number(l.balance)>0);
   const overdue=c.loans.filter(l=>l.status==="overdue"||l.daysOverdue>0&&l.balance>0);
-  return `<div class="exec-module-metrics">${executiveModuleMetric("Danger period",danger.length,"orange")}${executiveModuleMetric("Overdue (after grace)",overdue.length,"red")}${executiveModuleMetric("Amount outstanding",money(overdue.reduce((n,l)=>n+l.balance,0)),"orange")}${executiveModuleMetric("Recovery rate",`${c.stats.recoveryRate}%`,"green")}</div>
-    ${danger.length?`<section class="finance-panel" style="margin-bottom:16px"><div class="finance-panel-head"><div><h3>Danger period — active due loans</h3><p>Due date reached through day 5. After grace, 5% penalty applies on unpaid principal only (not interest).</p></div></div>
-      <div class="credits-recovery-cards">${danger.map(l=>`<article class="danger-period"><div><span>${l.reference}</span><h3>${l.member}</h3><p>Due ${l.nextDueDate?new Date(l.nextDueDate).toLocaleDateString():"—"} · installment ${money(l.nextPaymentAmount||0)} · principal ${money(l.balance)}</p></div><span class="status review">Danger</span><button data-credits-recover="${l.id}">Record reminder</button></article>`).join("")}</div></section>`:""}
-    <div class="credits-recovery-cards">${overdue.map(l=>{const history=c.recovery.filter(r=>r.loanId===l.id);return `<article><div><span>${l.reference}</span><h3>${l.member}</h3><p>${l.daysOverdue} days overdue after grace - ${money(l.balance)}</p></div>${status(l.status)}<div class="credits-recovery-history">${history.map(r=>`<div><strong>${r.actionType}</strong><span>${r.notes}</span><small>${new Date(r.createdAt).toLocaleDateString()} - Follow-up ${r.followUpDate?new Date(r.followUpDate).toLocaleDateString():"not set"}</small></div>`).join("")||"<small>No recovery action recorded yet.</small>"}</div><button data-credits-recover="${l.id}">Record follow-up</button></article>`}).join("")||`<div class="exec-empty">No defaulted loans.</div>`}</div>`;
+  return `<div class="exec-module-metrics">${executiveModuleMetric("Past due",danger.length,"orange")}${executiveModuleMetric("Overdue loans",overdue.length,"red")}${executiveModuleMetric("Amount outstanding",money(overdue.reduce((n,l)=>n+l.balance,0)),"orange")}${executiveModuleMetric("Recovery rate",`${c.stats.recoveryRate}%`,"green")}</div>
+    ${danger.length?`<section class="finance-panel" style="margin-bottom:16px"><div class="finance-panel-head"><div><h3>Past-due installments</h3><p>On the due date the installment is due only. From the next day, a one-time 5% penalty applies on unpaid principal (not interest).</p></div></div>
+      <div class="credits-recovery-cards">${danger.map(l=>{const penalty=Math.max(0,Number(l.penaltyAmount||0))+Math.max(0,Number(l.pendingPenaltyAmount||0));return `<article class="danger-period"><div><span>${l.reference}</span><h3>${l.member}</h3><p>Due ${l.nextDueDate?new Date(l.nextDueDate).toLocaleDateString():"—"} · installment ${money(l.nextPaymentAmount||0)}${penalty?` · penalty ${money(penalty)}`:""} · principal ${money(l.balance)}</p></div><span class="status review">Past due</span><button data-credits-recover="${l.id}">Record reminder</button></article>`;}).join("")}</div></section>`:""}
+    <div class="credits-recovery-cards">${overdue.map(l=>{const history=c.recovery.filter(r=>r.loanId===l.id);return `<article><div><span>${l.reference}</span><h3>${l.member}</h3><p>${l.daysOverdue} days overdue - ${money(l.balance)}</p></div>${status(l.status)}<div class="credits-recovery-history">${history.map(r=>`<div><strong>${r.actionType}</strong><span>${r.notes}</span><small>${new Date(r.createdAt).toLocaleDateString()} - Follow-up ${r.followUpDate?new Date(r.followUpDate).toLocaleDateString():"not set"}</small></div>`).join("")||"<small>No recovery action recorded yet.</small>"}</div><button data-credits-recover="${l.id}">Record follow-up</button></article>`}).join("")||`<div class="exec-empty">No defaulted loans.</div>`}</div>`;
 }
 function creditsStatementsView() {
   return `<div class="credits-statement-grid">${state.credits.members.map(m=>`<article><div class="avatar blue">${initials(m.name)}</div><div><span>${m.memberNumber}</span><h3>${m.name}</h3><p>Savings ${money(m.savings)} - Loans ${money(m.outstandingBalance)}</p></div><button data-credits-statement="${m.id}">${icons.download}Statement</button></article>`).join("")}</div>`;
@@ -2211,18 +2374,27 @@ async function openExecutiveWorkspace(code) {
   if(state.role!=="Executive Officer") return;
   const endpoints={credits:"/api/credits/command-center",finance:"/api/finance/command-center",investment:"/api/investment/command-center",welfare:"/api/welfare/command-center",legal:"/api/legal/command-center",audit:"/api/audit/command-center",supervisory:"/api/supervisory/command-center"};
   const stateKeys={credits:"credits",finance:"finance",investment:"investment",welfare:"welfare",legal:"legal",audit:"auditCenter",supervisory:"supervisory"};
+  const landingPages={credits:"credits-active",finance:"dashboard",investment:"dashboard",welfare:"dashboard",legal:"dashboard",audit:"dashboard",supervisory:"dashboard"};
   if(!endpoints[code]) return toast("That department dashboard is not available.");
   try{
     toast(`Opening ${code} dashboard...`);
     state[stateKeys[code]]=await api(endpoints[code]);
     state.executiveWorkspace=code;
-    state.page="dashboard";
+    state.page=landingPages[code]||"dashboard";
     render();
     window.scrollTo(0,0);
     toast(`${code[0].toUpperCase()+code.slice(1)} dashboard opened in Executive read-only mode.`);
   }catch(error){toast(error.message||"Could not open that department dashboard.");}
 }
-function exitExecutiveWorkspace(){state.executiveWorkspace=null;state.page="departments";render();window.scrollTo(0,0);}
+async function ensureExecutiveCreditsDesk(){
+  if(state.role!=="Executive Officer"||state.page!=="executive-credits") return;
+  if(state.credits?.loans) return;
+  try{
+    state.credits=await api("/api/credits/command-center");
+    render();
+  }catch(error){toast(error.message||"Could not load Credits active loans.");}
+}
+function exitExecutiveWorkspace(){state.executiveWorkspace=null;state.page="departments";persistUiState();render();window.scrollTo(0,0);}
 async function openMemberDashboard(memberId) {
   if(!memberId) return toast("This member record cannot be opened.");
   try {
@@ -3030,7 +3202,16 @@ function bind() {
   document.querySelectorAll('a[href^="/api/documents/"][href$="/view"]').forEach(link=>link.addEventListener("click",event=>{
     event.preventDefault();openDocumentViewer(link);
   }));
+  document.querySelectorAll("[data-secure-preview]").forEach(el=>el.addEventListener("click",event=>{
+    event.preventDefault();
+    openSecureContentViewer(el.dataset.securePreview,el.dataset.previewTitle||"Supporting document",{replaceModal:false});
+  }));
+  document.querySelectorAll('a[href*="/supporting-document"]').forEach(link=>link.addEventListener("click",event=>{
+    event.preventDefault();
+    openSecureContentViewer(link.getAttribute("href"),link.textContent.trim()||"Supporting document",{replaceModal:false});
+  }));
   document.querySelectorAll("[data-page]").forEach(el => el.addEventListener("click", async () => {
+    if(typeof setSidebarOpen==="function")setSidebarOpen(false);
     state.page=el.dataset.page;
     if(state.page==="departments") state.departmentData=null;
     if(state.page!=="messages"&&messagePoll){clearInterval(messagePoll);messagePoll=null;}
@@ -3050,10 +3231,11 @@ function bind() {
       render();window.scrollTo(0,0);
     } catch(error){el.disabled=false;toast(error.message);}
   }));
-  document.querySelectorAll("[data-executive-page]").forEach(el=>el.addEventListener("click",event=>{
+  document.querySelectorAll("[data-executive-page]").forEach(el=>el.addEventListener("click",async event=>{
     event.preventDefault();const target=el.dataset.executivePage;
     if(!rolePages["Executive Officer"].includes(target)&&target!=="executive-search")return toast("This Executive page is not available.");
     state.executiveWorkspace=null;state.page=target;state.execQuickOpen=false;render();window.scrollTo(0,0);
+    if(target==="executive-credits") await ensureExecutiveCreditsDesk();
   }));
   document.querySelectorAll("[data-executive-workspace]").forEach(el=>el.addEventListener("click",()=>openExecutiveWorkspace(el.dataset.executiveWorkspace)));
   document.querySelectorAll("[data-executive-workspace-exit]").forEach(el=>el.addEventListener("click",exitExecutiveWorkspace));
@@ -3235,8 +3417,39 @@ function bind() {
   });
 }
 
+function setSidebarOpen(open){
+  const side=document.getElementById("sidebar");
+  if(!side)return;
+  const shouldOpen=open===undefined?!side.classList.contains("open"):Boolean(open);
+  side.classList.toggle("open",shouldOpen);
+  let backdrop=document.getElementById("sidebar-backdrop");
+  if(shouldOpen){
+    if(!backdrop){
+      backdrop=document.createElement("button");
+      backdrop.type="button";
+      backdrop.id="sidebar-backdrop";
+      backdrop.className="sidebar-backdrop";
+      backdrop.setAttribute("aria-label","Close menu");
+      backdrop.addEventListener("click",()=>setSidebarOpen(false));
+      document.body.appendChild(backdrop);
+    }
+    document.body.classList.add("sidebar-drawer-open");
+  }else{
+    backdrop?.remove();
+    document.body.classList.remove("sidebar-drawer-open");
+  }
+}
+window.setSidebarOpen=setSidebarOpen;
+
 async function handleAction(action, element) {
-  if (action==="menu") return document.getElementById("sidebar").classList.toggle("open");
+  if (action==="menu") return setSidebarOpen();
+  if (action==="nav-back") return handleInAppBack();
+  if (action==="logout") {
+    try{await api("/api/auth/logout",{method:"POST"});}catch{}
+    try{sessionStorage.removeItem("kg40k_ui");sessionStorage.removeItem("kg40k_workspace");}catch{}
+    pageHistory=[];previousNavKey=null;state.user=null;state.activeWorkspace=null;state.executiveWorkspace=null;
+    return loginView();
+  }
   if (action==="executive-quick") { state.execQuickOpen=!state.execQuickOpen;render();return; }
   if (action==="finance-quick") { state.financeQuickOpen=!state.financeQuickOpen;render();return; }
   if (action==="credits-quick") { state.creditsQuickOpen=!state.creditsQuickOpen;render();return; }
@@ -3268,7 +3481,6 @@ async function handleAction(action, element) {
     } else toast(`You have ${state.notifications.length} system notifications and ${state.unreadMessages||0} unread messages.`);
     return;
   }
-  if (action==="logout") { try{await api("/api/auth/logout",{method:"POST"});}catch{} state.user=null; return loginView(); }
   if (["export","statement","download-report"].includes(action)) return downloadReport(state.page==="loans"?"loans":state.page==="members"?"members":"transactions");
   if (action==="close-session") return toast("Cash session submitted for accountant reconciliation.");
   if (action==="view-member") {
@@ -3346,17 +3558,25 @@ function openModal(type) {
   dialog?.querySelector("input,select,textarea,button")?.focus();
 }
 function closeModal() { document.getElementById("modal-backdrop")?.remove(); }
+function closeDocumentViewer(){ document.querySelector(".document-viewer-backdrop")?.remove(); }
 function openDocumentViewer(link) {
   const href=link.getAttribute("href")||"";
   if(!/^\/api\/documents\/\d+\/view$/.test(href))return;
   const row=link.closest("tr"),card=link.closest("article,.exec-document-row");
   const title=(row?.querySelector("td:nth-child(2)")?.childNodes?.[0]?.textContent||card?.querySelector("h3,strong")?.textContent||"Organization document").trim();
   const downloadHref=href.replace(/\/view$/,"/download");
-  closeModal();
-  document.body.insertAdjacentHTML("beforeend",`<div class="modal-backdrop document-viewer-backdrop" id="modal-backdrop"><div class="modal document-viewer-modal" role="dialog" aria-modal="true" aria-labelledby="document-viewer-title"><div class="modal-head"><div><h2 id="document-viewer-title">${escapeHtml(title)}</h2><p>Secure in-system document preview</p></div><button class="modal-close" data-document-viewer-close aria-label="Close preview">${icons.x}</button></div><div class="document-viewer-frame" aria-live="polite"><div class="document-viewer-loading"><span></span><strong>Loading document?</strong></div></div><div class="document-viewer-actions"><span>${icons.shield} Viewing is recorded in the audit log</span><a class="button secondary" href="${downloadHref}">${icons.download}Download</a><button class="button primary" data-document-viewer-close>Close</button></div></div></div>`);
-  document.querySelectorAll("[data-document-viewer-close]").forEach(button=>button.addEventListener("click",closeModal));
-  document.getElementById("modal-backdrop")?.addEventListener("click",event=>{if(event.target.id==="modal-backdrop")closeModal();});
-  renderDocumentPreview(href,title);
+  openSecureContentViewer(href.replace(/\/view$/,"/content"),title,{downloadHref,replaceModal:true});
+}
+function openSecureContentViewer(contentHref,title,{downloadHref=null,replaceModal=false}={}) {
+  if(!contentHref)return;
+  if(replaceModal)closeModal();
+  closeDocumentViewer();
+  const safeTitle=escapeHtml(title||"Document");
+  const dl=downloadHref?`<a class="button secondary" href="${downloadHref}" download>${icons.download}Download</a>`:`<a class="button secondary" href="${contentHref}" target="_blank" rel="noopener">${icons.download}Open / Download</a>`;
+  document.body.insertAdjacentHTML("beforeend",`<div class="modal-backdrop document-viewer-backdrop" id="document-viewer-backdrop"><div class="modal document-viewer-modal" role="dialog" aria-modal="true" aria-labelledby="document-viewer-title"><div class="modal-head"><div><h2 id="document-viewer-title">${safeTitle}</h2><p>In-app document preview</p></div><button class="modal-close" data-document-viewer-close aria-label="Close preview">${icons.x}</button></div><div class="document-viewer-frame" aria-live="polite"><div class="document-viewer-loading"><span></span><strong>Loading document…</strong></div></div><div class="document-viewer-actions"><span>${icons.shield} Viewing stays inside the system</span>${dl}<button class="button primary" data-document-viewer-close>Close</button></div></div></div>`);
+  document.querySelectorAll("[data-document-viewer-close]").forEach(button=>button.addEventListener("click",closeDocumentViewer));
+  document.getElementById("document-viewer-backdrop")?.addEventListener("click",event=>{if(event.target.id==="document-viewer-backdrop")closeDocumentViewer();});
+  renderSecurePreview(contentHref,title||"Document");
 }
 function renderDocumentPreview(href,title) { return renderSecurePreview(href.replace(/\/view$/,"/content"),title); }
 async function renderSecurePreview(contentHref,title) {
@@ -3462,13 +3682,13 @@ function loanSecurityLabel(type) {
   if(type==="savings_and_shares")return "Savings and shares";
   return type?String(type).replaceAll("_"," "):"Not recorded";
 }
-function loanApplicationDetailsHtml(loan) {
+function loanApplicationDetailsHtml(loan,supportingDocuments=[]) {
   const security=String(loan.security_type||"").toLowerCase();
   const isCollateral=security==="collateral";
   const policyAccepted=loan.borrower_declaration_accepted===true||loan.borrower_declaration_accepted==="t";
   const overdueAccepted=loan.overdue_declaration_accepted===true||loan.overdue_declaration_accepted==="t"||policyAccepted;
   const collateralConsent=loan.collateral_owner_consent===true||loan.collateral_owner_consent==="t";
-  const hasDocument=!!loan.supporting_document_stored_name;
+  const docs=(supportingDocuments||[]).length?supportingDocuments:(loan.supporting_document_stored_name?[{originalName:loan.supporting_document_original_name||"Supporting document",url:`/api/loans/${loan.id}/supporting-document`}]:[]);
   const rows=[
     ["Loan product",escapeHtml(loan.product||"—")],
     ["Repayment term",`${loan.term_months||"—"} months`],
@@ -3488,7 +3708,13 @@ function loanApplicationDetailsHtml(loan) {
       <div><span>Owner phone</span><strong>${escapeHtml(loan.collateral_owner_phone||"—")}</strong></div>
       <div><span>Owner consent</span><strong>${collateralConsent?`<span class="status active">Consent given</span>`:`<span class="status pending">Not recorded</span>`}</strong></div>
     </div>`:"";
-  const document=hasDocument?`<div class="notice"><div>${icons.file}</div><div><strong>Supporting document</strong><p>${escapeHtml(loan.supporting_document_original_name||"Attached file")}</p><p><a class="button secondary" href="/api/loans/${loan.id}/supporting-document" target="_blank">${icons.eye} View document</a></p></div></div>`:"";
+  const document=docs.length?`<div class="notice"><div>${icons.file}</div><div><strong>Supporting documents (${docs.length})</strong>
+    <div class="loan-doc-list">${docs.map((doc,i)=>{
+      const url=doc.url||`/api/loans/${loan.id}/supporting-document?index=${i+1}`;
+      const name=doc.originalName||`Document ${i+1}`;
+      return `<p><button type="button" class="button secondary" data-secure-preview="${escapeHtml(url)}" data-preview-title="${escapeHtml(name)}">${icons.eye} ${escapeHtml(name)}</button></p>`;
+    }).join("")}</div>
+  </div></div>`:"";
   return `<h3 class="loan-section-title">Member application</h3>
     <div class="loan-application-grid">${rows.map(([label,value])=>`<div><span>${label}</span><strong>${value}</strong></div>`).join("")}</div>
     ${collateral}${document}`;
@@ -3519,7 +3745,7 @@ async function openLoanDetails(referenceOrId) {
         <div><span>Processing fee</span><strong>${money(loan.processing_fee||0)}</strong></div>
       </div>
       ${loan.eligibility_result?`<div class="notice">${icons.shield}<div><strong>Eligibility</strong><p>${escapeHtml(loan.eligibility_result)}</p></div></div>`:""}
-      ${loanApplicationDetailsHtml(loan)}
+      ${loanApplicationDetailsHtml(loan,details.supportingDocuments||[])}
       <h3 class="loan-section-title">Guarantors</h3>
       <div class="loan-guarantors">${details.guarantors.length?details.guarantors.map(g=>`<div class="setting-row"><div class="chat-avatar">${initials(g.name)}</div><div class="setting-copy"><strong>${escapeHtml(g.name)}</strong><span>${escapeHtml(g.memberNumber||"")}${g.note?` · ${escapeHtml(g.note)}`:""}</span></div>${status(g.status)}</div>`).join(""):`<p class="page-subtitle">${String(loan.security_type||"").toLowerCase()==="collateral"?"No guarantors — collateral security was offered.":"No guarantors recorded."}</p>`}</div>
       <h3 class="loan-section-title">Full approval process</h3>
@@ -3531,11 +3757,33 @@ async function openLoanDetails(referenceOrId) {
       ${details.canCurrentUserDecide?.executive?`<div class="form-actions loan-decision-actions"><button type="button" class="button primary" data-exec-loan-decision="${loan.id}" data-decision="authorize">Approve loan</button><button type="button" class="button secondary" data-exec-loan-decision="${loan.id}" data-decision="return">Request information</button><button type="button" class="button secondary" data-exec-loan-decision="${loan.id}" data-decision="reject">Reject</button></div>`:""}
       ${details.canCurrentUserDecide?.credits&&["officer-review","pending","review","correction","committee-review"].includes(loan.status)?`<div class="form-actions loan-decision-actions"><button type="button" class="button primary" data-credits-loan="${loan.id}" data-credit-decision="approve">Approve (Credits)</button><button type="button" class="button secondary" data-credits-loan="${loan.id}" data-credit-decision="return">Request information</button><button type="button" class="button secondary" data-credits-loan="${loan.id}" data-credit-decision="reject">Reject</button></div>`:""}
       ${details.disbursement?`<h3 class="loan-section-title">Disbursement</h3><div class="notice ${details.disbursement.status==="disbursed"?"":"warning"}">${icons.wallet}<div><strong>${money(details.disbursement.amount)} · ${escapeHtml(details.disbursement.status)}</strong><p>${escapeHtml(disbursementMethodLine(details.disbursement))}${details.disbursement.transactionReference?` · ${escapeHtml(details.disbursement.transactionReference)}`:""}</p>${details.disbursement.status==="disbursed"?`<p>Processing fee ${money(loan.processing_fee||0)} · ${escapeHtml(disbursementNetLabel(details.disbursement.method))} ${money(Math.max(0,Number(details.disbursement.amount||loan.amount||0)-Number(loan.processing_fee||0)))}</p>`:`<p>Credits Officer must choose Cash, Mobile Money, or Bank transfer before paying the member.</p>`}</div></div>`:""}
-      ${details.schedule.length?`<h3 class="loan-section-title">Repayment schedule</h3><div class="table-scroll repayment-scroll"><table><thead><tr><th>#</th><th>Due date</th><th>Opening balance</th><th>Principal</th><th>Interest</th><th>Total due</th><th>Status</th></tr></thead><tbody>${details.schedule.map(row=>`<tr><td>${row.installment}</td><td>${new Date(row.dueDate).toLocaleDateString()}</td><td>${money(row.openingBalance)}</td><td>${money(row.principal)}</td><td>${money(row.interest)}</td><td class="cell-main">${money(row.totalDue)}</td><td>${status(row.status)}</td></tr>`).join("")}</tbody></table></div>`:""}
+      ${details.schedule.length?`<h3 class="loan-section-title">Repayment schedule</h3><p class="page-subtitle" style="margin:-4px 0 10px">Due = principal + interest, plus penalty when that month is past the due date. Outstanding is what is still unpaid.</p><div class="table-scroll repayment-scroll"><table class="loan-schedule-table"><thead><tr><th>#</th><th>Due date</th><th>Opening</th><th>Principal</th><th>Interest</th><th>Penalty</th><th>Due</th><th>Outstanding</th><th>Paid amount</th><th>Surplus</th><th>Status</th></tr></thead><tbody>${details.schedule.map(row=>{
+        const dueKey=typeof row.dueDate==="string"&&/^\d{4}-\d{2}-\d{2}/.test(row.dueDate)?row.dueDate.slice(0,10):(row.dueDate?new Date(row.dueDate).toLocaleDateString("en-CA",{timeZone:"Africa/Kampala"}):"");
+        const todayKey=new Date().toLocaleDateString("en-CA",{timeZone:"Africa/Kampala"});
+        const isPaid=row.status==="paid";
+        const penaltyActive=!isPaid&&Boolean(dueKey&&dueKey<todayKey);
+        const due=dueKey?new Date(`${dueKey}T12:00:00`):null;
+        const principal=Number(row.principal)||0;
+        const interest=Number(row.interest)||0;
+        const penalty=(!isPaid&&(penaltyActive||row.status==="overdue"))
+          ?(Number(row.penalty)||Math.round(principal*0.05*100)/100)
+          :0;
+        const dueAmount=Math.round((principal+interest+penalty)*100)/100;
+        const remainingPrincipal=Math.max(0,principal-(Number(row.principalPaid)||0));
+        const remainingInterest=Math.max(0,interest-(Number(row.interestPaid)||0));
+        const outstanding=isPaid?0:Math.round((remainingPrincipal+remainingInterest+penalty)*100)/100;
+        const amountPaid=Number(row.amountPaid!=null?row.amountPaid:row.paidAmount)||0;
+        const surplus=Number(row.surplusPaid||0);
+        return `<tr class="${row.status==="overdue"?"is-overdue":row.status==="due"?"is-due":""}"><td>${row.installment}</td><td>${due?due.toLocaleDateString():"—"}</td><td>${money(row.openingBalance)}</td><td>${money(principal)}</td><td>${money(interest)}</td><td class="penalty-cell">${penalty?money(penalty):"—"}</td><td class="cell-main">${money(dueAmount)}</td><td>${money(outstanding)}</td><td>${amountPaid?money(amountPaid):"—"}</td><td>${surplus?money(surplus):"—"}</td><td>${status(row.status)}</td></tr>`;
+      }).join("")}</tbody></table></div>`:""}
       <div class="form-actions"><button class="button primary" data-close-2>Done</button></div></div></div></div>`);
     document.querySelector("[data-close]").onclick=closeModal;document.querySelector("[data-close-2]").onclick=closeModal;
     document.querySelectorAll("#modal-backdrop [data-exec-loan-decision]").forEach(el=>el.addEventListener("click",async()=>{closeModal();await executiveLoanDecision(el.dataset.execLoanDecision,el.dataset.decision);}));
     document.querySelectorAll("#modal-backdrop [data-credits-loan]").forEach(el=>el.addEventListener("click",async()=>{closeModal();await creditsLoanDecision(el.dataset.creditsLoan,el.dataset.creditDecision);}));
+    document.querySelectorAll("#modal-backdrop [data-secure-preview]").forEach(el=>el.addEventListener("click",event=>{
+      event.preventDefault();
+      openSecureContentViewer(el.dataset.securePreview,el.dataset.previewTitle||"Supporting document",{replaceModal:false});
+    }));
   } catch(error){toast(error.message);}
 }
 function workflowLabel(stage,action) {
@@ -3587,6 +3835,7 @@ function toast(message) {
 }
 
 init();
+window.addEventListener("popstate",onBrowserBack);
 
 document.addEventListener("click",event=>{
   const close=event.target.closest("[data-close-modal]");

@@ -36,6 +36,34 @@ Legal/Records registers members, stores bio data and private passport photos, an
 
 Database migrations apply automatically and are recorded in `schema_migrations`. Production startup never creates demonstration users or shared passwords.
 
+## Host with the same system data
+
+A full PostgreSQL dump of the current Kasangati G40 operating data is kept at:
+
+`database/dumps/system-hosting-data.dump`
+
+On a new host (empty Postgres recommended):
+
+1. Copy `.env.example` to `.env` and set `DATABASE_URL` plus a strong `JWT_SECRET`.
+2. Install dependencies: `npm ci`
+3. Import the dump (creates the database name from `DATABASE_URL` when possible):
+
+   ```powershell
+   npm run db:import-system
+   ```
+
+4. Start the app: `npm start`
+
+That import uses `pg_restore --clean --if-exists` and **replaces** matching objects in the target database. Point `DATABASE_URL` at the intended destination only.
+
+To refresh the dump from your local database after data changes:
+
+```powershell
+npm run db:export-system
+```
+
+Loan supporting images used by seeded/running loans are under `storage/seed-supporting/`.
+
 ## Optional development data
 
 Demo data is explicit. Set a strong temporary password only in the current shell, run the seed, then clear it:
@@ -46,7 +74,7 @@ npm run seed
 Remove-Item Env:DEMO_PASSWORD
 ```
 
-Never run the demo seed against production and never publish its password.
+Never run the demo seed against production and never publish its password. Prefer `npm run db:import-system` when you need the real operating snapshot instead of demo records.
 
 ## Mobile testing on the same Wi-Fi
 

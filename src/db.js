@@ -83,8 +83,26 @@ async function runMigrations() {
   }
 }
 
+async function ensureSeedSupportingDocs() {
+  const seedDir = path.join(projectRoot, "storage", "seed-supporting");
+  const uploadsDir = path.join(projectRoot, "storage", "uploads");
+  if (!fs.existsSync(seedDir)) {
+    console.warn("Seed supporting docs folder missing:", seedDir);
+    return;
+  }
+  fs.mkdirSync(uploadsDir, { recursive: true });
+  for (const file of fs.readdirSync(seedDir)) {
+    if (!/\.(png|jpe?g|webp|pdf)$/i.test(file)) continue;
+    const source = path.join(seedDir, file);
+    const dest = path.join(uploadsDir, `seed-${file}`);
+    fs.copyFileSync(source, dest);
+    console.log("Seed loan doc ready:", `seed-${file}`);
+  }
+}
+
 async function initialize({seedDemo=process.env.SEED_DEMO_DATA==="true"}={}) {
   await runMigrations();
+  await ensureSeedSupportingDocs();
   if(seedDemo) {
     await seed();
     await require("../database/seeds/supervisory")({ query, one });
