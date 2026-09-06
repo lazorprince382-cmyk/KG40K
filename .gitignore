@@ -18,4 +18,5 @@ scripts/_inspect-*.js
 scripts/_verify-*.js
 database/dumps/_*.json
 database/dumps/railway-live.dump
+database/dumps/local-production-mirror.dump
 
