@@ -40,6 +40,15 @@ module.exports = function registerLegalBioDataApi({
       department=String(req.query.department||"all").trim().toLowerCase();
     const limit=Math.min(300,Math.max(1,Number(req.query.limit)||200)),like=`%${term}%`;
     const params=[like,status,department,limit];
+    // System Admin logins are managed under Executive → System accounts, not Legal bio-data.
+    const excludeSystem=`AND (login_account.id IS NULL OR login_account.role <> 'System Admin')
+      AND COALESCE(login_account.email,'') NOT ILIKE 'deleted.%@removed.local'`;
+    const statusFilter=`AND (
+        $2='all'
+        OR ($2='filled_up' AND COALESCE(b.bio_status,'pending') IN ('verified','complete'))
+        OR ($2='need_editing' AND COALESCE(b.bio_status,'pending') IN ('pending','needs_update'))
+        OR COALESCE(b.bio_status,'pending')=$2
+      )`;
     const result=await query(`${selectBio}
       WHERE ($1='%%' OR m.full_name ILIKE $1 OR m.member_number ILIKE $1 OR m.phone ILIKE $1
         OR COALESCE(m.email,'') ILIKE $1 OR COALESCE(login_account.email,'') ILIKE $1 OR m.national_id ILIKE $1 OR COALESCE(m.occupation,'') ILIKE $1
@@ -49,7 +58,8 @@ module.exports = function registerLegalBioDataApi({
         OR COALESCE(b.village,'') ILIKE $1 OR COALESCE(b.emergency_contact_name,'') ILIKE $1
         OR COALESCE(login_account.role,'') ILIKE $1)
       AND m.deleted_at IS NULL
-      AND ($2='all' OR COALESCE(b.bio_status,'pending')=$2)
+      ${excludeSystem}
+      ${statusFilter}
       AND ($3='all'
         OR ($3='members' AND NOT EXISTS (
           SELECT 1 FROM (${officialMemberDepts}) od WHERE od.member_id=m.id))
@@ -59,9 +69,14 @@ module.exports = function registerLegalBioDataApi({
     const totals=await one(`SELECT COUNT(*)::int AS total,
       COUNT(*) FILTER (WHERE COALESCE(b.bio_status,'pending')='verified')::int AS verified,
       COUNT(*) FILTER (WHERE COALESCE(b.bio_status,'pending')='complete')::int AS complete,
-      COUNT(*) FILTER (WHERE COALESCE(b.bio_status,'pending') IN ('pending','needs_update'))::int AS attention
+      COUNT(*) FILTER (WHERE COALESCE(b.bio_status,'pending') IN ('pending','needs_update'))::int AS attention,
+      COUNT(*) FILTER (WHERE COALESCE(b.bio_status,'pending') IN ('verified','complete'))::int AS filled_up,
+      COUNT(*) FILTER (WHERE COALESCE(b.bio_status,'pending') IN ('pending','needs_update'))::int AS need_editing
       FROM members m LEFT JOIN member_bio_data b ON b.member_id=m.id
-      WHERE m.deleted_at IS NULL`);
+      LEFT JOIN users login_account ON login_account.member_id=m.id
+      WHERE m.deleted_at IS NULL
+        AND (login_account.id IS NULL OR login_account.role <> 'System Admin')
+        AND COALESCE(login_account.email,'') NOT ILIKE 'deleted.%@removed.local'`);
     const departments=(await query(`SELECT d.code,d.name,
       COUNT(DISTINCT od.member_id)::int AS "memberCount"
       FROM departments d

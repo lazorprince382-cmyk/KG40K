@@ -5,7 +5,7 @@
   const {esc,date,badge,panel,empty,table,modal}=D,config=D.configs["Legal Officer"];
   if(!config)return;
   if(!document.querySelector('link[href*="legal-biodata-styles.css"]')){
-    const link=document.createElement("link");link.rel="stylesheet";link.href="/legal-biodata-styles.css?v=35";document.head.appendChild(link);
+    const link=document.createElement("link");link.rel="stylesheet";link.href="/legal-biodata-styles.css?v=37";document.head.appendChild(link);
   }
   if(!config.pages.includes("legal-bio-data"))config.pages.splice(1,0,"legal-bio-data");
   config.labels["legal-bio-data"]="Bio Data";
@@ -67,11 +67,16 @@
     const b=B(),depts=b.departments||[];
     return `<div class="bio-page">
       <div class="bio-protection">${icons.lock}<div><strong>Protected Administration & Records register</strong><span>Bio data is linked automatically to verified membership registration. Filter by department to find officers quickly.</span></div><b>LEGAL ACCESS</b></div>
-      <div class="bio-stats">${[["Registered members",b.stats.total,"users","blue"],["Verified bio records",b.stats.verified,"check","green"],["Complete, awaiting verification",b.stats.complete,"file","violet"],["Need attention",b.stats.attention,"bell","orange"]].map(x=>`<article class="${x[3]}"><span>${icons[x[2]]}</span><div><small>${x[0]}</small><strong>${x[1]}</strong></div></article>`).join("")}</div>
+      <div class="bio-stats">${[
+        ["all","Registered members",b.stats.total,"users","blue"],
+        ["filled_up","Filled up",b.stats.filled_up??((b.stats.verified||0)+(b.stats.complete||0)),"check","green"],
+        ["need_editing","Need editing",b.stats.need_editing??b.stats.attention,"bell","orange"],
+        ["verified","Verified bio records",b.stats.verified,"shield","violet"]
+      ].map(([key,label,value,icon,color])=>`<button type="button" class="bio-stat-btn ${color} ${(b.status||"all")===key?"active":""}" data-bio-status-filter="${key}"><span>${icons[icon]}</span><div><small>${label}</small><strong>${value}</strong></div></button>`).join("")}</div>
       <form class="bio-search" data-bio-search>
         <div>${icons.search}<input name="q" value="${esc(b.query||"")}" placeholder="Search name, member number, National ID, phone, occupation, village, district or next of kin..."></div>
         <select name="department"><option value="all">All departments</option>${depts.map(d=>option(b.department||"all",d.code,`${d.name} (${d.memberCount||0})`)).join("")}</select>
-        <select name="status"><option value="all">All bio records</option>${["verified","complete","pending","needs_update"].map(x=>option(b.status,x)).join("")}</select>
+        <select name="status"><option value="all">All bio records</option><option value="filled_up" ${b.status==="filled_up"?"selected":""}>Filled up</option><option value="need_editing" ${b.status==="need_editing"?"selected":""}>Need editing</option>${[["verified","Verified"],["complete","Complete"],["pending","Pending"],["needs_update","Needs update"]].map(([v,l])=>`<option value="${v}" ${b.status===v?"selected":""}>${l}</option>`).join("")}</select>
         <button class="button primary">${icons.search}Search Bio Data</button>
         <button type="button" class="button secondary" data-bio-clear>Clear</button>
       </form>
@@ -137,6 +142,9 @@
       try{await loadBio(data.q,data.status,data.department||"all");render();}catch(error){toast(error.message);}
     });
     document.querySelector("[data-bio-clear]")?.addEventListener("click",async()=>{await loadBio();render();});
+    document.querySelectorAll("[data-bio-status-filter]").forEach(x=>x.addEventListener("click",async()=>{
+      try{await loadBio(B().query||"",x.dataset.bioStatusFilter,B().department||"all");render();window.scrollTo(0,0);}catch(error){toast(error.message);}
+    }));
     document.querySelectorAll("[data-bio-dept-filter]").forEach(x=>x.addEventListener("click",async()=>{
       try{await loadBio(B().query||"",B().status||"all",x.dataset.bioDeptFilter);render();window.scrollTo(0,0);}catch(error){toast(error.message);}
     }));

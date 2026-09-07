@@ -32,7 +32,7 @@
     const advanceNote=annualMet&&annualSurplus>0
       ?`<div class="member-policy-note member-advance-note"><b>Annual savings target met.</b> Extra ${money(annualSurplus)} remains as surplus toward future months.</div>`
       :"";
-    return `<p class="member-reveal-sub">Annual targets for ${esc(f.fiscalYear)} · monthly savings ${money(f.monthlySavingsTarget)}</p>
+    return `<p class="member-reveal-sub">Annual targets for ${esc(f.fiscalYear)} · monthly savings ${money(f.monthlySavingsTarget)} <span class="member-policy-hint">(includes UGX 25,000 welfare share — shown as one savings figure)</span></p>
       ${targetLine("Full-year savings target",savingsToward,f.annualSavingsTarget,{surplusLabel:"Surplus toward future months"})}
       ${targetLine("Annual share contribution",shareToward,f.annualShareTarget)}
       ${targetLine("Annual subscription fee",f.subscriptionPaid,f.annualSubscriptionFee)}

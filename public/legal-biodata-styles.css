@@ -28,10 +28,14 @@
 .bio-stats .bio-stat-btn.blue>span{background:#2575df}
 .bio-stats .bio-stat-btn.green>span{background:#d89b00}
 .bio-stats .bio-stat-btn.orange>span{background:#ef8c16}
+.bio-stats .bio-stat-btn.violet>span{background:#6b4bb5}
+.bio-stats .bio-stat-btn.teal>span{background:#0f766e}
 .bio-stats .bio-stat-btn small,.bio-stats .bio-stat-btn strong,.bio-stats .bio-stat-btn em{display:block;font-style:normal}
 .bio-stats .bio-stat-btn small{font-size:14px;color:#728093}
 .bio-stats .bio-stat-btn strong{font-size:22px;color:#152946;margin-top:3px}
 .bio-stats .bio-stat-btn em{font-size:12px;color:#8a97a8;margin-top:2px}
+.bio-dept-tag.filled{background:#e8f6ee;color:#17663a}
+.bio-dept-tag.need-edit{background:#fff4e5;color:#9a5b00}
 .bio-card.active-user{border-top-color:#2575df}
 .bio-card.inactive{border-top-color:#c8d0da;opacity:.92}
 .bio-card footer button.danger-action{border-color:#edb8b8;background:#fff5f5;color:#b4232f}

@@ -1302,13 +1302,18 @@ function financeDashboardView() {
     ["Total Assets",money(s.totalAssets),"building","finance-assets","Current asset value"],
     ["Total Liabilities",money(s.totalLiabilities),"file","finance-invoices","Open invoices"]
   ];
-  const yearOptions=(f.availableFiscalYears||[]).map(y=>`<option value="${y.year}" ${Number(y.year)===Number(f.selectedFiscalYear)?"selected":""}>${escapeHtml(y.label||`FY ending ${y.year}`)}</option>`).join("");
+  const yearOptions=(f.availableFiscalYears||[]).map(y=>{
+    const value=y.key||y.year;
+    const selected=(f.selectedFiscalKey||String(f.selectedFiscalYear))===String(value)?"selected":"";
+    return `<option value="${escapeHtml(String(value))}" ${selected}>${escapeHtml(y.label||`FY ending ${y.year}`)}</option>`;
+  }).join("");
   return `<div class="finance-title-strip"><div><p class="eyebrow">Finance Department</p><h2>Financial control center</h2><p>Organization money only - SACCO savings and loans remain in Credits.</p></div><div class="dashboard-year-control"><label>Financial year</label><select data-finance-fy>${yearOptions}</select></div></div>
     ${financeHistoricalSnapshot(f)}
-    <div class="finance-period-heading"><div><strong>Current operations</strong><span>Live receipts, payments and registered cash accounts for the current period</span></div><small>${new Date().toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"})}</small></div>
+    <div class="finance-period-heading"><div><strong>${historical?"Statement period accounts":"Current operations"}</strong><span>${historical?`Balances and lines from ${escapeHtml(f.selectedFiscalLabel||("FY "+f.selectedFiscalYear))}`:"Live receipts, payments and registered cash accounts for the current period"}</span></div><small>${new Date().toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"})}</small></div>
     <div class="finance-stat-grid finance-current-grid">${cards.slice(0,4).map((card,index)=>financeStatCard(...card,index)).join("")}</div>
     ${financePendingEntriesWidget(f)}
     ${financeSubscriptionProgressWidget(f)}
+    ${financeWelfareProgressWidget(f)}
     <div class="finance-dashboard-grid">
       ${financeRevenueGraph(f)}
       ${financeBudgetWidget(f)}
@@ -1352,6 +1357,17 @@ function financeSubscriptionProgressWidget(f){
       <div class="finance-subscription-track"><em style="width:${percent}%"></em></div>
       <div class="finance-subscription-meta"><span>${money(s.collected)} collected</span><span>${money(s.expected)} expected</span><span>Click to view members by date</span></div>
     </button>
+  </section>`;
+}
+function financeWelfareProgressWidget(f){
+  const w=f.welfareProgress;if(!w)return "";
+  const percent=Number(w.percent||0);
+  return `<section class="finance-panel finance-subscription-progress">
+    <div class="finance-subscription-bar">
+      <div class="finance-panel-head"><div><h3>Monthly welfare contributions</h3><p>${escapeHtml(w.periodLabel||"This month")} · ${money(w.perMember)} welfare share of ${money(w.monthlyCombined||425000)} member deposit</p></div><strong>${percent}%</strong></div>
+      <div class="finance-subscription-track"><em style="width:${percent}%"></em></div>
+      <div class="finance-subscription-meta"><span>${money(w.collected)} collected</span><span>${money(w.expected)} expected</span><span>${w.membersPaid||0} of ${w.activeMembers||0} members</span></div>
+    </div>
   </section>`;
 }
 function openFinanceSubscriptionMembers(){
@@ -1469,11 +1485,14 @@ function financeInvoicesView() {
 }
 function financeBudgetsView() {
   const f=state.finance;
-  return `<div class="finance-budget-cards">${f.budgets.map(b=>`<article class="${b.utilization>=100?"danger":b.utilization>=80?"warning":""}"><div><span>${b.department}</span>${status(b.status)}</div><h3>${money(b.allocated)}</h3><p>Used ${money(b.used)} - Remaining ${money(b.remaining)}</p>${progress("Budget utilization",`${b.utilization}%`,Math.min(100,b.utilization),b.utilization>=90?"amber":"lime")}<small>${b.utilization>=100?"Budget exceeded?spending must stop":b.utilization>=90?"Critical: 90% threshold reached":b.utilization>=80?"Warning: 80% threshold reached":"Within approved budget"}</small></article>`).join("")}</div>`;
+  const canEdit=Boolean(f.access?.canEdit||f.access?.canCreate);
+  return `<div class="finance-budget-cards">${f.budgets.map(b=>`<article class="${b.utilization>=100?"danger":b.utilization>=80?"warning":""}"><div><span>${b.department}</span>${status(b.status)}</div><h3>${money(b.allocated)}</h3><p>Used ${money(b.used)} - Remaining ${money(b.remaining)}</p>${progress("Budget utilization",`${b.utilization}%`,Math.min(100,b.utilization),b.utilization>=90?"amber":"lime")}<small>${b.utilization>=100?"Budget exceeded — spending must stop":b.utilization>=90?"Critical: 90% threshold reached":b.utilization>=80?"Warning: 80% threshold reached":"Within approved budget"}</small>${canEdit?`<div class="finance-account-actions"><button class="danger-action" data-finance-budget-delete="${b.id}">Delete budget</button></div>`:""}</article>`).join("")||`<div class="exec-empty">No department budgets for this period.</div>`}</div>`;
 }
 function financeBankView() {
   const f=state.finance;
-  return `<div class="finance-account-grid">${f.accounts.map(a=>`<article><div><span>${icons[a.accountType==="bank"?"building":"wallet"]}</span><div><small>${a.accountType.replaceAll("_"," ")}</small><h3>${a.accountName}</h3><p>${a.bankName||"Organization cash"} ${a.accountNumber||""}</p></div></div><strong>${money(a.balance)}</strong><small>Opening balance: ${money(a.openingBalance)} - ${a.openingBalanceDate?new Date(a.openingBalanceDate).toLocaleDateString():"Date unavailable"}</small><small>Last reconciled: ${a.lastReconciledAt?new Date(a.lastReconciledAt).toLocaleDateString():"Never"}</small><div class="finance-account-actions">${a.supportingDocument?`<a href="${a.supportingDocument}" target="_blank" rel="noopener">View opening statement</a>`:""}${a.accountType==="bank"?`<button data-finance-reconcile="${a.id}">Reconcile</button>`:""}<button data-finance-account-edit="${a.id}">Edit</button><button class="danger-action" data-finance-account-delete="${a.id}">Deactivate</button></div></article>`).join("")}</div>${financeCashPositionWidget(f)}`;
+  const accounts=f.accounts||[];
+  const historical=Boolean(f.historicalPeriod);
+  return `<div class="finance-account-grid">${accounts.map(a=>`<article><div><span>${icons[a.accountType==="bank"?"building":"wallet"]}</span><div><small>${(a.accountType||"account").replaceAll("_"," ")}</small><h3>${a.accountName}</h3><p>${a.bankName||"Organization cash"} ${a.accountNumber||""}</p></div></div><strong>${money(a.balance)}</strong><small>Opening balance: ${money(a.openingBalance||0)} - ${a.openingBalanceDate?new Date(a.openingBalanceDate).toLocaleDateString():"Date unavailable"}</small><small>${historical?`Statement period: ${f.selectedFiscalLabel||f.selectedFiscalYear}`:`Last reconciled: ${a.lastReconciledAt?new Date(a.lastReconciledAt).toLocaleDateString():"Never"}`}</small><div class="finance-account-actions">${a.supportingDocument?`<a href="${a.supportingDocument}" target="_blank" rel="noopener">View opening statement</a>`:""}${historical?`<span class="status pending">Historical statement</span>`:`${a.accountType==="bank"?`<button data-finance-reconcile="${a.id}">Reconcile</button>`:""}<button data-finance-account-edit="${a.id}">Edit</button><button class="danger-action" data-finance-account-delete="${a.id}">Deactivate</button>`}</div></article>`).join("")||`<div class="exec-empty">No accounts for this financial year.</div>`}</div>${historical?"":financeCashPositionWidget(f)}`;
 }
 function financeCashbookView() {
   const f=state.finance;
@@ -1586,6 +1605,19 @@ async function deactivateFinanceAccount(id) {
   const account=state.finance.accounts.find(item=>String(item.id)===String(id));if(!account)return;
   if(!await confirmDialog(`Deactivate ${account.accountName}? Existing ledger history will remain available.`))return;
   try{await api(`/api/finance/accounts/${id}`,{method:"DELETE"});state.finance=await api("/api/finance/command-center");render();toast("Finance account deactivated.");}catch(error){toast(error.message);}
+}
+async function deleteFinanceBudget(id){
+  const budget=(state.finance?.budgets||[]).find(item=>String(item.id)===String(id));
+  if(!budget)return toast("Budget not found.");
+  if(Number(budget.used||0)>0&&!await confirmDialog(`${budget.department} already used ${money(budget.used)}. Delete this budget anyway?`))return;
+  else if(Number(budget.used||0)<=0&&!await confirmDialog(`Delete the ${budget.department} budget (${money(budget.allocated)})?`))return;
+  try{
+    const fy=state.finance?.selectedFiscalKey||state.finance?.selectedFiscalYear||"";
+    await api(`/api/finance/budgets/${id}`,{method:"DELETE"});
+    state.finance=await api(`/api/finance/command-center${fy?`?fy=${encodeURIComponent(fy)}`:""}`);
+    render();
+    toast(`${budget.department} budget deleted.`);
+  }catch(error){toast(error.message);}
 }
 async function processFinanceVoucher(id) {
   const voucher=state.finance.vouchers.find(v=>String(v.id)===String(id));if(!voucher)return;
@@ -3107,23 +3139,33 @@ function filteredSystemUsers(){
       if(dept==="other"&&codes.length)return false;
       if(dept!=="other"&&!codes.includes(dept))return false;
     }
+    const profileComplete=Boolean(u.phone)&&Boolean((u.assignments||[]).length||(u.governanceDepartments||[]).length);
     if(filter.stat==="active"&&!u.active)return false;
     if(filter.stat==="inactive"&&u.active)return false;
     if(filter.stat==="staff"&&!(u.governanceDepartments||[]).length)return false;
     if(filter.stat==="recent"&&!u.lastLogin)return false;
+    if(filter.stat==="filled_up"&&!profileComplete)return false;
+    if(filter.stat==="need_editing"&&profileComplete)return false;
     if(!q)return true;
     const haystack=[u.fullName,u.email,u.phone,u.role,u.memberNumber,u.branch,...(u.assignments||[]).flatMap(a=>[a.department,a.code,a.position]),...(u.governanceDepartments||[]).flatMap(a=>[a.name,a.code,a.title])].join(" ").toLowerCase();
     return haystack.includes(q);
   });
 }
+function userAccountCompleteness(u){
+  const missing=[];
+  if(!u.phone)missing.push("phone");
+  if(!(u.assignments||[]).length&&!(u.governanceDepartments||[]).length)missing.push("department");
+  return {complete:!missing.length,missing};
+}
 function userAccountCard(u){
   const assignments=u.assignments||[];
-  return `<article class="bio-card ${u.active?"active-user":"inactive"}">
+  const completeness=userAccountCompleteness(u);
+  return `<article class="bio-card ${u.active?"active-user":"inactive"} ${completeness.complete?"filled-up":"need-editing"}">
     <header><div class="bio-avatar">${u.hasProfilePhoto?profileImage(u.id,u.fullName,true):initials(u.fullName)}</div><div><small>${escapeHtml(u.memberNumber||u.role)}</small><h3>${escapeHtml(u.fullName)}</h3><span>${escapeHtml(u.email)}</span></div>${status(u.active?"active":"suspended")}</header>
-    <div class="bio-dept-tags">${assignments.length?assignments.slice(0,3).map(a=>`<span class="bio-dept-tag" title="${escapeHtml(a.position||"")}">${escapeHtml(a.department)} · L${a.level}</span>`).join(""):`<span class="bio-dept-tag">No department assignment</span>`}${assignments.length>3?`<span class="bio-dept-tag">+${assignments.length-3} more</span>`:""}</div>
+    <div class="bio-dept-tags">${assignments.length?assignments.slice(0,3).map(a=>`<span class="bio-dept-tag" title="${escapeHtml(a.position||"")}">${escapeHtml(a.department)} · L${a.level}</span>`).join(""):`<span class="bio-dept-tag">No department assignment</span>`}${assignments.length>3?`<span class="bio-dept-tag">+${assignments.length-3} more</span>`:""}${completeness.complete?`<span class="bio-dept-tag filled">Filled up</span>`:`<span class="bio-dept-tag need-edit">Needs editing</span>`}</div>
     <dl><div><dt>Role</dt><dd>${escapeHtml(u.role)}</dd></div><div><dt>Phone</dt><dd>${escapeHtml(u.phone||"—")}</dd></div><div><dt>Branch</dt><dd>${escapeHtml(u.branch||"—")}</dd></div><div><dt>Last login</dt><dd>${formatUserLastLogin(u.lastLogin)}</dd></div></dl>
     <div class="bio-login-summary ${u.active?"active":"inactive"}"><span>${icons.lock}</span><div><small>Login security</small><strong>${u.mustChangePassword?"Temporary password pending change":"Password is set"}</strong><em>${u.active?"Active and allowed to sign in":"Account deactivated"}</em></div></div>
-    <footer><button data-user-view="${u.id}">${icons.eye}View details</button><button data-user-reset="${u.id}">${icons.lock}Reset password</button>${u.id!==state.user.id?`<button class="${u.active?"danger-action":""}" data-user-status="${u.id}" data-active="${u.active?0:1}">${u.active?"Deactivate":"Activate"}</button>`:""}</footer>
+    <footer><button data-user-view="${u.id}">${icons.eye}View details</button><button data-user-reset="${u.id}">${icons.lock}Reset password</button>${u.id!==state.user.id?`<button class="${u.active?"danger-action":""}" data-user-status="${u.id}" data-active="${u.active?0:1}">${u.active?"Deactivate":"Activate"}</button><button class="danger-action" data-user-delete="${u.id}">${icons.trash||icons.x}Delete</button>`:""}</footer>
   </article>`;
 }
 function openUserAccountDetail(id){
@@ -3148,13 +3190,15 @@ function usersView() {
   const active=users.filter(u=>u.active).length;
   const rosterStaff=users.filter(u=>(u.governanceDepartments||[]).length).length;
   const recent=users.filter(u=>u.lastLogin).length;
+  const filledUp=users.filter(u=>userAccountCompleteness(u).complete).length;
+  const needEditing=users.length-filledUp;
   const deptFilter=filter.department||filter.role||"all";
   const roster=state.departmentRoster||[];
   const deptChips=[["all","All accounts",users.length],...roster.map(d=>[d.code,d.name,d.accountCount])];
   const deptLabel=deptFilter==="all"?"":deptFilter==="other"?"Other accounts":(roster.find(d=>d.code===deptFilter)||{}).name||deptFilter;
-  const statCards=[["all","User accounts",users.length,"users","dark","All secure login accounts"],["active","Active accounts",active,"check","green",`${users.length-active} inactive`],["staff","Department runners",rosterStaff,"shield","blue","Official committee accounts"],["recent","Recent logins",recent,"clock","orange","Recorded with IP and device"]];
+  const statCards=[["all","User accounts",users.length,"users","dark","All secure login accounts"],["filled_up","Filled up",filledUp,"check","green","Phone and department set"],["need_editing","Need editing",needEditing,"bell","orange","Missing phone or department"],["active","Active accounts",active,"shield","blue",`${users.length-active} inactive`],["staff","Department runners",rosterStaff,"users","violet","Official committee accounts"],["recent","Recent logins",recent,"clock","teal","Recorded with IP and device"]];
   return `<div class="bio-page system-accounts-page">
-    <div class="bio-protection">${icons.shield}<div><strong>Executive System accounts</strong><span>Reset passwords and activate or deactivate login accounts here. Legal registers members and can update login email or status, but password resets stay with Executive.</span></div><b>EXEC ACCESS</b></div>
+    <div class="bio-protection">${icons.shield}<div><strong>Executive System accounts</strong><span>Reset passwords, activate, deactivate or delete login accounts here. Legal registers members and can update login email or status, but password resets and system-account edits stay with Executive.</span></div><b>EXEC ACCESS</b></div>
     <div class="bio-stats">${statCards.map(([key,label,value,icon,color,note])=>`<button type="button" class="bio-stat-btn ${color} ${filter.stat===key?"active":""}" data-user-stat-filter="${key}"><span>${icons[icon]}</span><div><small>${label}</small><strong>${value}</strong><em>${note}</em></div></button>`).join("")}</div>
     <form class="bio-search" data-user-search>
       <div>${icons.search}<input name="q" value="${escapeHtml(filter.q||"")}" placeholder="Search name, email, phone, role, member number or department..."></div>
@@ -3245,7 +3289,7 @@ function bind() {
   document.querySelectorAll("[data-finance-page]").forEach(el=>el.addEventListener("click",()=>{
     state.page=el.dataset.financePage;state.financeQuickOpen=false;render();window.scrollTo(0,0);
   }));
-  document.querySelector("[data-finance-fy]")?.addEventListener("change",async event=>{try{event.target.disabled=true;state.finance=await api(`/api/finance/command-center?fy=${event.target.value}`);render();}catch(error){toast(error.message);}});
+  document.querySelector("[data-finance-fy]")?.addEventListener("change",async event=>{try{event.target.disabled=true;state.finance=await api(`/api/finance/command-center?fy=${encodeURIComponent(event.target.value)}`);render();}catch(error){toast(error.message);}});
   document.querySelector("[data-finance-subscriptions]")?.addEventListener("click",()=>openFinanceSubscriptionMembers());
   document.querySelectorAll("[data-finance-modal]").forEach(el=>el.addEventListener("click",()=>openFinanceModal(el.dataset.financeModal)));
   document.querySelectorAll("[data-finance-voucher]").forEach(el=>el.addEventListener("click",()=>financeVoucherDecision(el.dataset.financeVoucher,el.dataset.decision)));
@@ -3257,6 +3301,7 @@ function bind() {
   document.querySelectorAll("[data-finance-reconcile]").forEach(el=>el.addEventListener("click",()=>reconcileFinanceAccount(el.dataset.financeReconcile)));
   document.querySelectorAll("[data-finance-account-edit]").forEach(el=>el.addEventListener("click",()=>editFinanceAccount(el.dataset.financeAccountEdit)));
   document.querySelectorAll("[data-finance-account-delete]").forEach(el=>el.addEventListener("click",()=>deactivateFinanceAccount(el.dataset.financeAccountDelete)));
+  document.querySelectorAll("[data-finance-budget-delete]").forEach(el=>el.addEventListener("click",()=>deleteFinanceBudget(el.dataset.financeBudgetDelete)));
   document.querySelectorAll("[data-procurement-advance]").forEach(el=>el.addEventListener("click",()=>advanceProcurement(el.dataset.procurementAdvance)));
   document.querySelectorAll("[data-finance-report]").forEach(el=>el.addEventListener("click",()=>downloadFinanceReport(el.dataset.financeReport,el.dataset.format||"excel")));
   document.querySelectorAll("[data-finance-report-preview]").forEach(el=>el.addEventListener("click",()=>openOperationalReportPreview("finance",el.dataset.financeReportPreview)));
@@ -3325,6 +3370,7 @@ function bind() {
   }));
   document.querySelectorAll("[data-user-status]").forEach(el=>el.addEventListener("click",()=>changeUserStatus(el)));
   document.querySelectorAll("[data-user-reset]").forEach(el=>el.addEventListener("click",()=>resetUserPassword(el.dataset.userReset)));
+  document.querySelectorAll("[data-user-delete]").forEach(el=>el.addEventListener("click",()=>deleteSystemUser(el.dataset.userDelete)));
   document.querySelectorAll("[data-user-view]").forEach(el=>el.addEventListener("click",()=>openUserAccountDetail(el.dataset.userView)));
   document.querySelector("[data-user-search]")?.addEventListener("submit",event=>{
     event.preventDefault();
@@ -3824,7 +3870,21 @@ async function resetUserPassword(id) {
     document.body.insertAdjacentHTML("beforeend",`<div class="modal-backdrop" id="modal-backdrop"><div class="modal"><div class="modal-head"><div><h2>Temporary password issued</h2><p>${escapeHtml(user.fullName)} - ${escapeHtml(user.email)}</p></div><button class="modal-close" data-close-modal>${icons.x}</button></div><div class="bio-password-result"><p>Give this password securely to the user. It is shown only now and must be changed at the next sign-in.</p><code>${escapeHtml(result.temporaryPassword)}</code><button class="button primary" data-close-modal>Done</button></div></div></div>`);
     document.querySelectorAll("#modal-backdrop [data-close-modal]").forEach(x=>x.addEventListener("click",closeModal));
   } catch(error) { toast(error.message); }
-}async function verifyTransaction(id) {
+}
+async function deleteSystemUser(id){
+  const user=(state.users||[]).find(u=>String(u.id)===String(id));
+  if(!user)return toast("User account not found.");
+  const reason=await promptDialog(`Why is ${user.fullName}'s login account being deleted?`,"");
+  if(reason===null)return;
+  if(reason.trim().length<5)return toast("Enter a clear deletion reason.");
+  if(!await confirmDialog(`Delete login account for ${user.fullName} (${user.email})?\n\nThey will no longer be able to sign in. Member financial records are kept.`))return;
+  try{
+    await api(`/api/users/${id}`,{method:"DELETE",body:JSON.stringify({reason:reason.trim()})});
+    const result=await api("/api/users"); applyUsersApiResult(result); render();
+    toast(`${user.fullName}'s login account was deleted.`);
+  }catch(error){toast(error.message);}
+}
+async function verifyTransaction(id) {
   try {
     await api(`/api/transactions/${id}/verify`,{method:"POST",body:"{}"});
     await refreshData(); render(); toast("Transaction verified and member balance updated.");

@@ -54,6 +54,20 @@ On a new host (empty Postgres recommended):
 
 4. Start the app: `npm start`
 
+Or run the combined hosting setup (import + Sep 2026 Dan 425k / welfare policy):
+
+```powershell
+npm run db:hosting-setup
+```
+
+If the dump is already imported and you only need the September Centenary deposit + monthly 425k/25k policy:
+
+```powershell
+npm run db:sync-sep2026-dan
+```
+
+That sync records Dan Rwebingira Ssalongo’s UGX 425,000 Centenary deposit (01-Sep-2026), reconciles the Kwagalana Centenary balance to UGX 8,351,473, sets the monthly member savings target to UGX 425,000 (shown as one figure on member dashboards), and tracks UGX 25,000 of each deposit as welfare for Finance/Welfare progress bars.
+
 That import uses `pg_restore --clean --if-exists` and **replaces** matching objects in the target database. Point `DATABASE_URL` at the intended destination only.
 
 To refresh the dump from your local database after data changes:

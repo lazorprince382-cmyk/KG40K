@@ -946,16 +946,34 @@ function requireFinance(action="view") {
   });
 }
 app.get("/api/finance/command-center",auth,requireFinance("view"),asyncRoute(async(req,res)=>{
-  const fiscalYearRows=(await query(`SELECT EXTRACT(YEAR FROM ends_on)::int AS year,fiscal_year_label AS label
-    FROM member_financial_year_policies
-    UNION
-    SELECT fiscal_year AS year,'FY ended '||to_char(period_end,'DD Mon YYYY') AS label FROM financial_reporting_periods
-    ORDER BY year DESC`)).rows;
-  const availableFiscalYears=fiscalYearRows.map(row=>({year:Number(row.year),label:row.label}));
-  const defaultFiscalYear=Number((await one(`SELECT EXTRACT(YEAR FROM ends_on)::int AS year
-    FROM member_financial_year_policies WHERE status='active' ORDER BY ends_on DESC LIMIT 1`))?.year||availableFiscalYears[0]?.year||new Date().getFullYear());
-  const requestedFiscalYear=Number(req.query.fy);
-  const selectedFiscalYear=availableFiscalYears.some(row=>row.year===requestedFiscalYear)?requestedFiscalYear:defaultFiscalYear;  const [accounts,incomeExpense,budgets,vouchers,entries,invoices,assets,procurements,documents,departments,investmentAnalyses]=await Promise.all([
+  const fiscalYearRows=(await query(`
+    SELECT 'live:'||EXTRACT(YEAR FROM ends_on)::text AS key,
+      EXTRACT(YEAR FROM ends_on)::int AS year,
+      fiscal_year_label AS label,
+      NULL::bigint AS period_id,
+      'live' AS mode,
+      ends_on AS sort_date
+      FROM member_financial_year_policies WHERE status='active'
+    UNION ALL
+    SELECT 'period:'||id::text, fiscal_year,
+      'FY ended '||to_char(period_end,'DD Mon YYYY'), id, 'historical', period_end
+      FROM financial_reporting_periods
+    ORDER BY sort_date DESC`)).rows;
+  const availableFiscalYears=fiscalYearRows.map(row=>({
+    key:row.key,year:Number(row.year),label:row.label,periodId:row.period_id?Number(row.period_id):null,mode:row.mode
+  }));
+  const liveDefault=availableFiscalYears.find(row=>row.mode==="live")||availableFiscalYears[0];
+  const defaultFiscalKey=liveDefault?.key||`live:${new Date().getFullYear()}`;
+  const requestedFy=String(req.query.fy||"").trim();
+  const selectedOption=availableFiscalYears.find(row=>row.key===requestedFy)
+    ||availableFiscalYears.find(row=>String(row.year)===requestedFy)
+    ||liveDefault
+    ||{key:defaultFiscalKey,year:new Date().getFullYear(),label:`FY ${new Date().getFullYear()}`,mode:"live",periodId:null};
+  const selectedFiscalYear=Number(selectedOption.year);
+  const selectedFiscalKey=selectedOption.key||defaultFiscalKey;
+  const selectedFiscalLabel=selectedOption.label||`FY ${selectedFiscalYear}`;
+  const defaultFiscalYear=Number(liveDefault?.year||selectedFiscalYear);
+  const [accounts,incomeExpense,budgets,vouchers,entries,invoices,assets,procurements,documents,departments,investmentAnalyses]=await Promise.all([
     query(`SELECT id,account_code AS "accountCode",account_name AS "accountName",account_type AS "accountType",
       bank_name AS "bankName",account_number AS "accountNumber",balance::float,opening_balance::float AS "openingBalance",
       opening_balance_date AS "openingBalanceDate",notes,supporting_document AS "supportingDocument",
@@ -969,7 +987,7 @@ app.get("/api/finance/command-center",auth,requireFinance("view"),asyncRoute(asy
       FROM organization_finance_entries`),
     query(`SELECT b.id,b.reference,d.id AS "departmentId",b.fiscal_period AS "fiscalPeriod",b.allocated_amount::float AS allocated,
       b.used_amount::float AS used,(b.allocated_amount-b.used_amount)::float AS remaining,b.status,d.code AS "departmentCode",d.name AS department
-      FROM finance_budgets b JOIN departments d ON d.id=b.department_id WHERE b.status='approved' ORDER BY d.sort_order`),
+      FROM finance_budgets b JOIN departments d ON d.id=b.department_id WHERE b.status IN ('approved','pending_approval') ORDER BY d.sort_order`),
     query(`SELECT v.id,v.voucher_number AS "voucherNumber",v.supplier,v.description,v.category,v.budget_line AS "budgetLine",
       v.amount::float,v.payment_method AS "paymentMethod",v.status,v.supporting_document AS "supportingDocument",
       v.created_at AS "createdAt",d.name AS department,requester.id AS "requestedById",requester.full_name AS "requestedBy",
@@ -1005,18 +1023,24 @@ app.get("/api/finance/command-center",auth,requireFinance("view"),asyncRoute(asy
       FROM investment_proposals p JOIN users u ON u.id=p.created_by
       WHERE p.status='financial_analysis' ORDER BY p.created_at`)
   ]);
-  const financialSnapshot=await one(`SELECT p.id,p.fiscal_year AS "fiscalYear",p.period_end AS "periodEnd",p.status,p.source_name AS "sourceName",
-    jsonb_object_agg(l.line_code,jsonb_build_object('name',l.line_name,'current',l.current_amount::float,'prior',l.prior_amount::float)) AS values
-    FROM financial_reporting_periods p JOIN financial_statement_lines l ON l.period_id=p.id
-    WHERE p.fiscal_year=$1 GROUP BY p.id,p.fiscal_year,p.period_end,p.status,p.source_name LIMIT 1`,[selectedFiscalYear]);
+  const financialSnapshot=selectedOption.periodId
+    ? await one(`SELECT p.id,p.fiscal_year AS "fiscalYear",p.period_end AS "periodEnd",p.status,p.source_name AS "sourceName",
+        jsonb_object_agg(l.line_code,jsonb_build_object('name',l.line_name,'current',l.current_amount::float,'prior',l.prior_amount::float)) AS values
+        FROM financial_reporting_periods p JOIN financial_statement_lines l ON l.period_id=p.id
+        WHERE p.id=$1 GROUP BY p.id,p.fiscal_year,p.period_end,p.status,p.source_name LIMIT 1`,[selectedOption.periodId])
+    : await one(`SELECT p.id,p.fiscal_year AS "fiscalYear",p.period_end AS "periodEnd",p.status,p.source_name AS "sourceName",
+        jsonb_object_agg(l.line_code,jsonb_build_object('name',l.line_name,'current',l.current_amount::float,'prior',l.prior_amount::float)) AS values
+        FROM financial_reporting_periods p JOIN financial_statement_lines l ON l.period_id=p.id
+        WHERE p.fiscal_year=$1 GROUP BY p.id,p.fiscal_year,p.period_end,p.status,p.source_name
+        ORDER BY p.period_end DESC LIMIT 1`,[selectedFiscalYear]);
   const cash=accounts.rows.filter(a=>a.accountType==="cash").reduce((sum,a)=>sum+a.balance,0);
   const bank=accounts.rows.filter(a=>a.accountType==="bank").reduce((sum,a)=>sum+a.balance,0);
   const petty=accounts.rows.filter(a=>a.accountType==="petty_cash").reduce((sum,a)=>sum+a.balance,0);
   const mobile=accounts.rows.filter(a=>a.accountType==="mobile_money").reduce((sum,a)=>sum+a.balance,0);
   const restricted=accounts.rows.filter(a=>a.restricted||a.accountType==="restricted").reduce((sum,a)=>sum+a.balance,0);
   const liquidFunds=bank+cash+petty+mobile;
-  const budgetAllocated=budgets.rows.reduce((sum,b)=>sum+b.allocated,0);
-  const budgetUsed=budgets.rows.reduce((sum,b)=>sum+b.used,0);
+  const budgetAllocated=budgets.rows.filter(b=>b.status==="approved").reduce((sum,b)=>sum+b.allocated,0);
+  const budgetUsed=budgets.rows.filter(b=>b.status==="approved").reduce((sum,b)=>sum+b.used,0);
   const outstandingVouchers=vouchers.rows.filter(v=>!["processed","rejected"].includes(v.status));
   const outstandingPayments=outstandingVouchers.reduce((sum,v)=>sum+v.amount,0);
   const totalAssets=assets.rows.reduce((sum,a)=>sum+a.currentValue,0);
@@ -1036,14 +1060,33 @@ app.get("/api/finance/command-center",auth,requireFinance("view"),asyncRoute(asy
       COALESCE((SELECT SUM(amount) FROM organization_finance_entries f WHERE f.entry_type='expense' AND f.status IN ('approved','completed') AND date_trunc('month',f.transaction_date)=months.month),0)::float AS expenses
       FROM months ORDER BY month`)).rows;
   const daily=[];
-  const historicalPeriod=selectedFiscalYear!==defaultFiscalYear&&Boolean(financialSnapshot);
+  const historicalPeriod=selectedOption.mode==="historical"&&Boolean(financialSnapshot);
   const snapshotValues=financialSnapshot?.values||{};
   const snapshotAmount=code=>Number(snapshotValues[code]?.current||0);
+  const statementAccountSpecs=[
+    {code:"gl_4101",accountCode:"GL-4101",accountName:"Bank 1",accountType:"bank",bankName:"Bank 1",accountNumber:"4101"},
+    {code:"gl_4102",accountCode:"GL-4102",accountName:"MTN Mobile Money",accountType:"mobile_money",bankName:"MTN",accountNumber:"Mobile Money"},
+    {code:"gl_4103",accountCode:"GL-4103",accountName:"Deposits",accountType:"restricted",bankName:null,accountNumber:"Deposits"},
+    {code:"gl_4104",accountCode:"GL-4104",accountName:"Centenary Bank Co.",accountType:"bank",bankName:"Centenary",accountNumber:"3100111892"},
+    {code:"gl_4105",accountCode:"GL-4105",accountName:"Cash at Hand",accountType:"cash",bankName:null,accountNumber:"Cash"}
+  ];
+  const periodAccounts=historicalPeriod?statementAccountSpecs.map((spec,index)=>{
+    const balance=snapshotAmount(spec.code);
+    return {
+      id:`snapshot-${financialSnapshot.id}-${spec.code}`,
+      accountCode:spec.accountCode,accountName:spec.accountName,accountType:spec.accountType,
+      bankName:spec.bankName,accountNumber:spec.accountNumber,balance,openingBalance:balance,
+      openingBalanceDate:financialSnapshot.periodEnd,notes:`Statement balance as at ${selectedFiscalLabel}`,
+      supportingDocument:null,supportingDocumentName:null,restricted:spec.accountType==="restricted",
+      active:true,lastReconciledAt:null,historical:true,sort:index
+    };
+  }):accounts.rows;
   const pendingFinanceEntries=entries.rows.filter(x=>x.status==="pending_finance_review");
   const subscriptionPolicy=await one(`SELECT fiscal_year_label AS "fiscalYear",annual_subscription_fee::float AS fee,
-    EXTRACT(YEAR FROM ends_on)::int AS year,starts_on AS "startsOn",ends_on AS "endsOn"
+    EXTRACT(YEAR FROM ends_on)::int AS year,starts_on AS "startsOn",ends_on AS "endsOn",
+    monthly_savings_target::float AS "monthlySavingsTarget"
     FROM member_financial_year_policies WHERE status='active' ORDER BY ends_on DESC LIMIT 1`);
-  const activeMemberCount=Number((await one(`SELECT COUNT(*)::int AS count FROM members WHERE status='active'`))?.count||0);
+  const activeMemberCount=Number((await one(`SELECT COUNT(*)::int AS count FROM members WHERE status='active' AND deleted_at IS NULL`))?.count||0);
   const subscriptionPayments=subscriptionPolicy?(await query(`SELECT t.id,t.reference,t.amount::float,t.created_at AS "paidAt",
       t.verified_at AS "verifiedAt",m.id AS "memberId",m.full_name AS member,m.member_number AS "memberNumber"
       FROM transactions t JOIN members m ON m.id=t.member_id
@@ -1064,24 +1107,47 @@ app.get("/api/finance/command-center",auth,requireFinance("view"),asyncRoute(asy
     membersPaid:subscriptionMembersPaid,
     payments:subscriptionPayments
   };
+  const monthlyWelfarePerMember=Number((await one(`SELECT value FROM settings WHERE key='monthlyWelfareContribution'`))?.value||25000);
+  const monthlyCombined=Number(subscriptionPolicy?.monthlySavingsTarget||425000);
+  const welfareMonthStart=(await one(`SELECT date_trunc('month',CURRENT_DATE)::date AS start`))?.start;
+  const welfareMonthContributions=welfareMonthStart?(await query(`SELECT c.member_id AS "memberId",c.amount::float,m.full_name AS member
+      FROM welfare_contributions c JOIN members m ON m.id=c.member_id
+      WHERE c.status IN ('verified','completed')
+        AND c.contribution_date>=$1 AND c.contribution_date<($1::date+INTERVAL '1 month')`,[welfareMonthStart])).rows:[];
+  const welfareCollected=welfareMonthContributions.reduce((sum,row)=>sum+Number(row.amount||0),0);
+  const welfareExpected=activeMemberCount*monthlyWelfarePerMember;
+  const welfareProgress={
+    periodLabel:welfareMonthStart?new Date(welfareMonthStart).toLocaleDateString("en-GB",{month:"long",year:"numeric"}):"This month",
+    perMember:monthlyWelfarePerMember,
+    monthlyCombined,
+    expected:welfareExpected,
+    collected:welfareCollected,
+    percent:welfareExpected?Math.min(100,Math.round(welfareCollected/welfareExpected*100)):0,
+    activeMembers:activeMemberCount,
+    membersPaid:new Set(welfareMonthContributions.map(row=>row.memberId)).size
+  };
+  const displayBank=historicalPeriod
+    ? (snapshotAmount("gl_4104")||snapshotAmount("cash_bank")||periodAccounts.filter(a=>a.accountType==="bank").reduce((s,a)=>s+a.balance,0))
+    : bank;
+  const displayCash=historicalPeriod?periodAccounts.filter(a=>a.accountType==="cash").reduce((s,a)=>s+a.balance,0):cash;
   res.json({
-    selectedFiscalYear,availableFiscalYears,historicalPeriod,
-    stats:{currentBankBalance:historicalPeriod?snapshotAmount('cash_bank'):bank,cashOnHand:historicalPeriod?0:cash,
-      incomeToday:historicalPeriod?snapshotAmount('total_income'):incomeExpense.rows[0].income_today,
-      expensesToday:historicalPeriod?snapshotAmount('total_operating_expenses'):incomeExpense.rows[0].expense_today,
-      monthlyIncome:historicalPeriod?snapshotAmount('total_income'):incomeExpense.rows[0].income_month,
-      monthlyExpenses:historicalPeriod?snapshotAmount('total_operating_expenses'):incomeExpense.rows[0].expense_month,
+    selectedFiscalYear,selectedFiscalKey,selectedFiscalLabel,availableFiscalYears,historicalPeriod,
+    stats:{currentBankBalance:displayBank,cashOnHand:displayCash,
+      incomeToday:historicalPeriod?(snapshotAmount('total_income')||snapshotAmount('net_income')||0):incomeExpense.rows[0].income_today,
+      expensesToday:historicalPeriod?(snapshotAmount('total_operating_expenses')||snapshotAmount('total_expenses')||0):incomeExpense.rows[0].expense_today,
+      monthlyIncome:historicalPeriod?(snapshotAmount('total_income')||0):incomeExpense.rows[0].income_month,
+      monthlyExpenses:historicalPeriod?(snapshotAmount('total_operating_expenses')||snapshotAmount('total_expenses')||0):incomeExpense.rows[0].expense_month,
       outstandingPayments:historicalPeriod?0:outstandingPayments,pendingPaymentRequests:historicalPeriod?0:outstandingVouchers.length,
       pendingFinanceEntries:pendingFinanceEntries.length,
       approvedBudget:budgetAllocated,budgetUtilized:budgetAllocated?Number((budgetUsed/budgetAllocated*100).toFixed(2)):0,
-      totalAssets:historicalPeriod?snapshotAmount('total_assets'):totalAssets,
-      totalLiabilities:historicalPeriod?snapshotAmount('total_liabilities'):liabilities,
+      totalAssets:historicalPeriod?(snapshotAmount('total_assets')||0):totalAssets,
+      totalLiabilities:historicalPeriod?(snapshotAmount('total_liabilities')||0):liabilities,
       annualSubscriptionsCollected:subscriptionCollected,annualSubscriptionsExpected:subscriptionExpected},
-    cashPosition:{bankBalance:bank,cashBalance:cash,pettyCash:petty,mobileMoney:mobile,availableFunds:Math.max(0,liquidFunds-restricted),restrictedFunds:restricted},
-    financialSnapshot,accounts:accounts.rows,departments:departments.rows,budgets:budgetRows,vouchers:vouchers.rows,entries:entries.rows,
+    cashPosition:{bankBalance:displayBank,cashBalance:displayCash,pettyCash:historicalPeriod?0:petty,mobileMoney:historicalPeriod?periodAccounts.filter(a=>a.accountType==="mobile_money").reduce((s,a)=>s+a.balance,0):mobile,availableFunds:Math.max(0,(historicalPeriod?displayBank+displayCash:liquidFunds)-restricted),restrictedFunds:historicalPeriod?periodAccounts.filter(a=>a.restricted).reduce((s,a)=>s+a.balance,0):restricted},
+    financialSnapshot,accounts:periodAccounts,departments:departments.rows,budgets:budgetRows,vouchers:vouchers.rows,entries:entries.rows,
     pendingEntries:pendingFinanceEntries,invoices:invoices.rows,assets:assets.rows,
     procurements:procurements.rows,documents:documents.rows,investmentAnalyses:investmentAnalyses.rows,monthly,daily,
-    incomeBySource,expensesByCategory,subscriptionProgress,
+    incomeBySource,expensesByCategory,subscriptionProgress,welfareProgress,
     notifications:[
       ...pendingFinanceEntries.slice(0,4).map(x=>({level:"warning",title:`${x.reference} awaits Finance verification`,createdAt:x.createdAt||x.transactionDate})),
       ...budgetRows.filter(x=>x.utilization>=80).map(x=>({level:"warning",title:`${x.department} budget has reached ${x.utilization}%`,createdAt:x.updatedAt||x.createdAt})),
@@ -1382,7 +1448,17 @@ app.post("/api/finance/budgets",auth,requireFinance("create"),asyncRoute(async(r
   });
   await audit({userId:req.user.id,action:"FINANCE_BUDGET_SUBMITTED",entityType:"finance_budget",entityId:String(row.id),details:`${row.reference} - UGX ${allocated}`,...metadata(req)});
   res.status(202).json({...row,status:"pending_approval"});
-}));app.post("/api/finance/procurements",auth,requireFinance("create"),asyncRoute(async(req,res)=>{
+}));
+app.delete("/api/finance/budgets/:id",auth,requireFinance("edit"),asyncRoute(async(req,res)=>{
+  const budget=await one(`SELECT b.id,b.reference,b.allocated_amount::float AS allocated,b.used_amount::float AS used,b.status,
+    d.name AS department FROM finance_budgets b JOIN departments d ON d.id=b.department_id WHERE b.id=$1`,[req.params.id]);
+  if(!budget)return res.status(404).json({error:"Budget not found"});
+  await query("DELETE FROM finance_budgets WHERE id=$1",[budget.id]);
+  await audit({userId:req.user.id,action:"FINANCE_BUDGET_DELETED",entityType:"finance_budget",entityId:String(budget.id),
+    details:`${budget.reference} - ${budget.department} - UGX ${budget.allocated} (used ${budget.used})`,...metadata(req)});
+  res.json({ok:true,id:budget.id,reference:budget.reference,department:budget.department});
+}));
+app.post("/api/finance/procurements",auth,requireFinance("create"),asyncRoute(async(req,res)=>{
   const b=req.body,amount=Number(b.estimatedAmount);
   if(!b.departmentId||!b.itemDescription||!Number.isFinite(amount)||amount<=0)
     return res.status(400).json({error:"Department, item description and estimated amount are required"});
@@ -2413,11 +2489,12 @@ app.get("/api/welfare/command-center",auth,requireWelfare("view"),asyncRoute(asy
   const requestRows=requests.rows,pending=requestRows.filter(r=>!["approved","rejected","closed"].includes(r.status));
   const approved=requestRows.filter(r=>r.status==="approved"),rejected=requestRows.filter(r=>r.status==="rejected");
   const emergencies=requestRows.filter(r=>["critical","high"].includes(r.urgency)&&!["closed","rejected"].includes(r.status));
-  const members=(await query("SELECT COUNT(*)::int AS count FROM members WHERE status='active'")).rows[0].count;
+  const members=(await query("SELECT COUNT(*)::int AS count FROM members WHERE status='active' AND deleted_at IS NULL")).rows[0].count;
+  const monthlyWelfareExpected=Number((await one(`SELECT value FROM settings WHERE key='monthlyWelfareContribution'`))?.value||25000);
   const memberTotals=new Map();
   for(const contribution of verifiedContributions)memberTotals.set(contribution.memberId,(memberTotals.get(contribution.memberId)||0)+contribution.amount);
-  const fullyPaid=[...memberTotals.values()].filter(x=>x>=50000).length,partiallyPaid=[...memberTotals.values()].filter(x=>x>0&&x<50000).length;
-  const arrears=Math.max(0,members-fullyPaid-partiallyPaid),expected=members*50000,collected=contributed;
+  const fullyPaid=[...memberTotals.values()].filter(x=>x>=monthlyWelfareExpected).length,partiallyPaid=[...memberTotals.values()].filter(x=>x>0&&x<monthlyWelfareExpected).length;
+  const arrears=Math.max(0,members-fullyPaid-partiallyPaid),expected=members*monthlyWelfareExpected,collected=contributed;
   const beneficiaries=new Set(payments.rows.filter(p=>["paid","processed"].includes(p.status)).map(p=>p.beneficiary));
   const averageApproval=requestRows.filter(r=>r.reviewedAt).length?Number((requestRows.filter(r=>r.reviewedAt)
     .reduce((s,r)=>s+(new Date(r.reviewedAt)-new Date(r.createdAt))/86400000,0)/requestRows.filter(r=>r.reviewedAt).length).toFixed(1)):0;
@@ -2442,7 +2519,8 @@ app.get("/api/welfare/command-center",auth,requireWelfare("view"),asyncRoute(asy
     fund:{openingBalance,contributions:contributed,assistancePaid,otherExpenses,closingBalance,
       growth:openingBalance?Number(((closingBalance-openingBalance)/openingBalance*100).toFixed(2)):0},
     contributionStatus:{fullyPaid,partiallyPaid,arrears,expected,collected,
-      collectionPercentage:expected?Number((collected/expected*100).toFixed(1)):0},
+      collectionPercentage:expected?Number((collected/expected*100).toFixed(1)):0,
+      perMember:monthlyWelfareExpected,monthlyCombined:425000},
     beneficiarySummary:{total:beneficiaries.size,totalPaid:assistancePaid,averageSupport:beneficiaries.size?assistancePaid/beneficiaries.size:0,
       repeat:payments.rows.length-beneficiaries.size,highestCategory:Object.entries(categories).sort((a,b)=>b[1]-a[1])[0]?.[0]||"None"},
     requests:requestRows,contributions:contributions.rows,payments:payments.rows,activities:activities.rows,
@@ -2992,17 +3070,20 @@ app.get("/api/users",auth,permit("user:manage"),asyncRoute(async(req,res)=>{
     COALESCE((SELECT json_agg(json_build_object('code',od.dept_code,'name',od.dept_name,
       'title',od.body_name||': '||od.position_title) ORDER BY od.dept_name)
       FROM (${officialMemberDepts}) od WHERE od.member_id=u.member_id),'[]') AS "governanceDepartments"
-    FROM users u LEFT JOIN branches b ON b.id=u.branch_id LEFT JOIN members m ON m.id=u.member_id ORDER BY u.id DESC`)).rows;
+    FROM users u LEFT JOIN branches b ON b.id=u.branch_id LEFT JOIN members m ON m.id=u.member_id
+    WHERE u.email NOT ILIKE 'deleted.%@removed.local'
+    ORDER BY u.id DESC`)).rows;
   const departmentRoster=(await query(`SELECT d.code,d.name,
       COUNT(DISTINCT u.id)::int AS "accountCount"
       FROM departments d
       LEFT JOIN (${officialMemberDepts}) od ON od.dept_code=d.code
-      LEFT JOIN users u ON u.member_id=od.member_id
+      LEFT JOIN users u ON u.member_id=od.member_id AND u.email NOT ILIKE 'deleted.%@removed.local'
       WHERE d.code = ANY($1)
       GROUP BY d.code,d.name
       ORDER BY d.name`,[officialDeptCodes])).rows;
   const otherAccounts=(await one(`SELECT COUNT(*)::int AS count FROM users u
-    WHERE NOT EXISTS (SELECT 1 FROM (${officialMemberDepts}) od WHERE od.member_id=u.member_id)`))?.count||0;
+    WHERE u.email NOT ILIKE 'deleted.%@removed.local'
+      AND NOT EXISTS (SELECT 1 FROM (${officialMemberDepts}) od WHERE od.member_id=u.member_id)`))?.count||0;
   res.json({users,roles:ROLES,departmentRoster,otherAccounts,
     branches:(await query("SELECT * FROM branches WHERE active=true")).rows,
     departments:(await query("SELECT id,code,name FROM departments WHERE active=true ORDER BY sort_order")).rows});
@@ -3056,6 +3137,28 @@ app.post("/api/users/:id/reset-password",auth,permit("user:manage"),asyncRoute(a
   const result=await query("UPDATE users SET password_hash=$1,must_change_password=true,failed_attempts=0,locked_until=NULL,token_version=token_version+1 WHERE id=$2 RETURNING id",[await bcrypt.hash(temporaryPassword,12),req.params.id]);
   if(result.rowCount!==1)return res.status(404).json({error:"User account not found"});
   await audit({userId:req.user.id,action:"PASSWORD_RESET",entityType:"user",entityId:req.params.id,...metadata(req)}); res.json({ok:true,temporaryPassword});
+}));
+app.delete("/api/users/:id",auth,permit("user:manage"),asyncRoute(async(req,res)=>{
+  const userId=Number(req.params.id),reason=String(req.body?.reason||"").trim();
+  if(!Number.isInteger(userId)||userId<1)return res.status(400).json({error:"Choose a valid account"});
+  if(userId===Number(req.user.id))return res.status(400).json({error:"You cannot delete your own account"});
+  if(reason.length<5)return res.status(400).json({error:"Enter a clear reason for deleting this account"});
+  const target=await one(`SELECT id,full_name,email,role,member_id FROM users WHERE id=$1 AND email NOT ILIKE 'deleted.%@removed.local'`,[userId]);
+  if(!target)return res.status(404).json({error:"User account not found"});
+  if(target.role==="System Admin"){
+    const remaining=Number((await one(`SELECT COUNT(*)::int AS count FROM users
+      WHERE role='System Admin' AND active=true AND id<>$1 AND email NOT ILIKE 'deleted.%@removed.local'`,[userId]))?.count||0);
+    if(remaining<1)return res.status(409).json({error:"Keep at least one System Admin account"});
+  }
+  await transaction(async client=>{
+    await client.query(`UPDATE department_assignments SET active=false WHERE user_id=$1`,[userId]);
+    await client.query(`UPDATE users SET active=false,locked_until=NOW()+INTERVAL '100 years',
+      email='deleted.'||id||'.'||floor(extract(epoch from now()))::text||'@removed.local',
+      token_version=token_version+1 WHERE id=$1`,[userId]);
+  });
+  await audit({userId:req.user.id,action:"USER_DELETED",entityType:"user",entityId:String(userId),
+    details:`${target.full_name} - ${target.email} - ${target.role}; reason=${reason}`,...metadata(req)});
+  res.json({ok:true,id:userId,fullName:target.full_name});
 }));
 
 app.post("/api/transactions",auth,permit("transaction:create"),asyncRoute(async(req,res)=>{
