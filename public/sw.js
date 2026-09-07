@@ -1,11 +1,11 @@
-const CACHE="kasangati-v159";
+const CACHE="kasangati-v164";
 const SHELL=[
-  "/","/index.html","/styles.css?v=99","/brand-theme.css?v=64","/brand-no-green.css?v=17","/legal-member-exit.css?v=2","/app.js?v=144",
-  "/app-core.js?v=134","/department-theme.js?v=63","/department-core.js?v=68",
+  "/","/index.html","/styles.css?v=100","/brand-theme.css?v=64","/brand-no-green.css?v=17","/legal-member-exit.css?v=2","/app.js?v=149",
+  "/app-core.js?v=139","/department-theme.js?v=63","/department-core.js?v=68",
   "/audit-dashboard.js?v=63","/audit-modules.js?v=63","/welfare-module.js?v=65",
   "/legal-module.js?v=64","/legal-biodata-module.js?v=68","/legal-family-ui.js?v=2","/legal-member-exit-ui.js?v=2",
   "/legal-registration-module.js?v=63","/supervisory-module.js?v=63","/department-events.js?v=63",
-  "/official-policy-ui.js?v=11","/member-portal.js?v=105","/loan-calculator.js?v=7",
+  "/official-policy-ui.js?v=11","/member-portal.js?v=107","/loan-calculator.js?v=7",
   "/legal-biodata-styles.css?v=37",
   "/brand-logo.png?v=51","/brand-logo-slogan.png?v=51","/manifest.webmanifest"
 ];

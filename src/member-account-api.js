@@ -377,9 +377,18 @@ module.exports = function registerMemberAccountApi({
       ...welfareRequests.rows.map(item => ({ type: "welfare", title: `Welfare ${item.category}`, detail: `UGX ${Number(item.amount).toLocaleString()}`, date: item.createdAt, status: item.status })),
       ...notifications.rows.map(item => ({ type: "notification", title: item.title, detail: item.message, date: item.createdAt, status: item.readAt ? "read" : "new" }))
     ].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 20);
+    const uapBalance=Number((await one(`SELECT balance::float AS balance FROM finance_accounts WHERE account_code='GL-4500' AND active=true`))?.balance
+      ||(await one(`SELECT value FROM settings WHERE key='organizationUapBalance'`))?.value||0);
+    const bankBalance=Number((await one(`SELECT balance::float AS balance FROM finance_accounts WHERE account_code='GL-4104' AND active=true`))?.balance
+      ||(await one(`SELECT value FROM settings WHERE key='organizationBankBalance'`))?.value||0);
+    const loansOutstanding=Number((await one(`SELECT COALESCE(SUM(balance),0)::float AS total FROM loans WHERE status IN ('active','overdue')`))?.total||0);
+    const companyFunds=uapBalance+bankBalance+loansOutstanding;
+    const welfarePaid=Number(contributionsTotal||0);
     return {
       member, summary: {
         savings: member.savings, totalMemberFunds: Number(member.savings) + Number(member.shares),
+        personalTotalFunds: Number(member.savings) + Number(member.shares),
+        welfare: welfarePaid,
         activeLoanBalance: activeLoans.reduce((sum, item) => {
           const totalDue=Number(item.totalDue||item.amount||0);
           const totalPaid=Number(item.totalPaid||0);
@@ -387,8 +396,10 @@ module.exports = function registerMemberAccountApi({
         }, 0),
         availableLoanLimit: Math.max(0, member.savings * 3 - activeLoans.reduce((sum, item) => sum + Number(item.balance), 0)),
         welfareContributions: contributionsTotal, investments: investmentTotal, shares: member.shares,
-        pendingRequests, notifications: notifications.rows.filter(item => !item.readAt).length
+        pendingRequests, notifications: notifications.rows.filter(item => !item.readAt).length,
+        uapBalance, bankBalance, loansOutstanding, companyFunds
       },
+      organizationStanding:{uapBalance,bankBalance,loansOutstanding,companyFunds},
       transactions: transactions.rows, loans: loans.rows, guarantees: guarantees.rows, investments: investments.rows,
       welfare: { requests: welfareRequests.rows, contributions: welfareContributions.rows }, meetings: meetings.rows,
       documents: documents.rows, notifications: notifications.rows, announcements: announcements.rows, support: support.rows, recentActivity,

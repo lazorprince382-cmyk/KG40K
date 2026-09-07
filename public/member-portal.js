@@ -144,8 +144,14 @@
   }
   function dashboard(){
     const c=C(),m=c.member,s=c.summary,h=new Date().getHours(),g=h<12?"Good morning":h<18?"Good afternoon":"Good evening";
+    const org=c.organizationStanding||{};
+    const uap=Number(s.uapBalance??org.uapBalance??0);
+    const bank=Number(s.bankBalance??org.bankBalance??0);
+    const loansOut=Number(s.loansOutstanding??org.loansOutstanding??0);
+    const company=Number(s.companyFunds??org.companyFunds??(uap+bank+loansOut));
     return `${oversightBanner()}<div class="member-portal"><section class="member-welcome member-hero-card"><div class="member-welcome-top"><span>${g}</span><h2>${esc(m.fullName)}</h2></div>${loanNeedCta(c)}</section>
-      <div class="member-summary-grid">${metric("My Savings",money(s.savings),"savings","member-savings","Current carried-forward balance")}${metric("Share Capital",money(s.shares),"building","member-savings","Current share balance")}${metric("Total Member Funds",money(s.totalMemberFunds),"wallet","member-savings","Savings plus share capital")}${metric("Active Loan Balance",money(s.activeLoanBalance),"loans","member-loans","Remaining total repayment including interest")}</div>
+      <div class="member-summary-grid">${metric("My Savings",money(s.savings),"savings","member-savings","Current carried-forward balance")}${metric("Share Capital",money(s.shares),"building","member-savings","Current share balance")}${metric("Personal Total Funds",money(s.personalTotalFunds??s.totalMemberFunds),"wallet","member-savings","Savings plus share capital")}${metric("Welfare",money(s.welfare??s.welfareContributions??0),"shield","member-welfare","UGX 25,000 of each UGX 425,000 monthly deposit")}${metric("Active Loan Balance",money(s.activeLoanBalance),"loans","member-loans","Remaining total repayment including interest")}</div>
+      <div class="member-summary-grid member-org-standing">${metric("At UAP account",money(uap),"building","member-dashboard","Old Mutual unit trust standing amount")}${metric("Centenary bank account",money(bank),"wallet","member-dashboard","Company Centenary account")}${metric("Money in loans",money(loansOut),"loans","member-loans","Outstanding loan principal across members")}${metric("Total Company Funds",money(company),"reports","member-dashboard","UAP + Centenary + money in loans")}</div>
       ${dashboardNextUp(c)}
       <div class="member-dashboard-reveals">${contributionProgressReveal()}${recentActivityReveal()}</div></div>`;
   }
