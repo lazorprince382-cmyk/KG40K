@@ -12,6 +12,7 @@
     "db:import-system": "node scripts/import-system-dump.js",
     "db:hosting-setup": "node scripts/hosting-setup.js",
     "db:sync-live-pack": "node scripts/sync-live-pack.js",
+    "db:verify-live": "node scripts/verify-live-positions.js",
     "system:auto-update": "node scripts/system-auto-update.js",
     "db:sync-sep2026-dan": "node scripts/sync-sep2026-dan-425k-welfare.js",
     "db:sync-uap-flow": "node scripts/sync-uap-centenary-flow.js",

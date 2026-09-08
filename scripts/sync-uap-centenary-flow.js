@@ -190,9 +190,16 @@ async function main() {
         created_by BIGINT,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )`);
-    await client.query(`
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_unit_trust_movements_unique
-        ON unit_trust_movements (movement_date, description, COALESCE(source_reference, ''))`);
+    try {
+      await client.query("SAVEPOINT ut_idx");
+      await client.query(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_unit_trust_movements_unique
+          ON unit_trust_movements (movement_date, description, COALESCE(source_reference, ''))`);
+      await client.query("RELEASE SAVEPOINT ut_idx");
+    } catch (idxErr) {
+      await client.query("ROLLBACK TO SAVEPOINT ut_idx");
+      console.warn(`unit_trust unique index skipped: ${idxErr.message}`);
+    }
 
     const actor = await actorId(client);
     if (!actor) throw new Error("No active user");
@@ -258,17 +265,44 @@ async function main() {
       console.log(`Centenary set to ${CENTENARY_BALANCE.toLocaleString()}`);
 
       await client.query(
-        `INSERT INTO investment_fund_accounts
-          (reference, institution_name, fund_name, bank_name, bank_account_number, amount_invested, current_value,
-           returns_earned, invested_on, report_as_at, status, source_reference, created_by, updated_at)
-         VALUES ('FUND-OLD-MUTUAL-2025','Old Mutual','Unit Trust Fund','Old Mutual Investment Group',
-           '99171-CKA1073440',150000000,$1,$2,'2025-01-01','2026-09-01','active',$3,$4,NOW())
-         ON CONFLICT (reference) DO UPDATE SET
-           current_value=EXCLUDED.current_value, returns_earned=EXCLUDED.returns_earned,
-           report_as_at=EXCLUDED.report_as_at, institution_name='Old Mutual',
-           fund_name='Unit Trust Fund', bank_account_number=EXCLUDED.bank_account_number, updated_at=NOW()`,
-        [UAP_CURRENT, 1384813.59, MARKER, actor]
+        `INSERT INTO settings (key, value) VALUES ('organizationUapBalance', $1)
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at=NOW()`,
+        [String(UAP_CURRENT)]
       );
+      await client.query(
+        `INSERT INTO settings (key, value) VALUES ('organizationBankBalance', $1)
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at=NOW()`,
+        [String(CENTENARY_BALANCE)]
+      );
+
+      // Persist Finance UI balances before ledger / fund / repay work (those must not wipe UAP).
+      await client.query("COMMIT");
+      console.log("Committed UAP + Centenary live balances");
+      await client.query("BEGIN");
+
+      try {
+      // Safe upsert — some dumps lack UNIQUE(reference); ON CONFLICT alone can abort the whole TX.
+      const fundExisting = (
+        await client.query(`SELECT id FROM investment_fund_accounts WHERE reference='FUND-OLD-MUTUAL-2025' LIMIT 1`)
+      ).rows[0];
+      if (fundExisting) {
+        await client.query(
+          `UPDATE investment_fund_accounts SET current_value=$1, returns_earned=$2, report_as_at='2026-09-01',
+             institution_name='Old Mutual', fund_name='Unit Trust Fund',
+             bank_name='Old Mutual Investment Group', bank_account_number='99171-CKA1073440',
+             status='active', source_reference=$3, updated_at=NOW() WHERE id=$4`,
+          [UAP_CURRENT, 1384813.59, MARKER, fundExisting.id]
+        );
+      } else {
+        await client.query(
+          `INSERT INTO investment_fund_accounts
+            (reference, institution_name, fund_name, bank_name, bank_account_number, amount_invested, current_value,
+             returns_earned, invested_on, report_as_at, status, source_reference, created_by, updated_at)
+           VALUES ('FUND-OLD-MUTUAL-2025','Old Mutual','Unit Trust Fund','Old Mutual Investment Group',
+             '99171-CKA1073440',150000000,$1,$2,'2025-01-01','2026-09-01','active',$3,$4,NOW())`,
+          [UAP_CURRENT, 1384813.59, MARKER, actor]
+        );
+      }
       await client.query(
         `UPDATE investment_fund_accounts SET current_value=$1, status='active', updated_at=NOW()
          WHERE reference='FUND-UAP-UMBRELLA'`,
@@ -456,65 +490,64 @@ async function main() {
            AND period_id=(SELECT id FROM financial_reporting_periods ORDER BY period_end DESC LIMIT 1)`,
         [UAP_CURRENT]
       );
-
-      // Justine: waive penalty then apply repayment
-      const justine = (
-        await client.query(
-          `SELECT l.id, m.full_name, m.id AS member_id FROM loans l
-           JOIN members m ON m.id=l.member_id
-           WHERE l.reference='LN-JUSTINE-16M-20260731' FOR UPDATE OF l`
-        )
-      ).rows[0];
-      if (justine) {
-        await client.query(
-          `UPDATE loan_charges SET status='waived', paid_amount=amount, settled_at=NOW(),
-             reason=COALESCE(reason,'') || ' | Waived: installment paid on due date before penalty should apply (' || $2 || ')'
-           WHERE loan_id=$1 AND charge_type='Late payment penalty' AND status IN ('outstanding','partial')`,
-          [justine.id, MARKER]
-        );
-        console.log("Waived Justine late-payment penalty");
-
-        const repayRef = "REP-JUSTINE-4320K-20260831";
-        const existingRepay = (await client.query(`SELECT id FROM transactions WHERE reference=$1`, [repayRef])).rows[0];
-        if (!existingRepay) {
-          const applied = await applyLoanRepayment(client, justine.id, JUSTINE_REPAY);
-          await client.query(
-            `INSERT INTO transactions
-              (reference, member_id, loan_id, type, method, amount, status, external_reference, notes,
-               recorded_by, verified_by, verified_at, created_at, receipt_number)
-             VALUES ($1,$2,$3,'Loan repayment','Bank transfer',$4,'completed',$5,$6,$7,$7,$8::timestamptz,$8::timestamptz,$9)`,
-            [
-              repayRef,
-              justine.member_id,
-              justine.id,
-              JUSTINE_REPAY,
-              JUSTINE_BANK_REF,
-              `${MARKER} AGNTBANK DEP JUSTINE/F — paid installment before penalty; interest ${applied.interestApplied} principal ${applied.principalApplied}`,
-              actor,
-              JUSTINE_AT,
-              `RCPT-${JUSTINE_BANK_REF}`,
-            ]
-          );
-          console.log(
-            `Justine repayment applied: interest ${applied.interestApplied}, principal ${applied.principalApplied}, balance ${applied.newBalance}`
-          );
-        } else {
-          console.log("SKIP Justine repayment — already recorded");
-        }
-      } else {
-        console.log("Justine loan not found");
+      } catch (ledgerErr) {
+        await client.query("ROLLBACK");
+        await client.query("BEGIN");
+        console.warn(`Ledger/fund sync skipped (UAP/Centenary already saved): ${ledgerErr.message}`);
       }
 
-      await client.query(
-        `INSERT INTO settings (key, value) VALUES ('organizationUapBalance', $1)
-         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at=NOW()`,
-        [String(UAP_CURRENT)]
-      );
-      await client.query(
-        `INSERT INTO settings (key, value) VALUES ('organizationBankBalance', $1)
-         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at=NOW()`,
-        [String(CENTENARY_BALANCE)]
-      );
+      try {
+        const justine = (
+          await client.query(
+            `SELECT l.id, m.full_name, m.id AS member_id FROM loans l
+             JOIN members m ON m.id=l.member_id
+             WHERE l.reference='LN-JUSTINE-16M-20260731' FOR UPDATE OF l`
+          )
+        ).rows[0];
+        if (justine) {
+          await client.query(
+            `UPDATE loan_charges SET status='waived', paid_amount=amount, settled_at=NOW(),
+               reason=COALESCE(reason,'') || ' | Waived: installment paid on due date before penalty should apply (' || $2 || ')'
+             WHERE loan_id=$1 AND charge_type='Late payment penalty' AND status IN ('outstanding','partial')`,
+            [justine.id, MARKER]
+          );
+          console.log("Waived Justine late-payment penalty");
+
+          const repayRef = "REP-JUSTINE-4320K-20260831";
+          const existingRepay = (await client.query(`SELECT id FROM transactions WHERE reference=$1`, [repayRef])).rows[0];
+          if (!existingRepay) {
+            const applied = await applyLoanRepayment(client, justine.id, JUSTINE_REPAY);
+            await client.query(
+              `INSERT INTO transactions
+                (reference, member_id, loan_id, type, method, amount, status, external_reference, notes,
+                 recorded_by, verified_by, verified_at, created_at, receipt_number)
+               VALUES ($1,$2,$3,'Loan repayment','Bank transfer',$4,'completed',$5,$6,$7,$7,$8::timestamptz,$8::timestamptz,$9)`,
+              [
+                repayRef,
+                justine.member_id,
+                justine.id,
+                JUSTINE_REPAY,
+                JUSTINE_BANK_REF,
+                `${MARKER} AGNTBANK DEP JUSTINE/F — paid installment before penalty; interest ${applied.interestApplied} principal ${applied.principalApplied}`,
+                actor,
+                JUSTINE_AT,
+                `RCPT-${JUSTINE_BANK_REF}`,
+              ]
+            );
+            console.log(
+              `Justine repayment applied: interest ${applied.interestApplied}, principal ${applied.principalApplied}, balance ${applied.newBalance}`
+            );
+          } else {
+            console.log("SKIP Justine repayment — already recorded");
+          }
+        } else {
+          console.log("Justine loan not found — loans target will be set in live-cleanup");
+        }
+      } catch (repayErr) {
+        await client.query("ROLLBACK");
+        await client.query("BEGIN");
+        console.warn(`Justine repayment skipped (UAP/Centenary already saved): ${repayErr.message}`);
+      }
     }
 
     await client.query(dryRun ? "ROLLBACK" : "COMMIT");
@@ -522,19 +555,27 @@ async function main() {
     const out = await pool.query(
       `SELECT COALESCE(SUM(balance),0)::float AS outstanding FROM loans WHERE status IN ('active','overdue')`
     );
-    const ua = await pool.query(`SELECT balance::float FROM finance_accounts WHERE account_code='GL-4500'`);
-    const ce = await pool.query(`SELECT balance::float FROM finance_accounts WHERE id=$1`, [centenary.id]);
-    console.log("\n== Summary ==");
-    console.log(`  Centenary: UGX ${Number(ce.rows[0]?.balance || CENTENARY_BALANCE).toLocaleString()}`);
-    console.log(`  UAP / Unit Trust: UGX ${Number(ua.rows[0]?.balance || UAP_CURRENT).toLocaleString()}`);
-    console.log(`  Loans outstanding: UGX ${Number(out.rows[0].outstanding).toLocaleString()}`);
+    const ua = await pool.query(
+      `SELECT balance::float AS balance FROM finance_accounts WHERE account_code='GL-4500' AND active=true`
+    );
+    const ce = await pool.query(`SELECT balance::float AS balance FROM finance_accounts WHERE id=$1`, [centenary.id]);
+    const uapBal = Number(ua.rows[0]?.balance);
+    const bankBal = Number(ce.rows[0]?.balance);
+    const loansBal = Number(out.rows[0].outstanding);
+    console.log("\n== Summary (actual DB values) ==");
+    console.log(`  Centenary: UGX ${Number.isFinite(bankBal) ? bankBal.toLocaleString() : "MISSING"}`);
+    console.log(`  UAP / Unit Trust: UGX ${Number.isFinite(uapBal) ? uapBal.toLocaleString() : "MISSING"}`);
+    console.log(`  Loans outstanding: UGX ${loansBal.toLocaleString()}`);
     console.log(
       `  Total company funds: UGX ${(
-        Number(ua.rows[0]?.balance || UAP_CURRENT) +
-        Number(ce.rows[0]?.balance || CENTENARY_BALANCE) +
-        Number(out.rows[0].outstanding)
+        (Number.isFinite(uapBal) ? uapBal : 0) +
+        (Number.isFinite(bankBal) ? bankBal : 0) +
+        loansBal
       ).toLocaleString()}`
     );
+    if (!dryRun && !(Number.isFinite(uapBal) && uapBal >= UAP_CURRENT - 1)) {
+      throw new Error(`UAP balance not saved correctly (got ${uapBal})`);
+    }
   } catch (error) {
     await client.query("ROLLBACK");
     console.error("Failed:", error.message);

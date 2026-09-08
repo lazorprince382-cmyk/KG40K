@@ -4,30 +4,28 @@
  * One-shot hosting setup for the operator who imports / refreshes system data.
  *
  * 1) Imports database/dumps/system-hosting-data.dump (unless --skip-import)
- * 2) Applies live finance sync pack (unless --skip-sync):
- *      - Sep 2026 Dan 425k + monthly welfare policy
- *      - Centenary ↔ UAP (Old Mutual) money flow + 10M transfer
- *      - Live cleanup: remove management-import receipts, loans → 45,500,115,
- *        Sep UAP daily interest at 12.96% p.a. from 1 Sep 2026
+ * 2) Applies live finance sync pack (unless --skip-sync)
+ * 3) Verifies Finance Live company positions (UAP + Centenary + loans)
  *
- * Usage (PowerShell):
- *   $env:DATABASE_URL="postgresql://USER:PASS@HOST:5432/DB"
+ * Usage (PowerShell) — replace with REAL credentials, not USER/PASS/HOST:
+ *   $env:DATABASE_URL="postgresql://postgres:REAL_PASSWORD@127.0.0.1:5432/your_db"
  *   npm run db:hosting-setup
- *   npm run db:hosting-setup -- --skip-import
- *   npm run db:hosting-setup -- --dry-run
- *   npm run db:sync-live-pack          # syncs only (no dump import)
+ *   npm run db:sync-live-pack
  *
  * After setup:
  *   npm start
- *   (migrations including 039-unit-trust-movements.sql apply on start)
  */
 const { spawnSync } = require("child_process");
 const path = require("path");
+const { requireDatabaseUrl } = require("./lib/load-database-url");
 
 const projectRoot = path.resolve(__dirname, "..");
 const skipImport = process.argv.includes("--skip-import");
 const skipSync = process.argv.includes("--skip-sync");
 const dryRun = process.argv.includes("--dry-run");
+const skipVerify = process.argv.includes("--skip-verify");
+
+requireDatabaseUrl(projectRoot);
 
 function run(label, command, args) {
   console.log(`\n== ${label} ==`);
@@ -44,13 +42,8 @@ function run(label, command, args) {
   }
 }
 
-if (!process.env.DATABASE_URL) {
-  console.error("Set DATABASE_URL first (PostgreSQL connection string).");
-  process.exit(1);
-}
-
 console.log("Kasangati G40 hosting setup");
-console.log(`DATABASE_URL is set${dryRun ? " (dry-run where supported)" : ""}`);
+console.log(`DATABASE_URL accepted${dryRun ? " (dry-run where supported)" : ""}`);
 
 if (!skipImport) {
   run("Import system hosting dump", "npm", ["run", "db:import-system"]);
@@ -84,6 +77,10 @@ if (!skipSync) {
   console.log("\n== Sync ==\nSkipped (--skip-sync)");
 }
 
+if (!dryRun && !skipVerify) {
+  run("Verify live company positions (Finance UI)", "node", ["scripts/verify-live-positions.js"]);
+}
+
 console.log("\nDone. Start the app with: npm start");
 console.log("Migrations (incl. unit_trust_movements) run automatically on start.");
 console.log("\nRecurring auto-update (schedule this — NOT dump import):");
@@ -96,4 +93,5 @@ console.log("  npm run db:clarify-uap-flow");
 console.log("  npm run db:sync-sep2026-live");
 console.log("  npm run db:sync-vicent-welfare");
 console.log("  npm run db:sync-live-pack");
+console.log("  npm run db:verify-live");
 console.log("  npm run db:export-system      # refresh dump after local data changes");

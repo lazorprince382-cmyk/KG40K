@@ -21,11 +21,14 @@
 const { spawnSync } = require("child_process");
 const path = require("path");
 const fs = require("fs");
+const { requireDatabaseUrl } = require("./lib/load-database-url");
 
 const projectRoot = path.resolve(__dirname, "..");
 const doPull = process.argv.includes("--pull");
 const skipInstall = process.argv.includes("--skip-install");
 const dryRun = process.argv.includes("--dry-run");
+
+requireDatabaseUrl(projectRoot);
 
 function run(label, command, args, { optional = false } = {}) {
   console.log(`\n== ${label} ==`);
@@ -44,11 +47,6 @@ function run(label, command, args, { optional = false } = {}) {
     console.error(`\nFailed: ${label} (exit ${result.status})`);
     process.exit(result.status || 1);
   }
-}
-
-if (!process.env.DATABASE_URL) {
-  console.error("Set DATABASE_URL first (PostgreSQL connection string).");
-  process.exit(1);
 }
 
 console.log("Kasangati G40 system auto-update");

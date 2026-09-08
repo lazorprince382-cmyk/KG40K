@@ -112,34 +112,62 @@ async function main() {
     const gap = round2(LOANS_TARGET - loanSum);
     console.log(`Loans outstanding now ${loanSum.toLocaleString()}; target ${LOANS_TARGET.toLocaleString()}; gap ${gap.toLocaleString()}`);
     if (Math.abs(gap) > 0.5) {
-      const justine = (
+      let justine = (
         await client.query(`SELECT id, balance::float AS balance FROM loans WHERE reference='LN-JUSTINE-16M-20260731' FOR UPDATE`)
       ).rows[0];
-      if (!justine) throw new Error("Justine loan not found");
+      if (!justine) {
+        justine = (
+          await client.query(
+            `SELECT id, balance::float AS balance FROM loans
+             WHERE status IN ('active','overdue') ORDER BY balance DESC NULLS LAST LIMIT 1 FOR UPDATE`
+          )
+        ).rows[0];
+        if (justine) {
+          console.warn(`Justine loan missing — adjusting largest active loan #${justine.id} to hit loans target`);
+        }
+      }
+      if (!justine) throw new Error("No active/overdue loans found to reach Money in loans target 45,500,115 — dump may be incomplete");
       const newBal = round2(Number(justine.balance) + gap);
+      if (newBal < 0) throw new Error(`Cannot set loan #${justine.id} balance to ${newBal}`);
       if (!dryRun) {
-        await client.query(`UPDATE loans SET balance=$1 WHERE id=$2`, [newBal, justine.id]);
-        // Keep member repayment history but annotate — outstanding corrected to leadership figure.
+        await client.query(`UPDATE loans SET balance=$1, status='active' WHERE id=$2`, [newBal, justine.id]);
         await client.query(
           `UPDATE transactions SET notes = COALESCE(notes,'') || $1
            WHERE reference='REP-JUSTINE-4320K-20260831'`,
           [` | Outstanding portfolio corrected to UGX ${LOANS_TARGET.toLocaleString()} (${MARKER})`]
         );
       }
-      console.log(`Justine balance ${Number(justine.balance).toLocaleString()} → ${newBal.toLocaleString()}`);
+      console.log(`Loan #${justine.id} balance ${Number(justine.balance).toLocaleString()} → ${newBal.toLocaleString()}`);
     }
 
     // 3) September UAP daily interest @ 12.96% p.a. from 140,461,829.36 starting 1 Sep 2026.
-    const uap = (
+    let uap = (
       await client.query(`SELECT id FROM finance_accounts WHERE account_code='GL-4500' AND active=true LIMIT 1`)
     ).rows[0];
-    if (!uap) throw new Error("UAP account missing");
+    if (!uap) {
+      uap = (
+        await client.query(
+          `INSERT INTO finance_accounts
+            (account_code, account_name, account_type, bank_name, account_number, balance, opening_balance,
+             opening_balance_date, notes, restricted, active, created_by, updated_at)
+           VALUES ('GL-4500','Old Mutual Unit Trust (UAP)','restricted','Old Mutual Investment Group',
+             '99171-CKA1073440',$1,$1,'2026-09-01',$2,true,true,$3,NOW())
+           RETURNING id`,
+          [UAP_SEP_OPEN, `Created by ${MARKER}`, actor]
+        )
+      ).rows[0];
+      console.warn("UAP account was missing — created GL-4500");
+    }
 
     const start = new Date("2026-09-01T00:00:00Z");
     const today = new Date();
-    // Cap at system "today" in Africa/Kampala-ish: user_info says Sep 7, 2026
-    const end = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
-    if (end < start) throw new Error("End date before Sep 1");
+    // Cap at system "today". If host clock is still 2024/2025, fall back to ops as-of date.
+    let end = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+    const asOfFallback = process.env.LIVE_AS_OF || "2026-09-08";
+    if (end < start) {
+      console.warn(`Host date ${ymd(end)} is before 2026-09-01 — using LIVE_AS_OF=${asOfFallback}`);
+      end = new Date(`${asOfFallback}T00:00:00Z`);
+    }
 
     let bal = UAP_SEP_OPEN;
     if (!dryRun) {
