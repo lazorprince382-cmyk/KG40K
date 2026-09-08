@@ -225,6 +225,22 @@ async function main() {
          WHERE reference IN ('FUND-OLD-MUTUAL-2025','FUND-UAP-UMBRELLA')`,
         [bal]
       );
+      const interestEarned = Number(
+        (
+          await client.query(`SELECT COALESCE(SUM(interest_amount),0)::float AS total FROM unit_trust_movements`)
+        ).rows[0].total || 0
+      );
+      await client.query(
+        `UPDATE investment_projects
+         SET current_value=$1,
+             expected_return=$2,
+             performance_status=CASE WHEN $1 >= COALESCE(raised_amount,150000000) THEN 'profitable' ELSE 'watch' END
+         WHERE reference='INV-FUND-OM-2025'
+            OR name ILIKE '%Old Mutual Unit Trust%'
+            OR name ILIKE '%Unit Trust%UAP%'`,
+        [bal, interestEarned]
+      );
+      console.log(`Investment project INV-FUND-OM-2025 current_value → ${bal.toLocaleString()} (interest ${interestEarned.toLocaleString()})`);
     }
 
     const loansAfter = Number(

@@ -57,7 +57,7 @@ const rolePages = {
     "credits-charges","credits-reports","credits-analytics","credits-documents","credits-notifications","messages","settings"],
   "Legal Officer": ["dashboard","settings"],
   "Welfare Officer": ["dashboard","settings"],
-  "Executive Officer": ["dashboard","messages","members","departments","users","executive-finance","executive-credits","executive-investments","executive-welfare","executive-legal","executive-audit","executive-supervisory","executive-approvals","executive-meetings","executive-projects","executive-reports","executive-analytics","notifications","executive-documents","settings"],
+  "Executive Officer": ["dashboard","messages","members","departments","users","executive-finance","executive-credits","executive-investments","executive-welfare","executive-legal","executive-audit","executive-supervisory","executive-approvals","executive-meetings","executive-reports","executive-analytics","notifications","executive-documents","settings"],
   "Supervisory Officer": ["dashboard","settings"]
 };const pageMeta = {
   dashboard: ["Organization overview", "Dashboard"], departments: ["Organization structure", "Departmental dashboards"], messages: ["Communication", "Messages"], users: ["System accounts", "System accounts"], members: ["People", "Members"], savings: ["Credits", "Savings"],
@@ -755,7 +755,7 @@ function executiveSidebar() {
     "executive-meetings":"clock","executive-projects":"building","executive-reports":"reports","executive-analytics":"reports",
     notifications:"bell","executive-documents":"file",users:"lock"};
   const pending=state.executive?.stats?.pendingApprovals||((state.executive?.approvals||[]).length+((state.executive?.documents||[]).filter(d=>d.status==="pending_executive").length));
-  const sidebarPages=new Set(["dashboard","messages","members","departments","users","executive-approvals","executive-meetings","executive-projects","executive-reports","executive-analytics","notifications","executive-documents","settings"]);
+  const sidebarPages=new Set(["dashboard","messages","members","departments","users","executive-approvals","executive-meetings","executive-reports","executive-analytics","notifications","executive-documents","settings"]);
   const alertFor=page=>page==="executive-approvals"&&pending||page==="messages"&&state.unreadMessages||page==="notifications"&&(state.notifications||[]).some(n=>!n.readAt);
   return `<aside class="sidebar executive-sidebar" id="sidebar">
     <div class="executive-brand"><div class="executive-crest">${icons.shield}</div><div><strong>KASANGATI G40<br>KWAGALANA</strong><span>Executive Department</span></div></div>
@@ -878,8 +878,8 @@ function headActions() {
     if(state.page==="finance-expenses") return `<div class="head-actions"><button class="button primary" data-finance-modal="expense">${icons.plus}New expense request</button></div>`;
     if(state.page==="finance-invoices") return `<div class="head-actions"><button class="button primary" data-finance-modal="invoice">${icons.plus}Record invoice</button></div>`;
     if(state.page==="finance-budgets") return `<div class="head-actions"><button class="button primary" data-finance-modal="budget">${icons.plus}Create or update budget</button></div>`;
-    if(state.page==="finance-bank") return `<div class="head-actions"><button class="button primary" data-finance-modal="transfer-uap">${icons.arrowUp||icons.plus}Transfer to UAP</button><button class="button secondary" data-finance-modal="account">${icons.plus}Add cash account</button></div>`;
-    if(state.page==="finance-unit-trust") return `<div class="head-actions"><button class="button primary" data-finance-modal="transfer-uap">${icons.arrowUp||icons.plus}Transfer to UAP</button></div>`;
+    if(state.page==="finance-bank") return `<div class="head-actions"><button class="button primary" data-finance-modal="transfer-uap">${icons.arrowUp||icons.plus}Transfer to UAP</button><button class="button secondary" data-finance-modal="withdraw-uap">${icons.withdraw}Withdraw from UAP</button><button class="button secondary" data-finance-modal="account">${icons.plus}Add cash account</button></div>`;
+    if(state.page==="finance-unit-trust") return `<div class="head-actions"><button class="button primary" data-finance-modal="transfer-uap">${icons.arrowUp||icons.plus}Transfer to UAP</button><button class="button secondary" data-finance-modal="withdraw-uap">${icons.withdraw}Withdraw from UAP</button></div>`;
     if(state.page==="finance-assets") return `<div class="head-actions"><button class="button primary" data-finance-modal="asset">${icons.plus}Register asset</button></div>`;
     if(state.page==="finance-procurement") return `<div class="head-actions"><button class="button primary" data-finance-modal="procurement">${icons.plus}Procurement request</button></div>`;
     if(state.page==="finance-reports") return `<div class="head-actions"><button class="button primary" data-finance-report="Financial Statement">${icons.download}Financial statement</button></div>`;
@@ -1042,14 +1042,13 @@ function executiveDashboardView() {
     ["Total Members",s.totalMembers,"members","members","Verified membership"],
     ["Active Members",s.activeMembers,"members","members","Currently active"],
     ["Pending Approvals",s.pendingApprovals,"approvals","executive-approvals","Needs authority"],
-    ["At UAP account",money(uap),"building","executive-finance","Old Mutual unit trust"],
+    ["UAP account",money(uap),"building","executive-finance","Old Mutual unit trust"],
     ["Centenary bank account",money(bank),"wallet","executive-finance","Company bank live balance"],
     ["Money in loans",money(loansOut),"loans","executive-credits","Outstanding loan principal"],
     ["Total Company Funds",money(company),"reports","executive-finance","UAP + Centenary + loans"],
-    ["Welfare Fund Balance",money(s.welfareFundBalance),"users","executive-welfare","Available fund"],
     ["Welfare since June 2024",money(e.welfare?.collectedSince||e.welfareStanding?.collectedSince||0),"receipt","executive-welfare",e.welfare?.sinceLabel?`Collected since ${e.welfare.sinceLabel}`:"Also inside personal savings"],
-    ["Income this month",money(s.organizationIncome),"arrowDown","executive-finance","Live operational receipts"],
-    ["Expenditure this month",money(s.organizationExpenditure),"arrowUp","executive-finance","Live operational payments"],
+    ["Income this month",money(s.organizationIncomeMonth??s.organizationIncome),"arrowDown","executive-finance","Org receipts — excludes member savings"],
+    ["Expenditure this month",money(s.organizationExpenditureMonth??s.organizationExpenditure),"arrowUp","executive-finance","Live operational payments"],
     ["Total SACCO Savings",money(s.totalSavings),"savings","executive-credits","Member savings"],
     ["Active Investments",s.activeInvestments,"reports","executive-investments","Running projects"],
     ["Legal Cases",s.legalCases,"file","executive-legal","Open matters"],
@@ -1074,7 +1073,7 @@ function executiveDashboardView() {
         ["Projects running",e.investment.running],["Profitable projects",e.investment.profitable],["Projects losing money",e.investment.losing],
         ["Expected returns",money(e.investment.expected_return)],["Investment growth",`${e.investment.growth}%`]])}
       ${executiveHealthCard("Welfare","executive-welfare","users",[
-        ["Fund balance",money(e.welfare.fundBalance)],["Since June 2024",money(e.welfare.collectedSince||0)],
+        ["Since June 2024",money(e.welfare.collectedSince||0)],
         ["Members contributing",e.welfare.membersContributing||0],["New members tracked",(e.welfare.newMembers||[]).length],
         ["Monthly contributions",money(e.welfare.monthlyContributions)]])}
       ${executiveHealthCard("Audit","executive-audit","audit",[
@@ -1133,7 +1132,7 @@ function executiveFinancialWidget(e) {
   const loans=Number(org.loansOutstanding||e.stats?.outstandingLoans||0);
   const company=Number(org.companyFunds||e.stats?.companyFunds||(uap+bank+loans));
   return `<section class="exec-panel exec-financial"><div class="exec-panel-head"><div><h3>Company funds (live)</h3><p>Same live positions as the Finance dashboard</p></div><button data-executive-page="executive-finance">Full summary ></button></div>
-    <div class="exec-finance-summary"><span>At UAP<strong>${money(uap)}</strong></span><span>Centenary bank<strong>${money(bank)}</strong></span><span>Money in loans<strong>${money(loans)}</strong></span><span>Total company funds<strong>${money(company)}</strong></span></div>
+    <div class="exec-finance-summary"><span>UAP account<strong>${money(uap)}</strong></span><span>Centenary bank<strong>${money(bank)}</strong></span><span>Money in loans<strong>${money(loans)}</strong></span><span>Total company funds<strong>${money(company)}</strong></span></div>
     <div class="exec-bar-chart">${months.length?months.map(m=>`<div><div class="exec-bars"><i style="height:${m.income/max*100}%"></i><i class="expense" style="height:${m.expenses/max*100}%"></i></div><span>${m.month}</span></div>`).join(""):`<div class="exec-empty">No monthly history yet.</div>`}</div><div class="exec-legend"><span><i></i>Income</span><span><i class="expense"></i>Expenses</span></div></section>`;
 }
 function executiveHealthCard(title,target,icon,rows) {
@@ -1159,7 +1158,7 @@ function executiveDepartmentsView() {
     ["finance","Finance Department","Budgets and finances","Income this month",money(e.stats.organizationIncome),"Expenses",money(e.stats.organizationExpenditure),e.performance.finance,"executive-finance","green","finance"],
     ["credits","Credits Department (SACCO)","Savings, loans and credit","Total savings",money(e.stats.totalSavings),"Outstanding loans",money(e.stats.outstandingLoans),e.performance.credits,"executive-credits","blue","credits"],
     ["investment","Investment Department","Ventures and projects","Active projects",e.investment.running,"Expected returns",money(e.investment.expected_return),e.performance.investment,"executive-investments","violet","investment"],
-    ["welfare","Welfare Department","Member welfare support","Fund balance",money(e.welfare.fundBalance),"Pending requests",e.welfare.pending,e.performance.welfare,"executive-welfare","orange","welfare"],
+    ["welfare","Welfare Department","Member welfare support","Since June 2024",money(e.welfare.collectedSince||e.welfareStanding?.collectedSince||0),"Pending requests",e.welfare.pending,e.performance.welfare,"executive-welfare","orange","welfare"],
     ["legal","Legal Department","Contracts and compliance","Active cases",e.legal.open_cases,"Contracts under review",e.legal.contracts,e.performance.legal,"executive-legal","red","legal"],
     ["audit","Audit Department","Financial integrity","Open audit issues",e.audit.open,"Compliance score",`${Math.round(Number(e.audit.compliance)||0)}%`,e.performance.audit,"executive-audit","teal","audit"],
     ["supervisory","Supervisory Department","Oversight and accountability","Pending follow-ups",e.supervisory.followups,"Department compliance",`${e.performance.supervisory}%`,e.performance.supervisory,"executive-supervisory","amber","supervisory"]
@@ -1186,12 +1185,20 @@ function executiveModuleView(module) {
   }
   if(module==="investments") return executiveProjectsView();
   if(module==="welfare") {
-    const standing=e.welfareStanding||{};
-    const newRows=(standing.newMembers||e.welfare.newMembers||[]).map(x=>[x.member,x.memberNumber||"",x.joinedAt?new Date(x.joinedAt).toLocaleDateString("en-GB"):"—",money(x.collected),money(x.savingsBalance||0)]);
-    return `<div class="exec-module-metrics">${executiveModuleMetric("Fund balance",money(e.welfare.fundBalance),"green")}${executiveModuleMetric(`Since ${standing.sinceLabel||"June 2024"}`,money(standing.collectedSince||e.welfare.collectedSince||0),"violet")}${executiveModuleMetric("Pending requests",e.welfare.pending,"orange")}${executiveModuleMetric("Monthly contributions",money(e.welfare.monthlyContributions),"blue")}</div>
-      <p class="exec-report-preview-note">${escapeHtml(standing.note||e.welfare.note||"Welfare share is part of personal savings and tracked in the welfare register.")}</p>
-      ${executiveRecordTable("New / recent members — welfare vs personal savings",["Member","Number","Joined","Welfare collected","Personal savings"],newRows)}
-      ${executiveRecordTable("Welfare request summary",["Reference","Member","Request","Amount","Status"],e.welfareRequests.map(x=>[x.reference,x.member,x.requestType,money(x.amount),status(x.status)]))}`;
+    const standing=e.welfareStanding||e.welfare||{};
+    const pool=standing.standingMembers||standing.byMember||e.welfare?.standingMembers||e.welfare?.byMember||[];
+    const standingList=pool.filter(x=>!x.excluded&&!x.isVicent&&Number(x.collected)>0);
+    const sinceTotal=Number(standing.collectedSince||e.welfare?.collectedSince||0)||standingList.reduce((sum,x)=>sum+Number(x.collected||0),0);
+    const newPool=standing.newMembers||e.welfare?.newMembers||[];
+    const newRows=newPool.map(x=>[x.member,x.memberNumber||"",x.joinedAt?new Date(x.joinedAt).toLocaleDateString("en-GB"):"—",money(x.collected),money(x.savingsBalance||0),escapeHtml(x.sinceLabel||(x.isVicent?"July 2026":"June 2024"))]);
+    const standingRows=standingList.slice(0,20).map(x=>[x.member,x.memberNumber||"",money(x.collected),escapeHtml(x.sinceLabel||"June 2024")]);
+    const note=standing.note||e.welfare?.note||"Most members hold UGX 650,000 welfare since June 2024 inside personal savings. Vicent holds UGX 50,000 since July 2026. Oketcho and Baraza are excluded from this standing.";
+    const open=Boolean(state.welfareStandingOpen?.executive);
+    const body=`<div class="exec-module-metrics">${executiveModuleMetric("Since June 2024",money(sinceTotal),"violet")}${executiveModuleMetric("Members on standing",standing.membersContributing||standingList.length,"blue")}${executiveModuleMetric("Pending requests",e.welfare?.pending||0,"orange")}${executiveModuleMetric("Monthly contributions",money(e.welfare?.monthlyContributions||0),"blue")}</div>
+      ${executiveRecordTable("Welfare standing since June 2024 (15 members)",["Member","Number","Welfare","Since"],standingRows)}
+      ${executiveRecordTable("New / recent members — welfare vs personal savings",["Member","Number","Joined","Welfare collected","Personal savings","Since"],newRows)}
+      ${executiveRecordTable("Welfare request summary",["Reference","Member","Request","Amount","Status"],(e.welfareRequests||[]).map(x=>[x.reference,x.member,x.requestType,money(x.amount),status(x.status)]))}`;
+    return welfareStandingReveal("executive","Welfare standing",note,body,open);
   }
   if(["legal","audit","supervisory"].includes(module)) {
     const rows=e.governance.filter(x=>module==="legal"?x.departmentCode==="legal":x.departmentCode==="supervisory"&&(module==="audit"?x.recordType==="audit":true));
@@ -1208,18 +1215,18 @@ function executiveFinanceSummary(e) {
   const loans=Number(org.loansOutstanding||e.stats?.outstandingLoans||0);
   const company=Number(org.companyFunds||e.stats?.companyFunds||(uap+bank+loans));
   return `<div class="exec-module-metrics executive-finance-metrics">
-    ${executiveModuleMetric("At UAP account",money(uap),"violet")}
+    ${executiveModuleMetric("UAP account",money(uap),"violet")}
     ${executiveModuleMetric("Centenary bank account",money(bank),"green")}
     ${executiveModuleMetric("Money in loans",money(loans),"blue")}
     ${executiveModuleMetric("Total Company Funds",money(company),"orange")}
-    ${executiveModuleMetric("Income (live ops)",money(e.stats.organizationIncome),"green")}
-    ${executiveModuleMetric("Expenditure (live ops)",money(e.stats.organizationExpenditure),"red")}
-    ${executiveModuleMetric("Net ops balance",money(e.stats.netBalance),"blue")}
+    ${executiveModuleMetric("Income this month",money(e.stats.organizationIncomeMonth??e.stats.organizationIncome),"green")}
+    ${executiveModuleMetric("Expenditure this month",money(e.stats.organizationExpenditureMonth??e.stats.organizationExpenditure),"red")}
+    ${executiveModuleMetric("Centenary bank balance",money(bank),"blue")}
     ${executiveModuleMetric("Pending payments",money(f.pending_payments||0),"red")}
   </div>
   <section class="exec-panel executive-account-summary"><div class="exec-panel-head"><div><h3>Bank, Cash &amp; Fund Accounts</h3><p>Read-only Finance summary - same live balances as the Finance dashboard</p></div><span class="executive-readonly-badge">${icons.shield} Read only</span></div>
-    <div class="executive-account-overview"><span>Registered accounts<strong>${accounts.length}</strong></span><span>At UAP<strong>${money(uap)}</strong></span><span>Centenary bank<strong>${money(bank)}</strong></span><span>Money in loans<strong>${money(loans)}</strong></span></div>
-    <div class="executive-account-grid">${accounts.length?accounts.map(account=>`<article><div class="executive-account-icon">${account.accountType==="bank"||account.accountCode==="GL-4500"?icons.building:icons.wallet}</div><div class="executive-account-title"><span>${escapeHtml(account.accountCode==="GL-4104"?"Centenary bank":account.accountCode==="GL-4500"?"Unit Trust (UAP)":String(account.accountType||"account").replaceAll("_"," "))}</span><h4>${escapeHtml(account.accountCode==="GL-4104"?"Centenary bank account":account.accountCode==="GL-4500"?"At UAP account":account.accountName)}</h4><p>${escapeHtml(account.bankName||"Organization funds")} ${account.maskedAccountNumber?`· ${escapeHtml(account.maskedAccountNumber)}`:""}</p></div><strong>${money(account.balance)}</strong><div class="executive-account-meta"><span class="status ${account.restricted?"pending":"active"}">${account.restricted?"Restricted":"Available"}</span><small>${account.lastReconciledAt?`Reconciled ${new Date(account.lastReconciledAt).toLocaleDateString()}`:"Not yet reconciled"}</small></div></article>`).join(""):`<div class="exec-empty">Finance has not registered any bank, cash or fund accounts yet.</div>`}</div>
+    <div class="executive-account-overview"><span>Registered accounts<strong>${accounts.length}</strong></span><span>UAP account<strong>${money(uap)}</strong></span><span>Centenary bank<strong>${money(bank)}</strong></span><span>Money in loans<strong>${money(loans)}</strong></span></div>
+    <div class="executive-account-grid">${accounts.length?accounts.map(account=>`<article><div class="executive-account-icon">${account.accountType==="bank"||account.accountCode==="GL-4500"?icons.building:icons.wallet}</div><div class="executive-account-title"><span>${escapeHtml(account.accountCode==="GL-4104"?"Centenary bank":account.accountCode==="GL-4500"?"Unit Trust (UAP)":String(account.accountType||"account").replaceAll("_"," "))}</span><h4>${escapeHtml(account.accountCode==="GL-4104"?"Centenary bank account":account.accountCode==="GL-4500"?"UAP account":account.accountName)}</h4><p>${escapeHtml(account.bankName||"Organization funds")} ${account.maskedAccountNumber?`· ${escapeHtml(account.maskedAccountNumber)}`:""}</p></div><strong>${money(account.balance)}</strong><div class="executive-account-meta"><span class="status ${account.restricted?"pending":"active"}">${account.restricted?"Restricted":"Available"}</span><small>${account.lastReconciledAt?`Reconciled ${new Date(account.lastReconciledAt).toLocaleDateString()}`:"Not yet reconciled"}</small></div></article>`).join(""):`<div class="exec-empty">Finance has not registered any bank, cash or fund accounts yet.</div>`}</div>
   </section>${executiveFinancialWidget(e)}${executiveRecordTable("Major finance entries",["Reference","Category","Description","Amount","Status"],e.financeEntries.filter(x=>!/management accounts import/i.test(x.paymentMethod||"")).map(x=>[x.reference,x.category,x.description,money(x.amount),status(x.status)]))}`;
 }
 function executiveModuleMetric(label,value,color) { return `<div class="exec-module-metric ${color}"><small>${label}</small><strong>${value}</strong><span>Executive summary</span></div>`; }
@@ -1255,16 +1262,24 @@ function executiveMeetingsView() {
 function executiveProjectsView() {
   const e=state.executive;
   const projects=e.investmentProjects||[],atRisk=projects.filter(p=>["watch","losing","underperforming"].includes(p.performanceStatus)||p.status==="suspended").length;
-  return `<div class="exec-module-metrics">${executiveModuleMetric("Active projects",projects.filter(p=>["active","running","construction"].includes(p.status)).length,"blue")}${executiveModuleMetric("Current value",money(e.investment.current_value),"green")}${executiveModuleMetric("Expected returns",money(e.investment.expected_return),"violet")}${executiveModuleMetric("Need attention",atRisk,"orange")}</div>
-    <section class="exec-panel executive-project-note"><div>${icons.shield}<div><strong>Executive project governance</strong><span>Monitor results, review evidence, record strategic comments, escalate concerns, and control suspension or closure. Operational editing remains with Investment.</span></div></div></section>
-    <div class="exec-project-grid executive-governance-projects">${projects.map(p=>{const utilization=p.targetAmount?Math.round(p.expenses/p.targetAmount*100):0,profit=Number(p.profit||0);return `<article class="exec-project-card"><div><span>${p.reference} - ${escapeHtml(p.category||"Investment")}</span>${status(p.status)}</div><h3>${escapeHtml(p.name)}</h3><p>${escapeHtml(p.description)}</p><div class="executive-project-meta"><span>Manager<strong>${escapeHtml(p.manager||"Not assigned")}</strong></span><span>Location<strong>${escapeHtml(p.location||"Not recorded")}</strong></span><span>Completion<strong>${Number(p.progress||0)}%</strong></span><span>Performance<strong>${escapeHtml(String(p.performanceStatus||"unrated").replaceAll("_"," "))}</strong></span></div>${progress("Project completion",`${p.progress||0}%`,p.progress||0,p.progress<50?"amber":"lime")}${progress("Budget spent",`${utilization}%`,Math.min(100,utilization),utilization>=80?"amber":"blue")}<div><span>Current value<strong>${money(p.currentValue)}</strong></span><span>Net position<strong class="${profit>=0?"positive":"negative"}">${money(profit)}</strong></span></div><small class="executive-project-proposal">${p.proposalReference?`Approved proposal ${escapeHtml(p.proposalReference)}`:"Legacy project - no linked proposal"}</small><button data-executive-project="${p.id}">${icons.eye} Open governance summary</button></article>`}).join("")||`<section class="exec-panel exec-empty">No investment projects have been registered.</section>`}</div>`;
+  return `<div class="exec-module-metrics">${executiveModuleMetric("Active projects",projects.filter(p=>["active","running","construction"].includes(p.status)).length,"blue")}${executiveModuleMetric("Current value (live UAP)",money(e.investment.current_value),"green")}${executiveModuleMetric("Interest earned",money(e.investment.expected_return),"violet")}${executiveModuleMetric("Need attention",atRisk,"orange")}</div>
+    <section class="exec-panel executive-project-note"><div>${icons.shield}<div><strong>Executive project governance</strong><span>Monitor results, review evidence, record strategic comments, escalate concerns, and control suspension or closure. Operational editing remains with Investment. Unit Trust figures follow live UAP balance and unit-trust movements.</span></div></div></section>
+    <div class="exec-project-grid executive-governance-projects">${projects.map(p=>{
+      const isUt=Boolean(p.isUnitTrust)||/unit trust|old mutual|INV-FUND-OM/i.test(`${p.reference||""} ${p.name||""} ${p.category||""}`);
+      const invested=Number(p.raisedAmount||p.targetAmount||0);
+      const profit=Number(isUt?(p.expectedReturn??p.profit??0):(p.profit||0));
+      const utilization=isUt?(invested?100:0):(p.targetAmount?Math.round(Number(p.expenses||0)/p.targetAmount*100):0);
+      const spendLabel=isUt?"Capital in UAP":"Budget spent";
+      return `<article class="exec-project-card"><div><span>${escapeHtml(p.reference)} - ${escapeHtml(p.category||"Investment")}</span>${status(p.status)}</div><h3>${escapeHtml(p.name)}</h3><p>${escapeHtml(p.description)}</p><div class="executive-project-meta"><span>Manager<strong>${escapeHtml(p.manager||"Not assigned")}</strong></span><span>Location<strong>${escapeHtml(p.location||"Not recorded")}</strong></span><span>Completion<strong>${Number(p.progress||0)}%</strong></span><span>Performance<strong>${escapeHtml(String(p.performanceStatus||"unrated").replaceAll("_"," "))}</strong></span></div>${progress("Project completion",`${p.progress||0}%`,p.progress||0,p.progress<50?"amber":"lime")}${progress(spendLabel,`${utilization}%`,Math.min(100,utilization),utilization>=80?"amber":"blue")}<div class="exec-project-values"><span>Current value<strong>${money(p.currentValue)}</strong></span><span>${isUt?"Interest / net":"Net position"}<strong class="${profit>=0?"positive":"negative"}">${money(profit)}</strong></span></div><small class="executive-project-proposal">${p.proposalReference?`Approved proposal ${escapeHtml(p.proposalReference)}`:"Legacy project - no linked proposal"}</small><button data-executive-project="${p.id}">${icons.eye} Open governance summary</button></article>`;
+    }).join("")||`<section class="exec-panel exec-empty">No investment projects have been registered.</section>`}</div>`;
 }
 async function openExecutiveProject(id) {
   try{
     const data=await api(`/api/executive/projects/${id}`),p=data.project,profit=Number(p.profit||0);
-    closeModal();document.body.insertAdjacentHTML("beforeend",`<div class="modal-backdrop" id="modal-backdrop"><div class="modal executive-project-modal"><div class="modal-head"><div><h2>${escapeHtml(p.name)}</h2><p>${p.reference} - Executive governance summary</p></div><button class="modal-close" data-close>${icons.x}</button></div><div class="executive-project-detail">
-      ${p.photoUrl?`<img class="executive-project-hero" src="${p.photoUrl}" alt="${escapeHtml(p.name)}">`:""}<div class="executive-project-kpis"><span>Budget<strong>${money(p.budget)}</strong></span><span>Spent<strong>${money(p.expenses)}</strong></span><span>Revenue<strong>${money(p.revenue)}</strong></span><span>Net position<strong class="${profit>=0?"positive":"negative"}">${money(profit)}</strong></span><span>ROI<strong>${p.roi}%</strong></span><span>Progress<strong>${p.progress}%</strong></span></div>
-      <div class="executive-project-columns"><section><h3>Project profile</h3><p>${escapeHtml(p.description)}</p><dl><dt>Status</dt><dd>${status(p.status)}</dd><dt>Manager</dt><dd>${escapeHtml(p.manager||"Not assigned")}</dd><dt>Location</dt><dd>${escapeHtml(p.location||"Not recorded")}</dd><dt>Period</dt><dd>${p.startsOn?new Date(p.startsOn).toLocaleDateString():"Not set"} - ${p.endsOn?new Date(p.endsOn).toLocaleDateString():"Not set"}</dd><dt>Funding</dt><dd>${escapeHtml(p.fundingSource||"Not recorded")}</dd><dt>Budget utilization</dt><dd>${p.budgetUtilization}%</dd></dl></section><section><h3>Approval and risk</h3><dl><dt>Proposal</dt><dd>${escapeHtml(p.proposalReference||"Legacy project")}</dd><dt>Approved by</dt><dd>${escapeHtml(p.proposalApprovedBy||"Historical record")}</dd><dt>Approved on</dt><dd>${p.proposalApprovedAt?new Date(p.proposalApprovedAt).toLocaleString():"Not recorded"}</dd><dt>Risk assessment</dt><dd>${escapeHtml(p.riskAssessment||"Not recorded")}</dd><dt>Finance analysis</dt><dd>${escapeHtml(p.financeAnalysis||"Not recorded")}</dd><dt>Finance recommendation</dt><dd>${escapeHtml(p.financeRecommendation||"Not recorded")}</dd></dl>${p.supportingDocument?`<a class="button secondary" href="${p.supportingDocument}" target="_blank">${icons.file} View supporting evidence</a>`:"<p>No project evidence uploaded.</p>"}</section></div>
+    const isUt=Boolean(p.isUnitTrust)||/unit trust|old mutual|INV-FUND-OM/i.test(`${p.reference||""} ${p.name||""}`);
+    closeModal();document.body.insertAdjacentHTML("beforeend",`<div class="modal-backdrop" id="modal-backdrop"><div class="modal executive-project-modal"><div class="modal-head"><div><h2>${escapeHtml(p.name)}</h2><p>${escapeHtml(p.reference)} - Executive governance summary${isUt?" · live Unit Trust":""}</p></div><button class="modal-close" data-close>${icons.x}</button></div><div class="executive-project-detail">
+      ${p.photoUrl?`<img class="executive-project-hero" src="${p.photoUrl}" alt="${escapeHtml(p.name)}">`:""}<div class="executive-project-kpis">${isUt?`<span>Live UAP value<strong>${money(p.currentValue)}</strong></span><span>Interest earned<strong class="positive">${money(p.expectedReturn||profit)}</strong></span><span>Capital / budget<strong>${money(p.budget)}</strong></span><span>Net position<strong class="${profit>=0?"positive":"negative"}">${money(profit)}</strong></span><span>ROI<strong>${p.roi}%</strong></span><span>Progress<strong>${p.progress}%</strong></span>`:`<span>Budget<strong>${money(p.budget)}</strong></span><span>Spent<strong>${money(p.expenses)}</strong></span><span>Revenue<strong>${money(p.revenue)}</strong></span><span>Net position<strong class="${profit>=0?"positive":"negative"}">${money(profit)}</strong></span><span>ROI<strong>${p.roi}%</strong></span><span>Progress<strong>${p.progress}%</strong></span>`}</div>
+      <div class="executive-project-columns"><section><h3>Project profile</h3><p>${escapeHtml(p.description)}</p><dl><dt>Status</dt><dd>${status(p.status)}</dd><dt>Manager</dt><dd>${escapeHtml(p.manager||"Not assigned")}</dd><dt>Location</dt><dd>${escapeHtml(p.location||"Not recorded")}</dd><dt>Period</dt><dd>${p.startsOn?new Date(p.startsOn).toLocaleDateString():"Not set"} - ${p.endsOn?new Date(p.endsOn).toLocaleDateString():"Not set"}</dd><dt>Funding</dt><dd>${escapeHtml(p.fundingSource||"Not recorded")}</dd><dt>${isUt?"Capital deployed":"Budget utilization"}</dt><dd>${p.budgetUtilization}%</dd></dl></section><section><h3>Approval and risk</h3><dl><dt>Proposal</dt><dd>${escapeHtml(p.proposalReference||"Legacy project")}</dd><dt>Approved by</dt><dd>${escapeHtml(p.proposalApprovedBy||"Historical record")}</dd><dt>Approved on</dt><dd>${p.proposalApprovedAt?new Date(p.proposalApprovedAt).toLocaleString():"Not recorded"}</dd><dt>Risk assessment</dt><dd>${escapeHtml(p.riskAssessment||"Not recorded")}</dd><dt>Finance analysis</dt><dd>${escapeHtml(p.financeAnalysis||"Not recorded")}</dd><dt>Finance recommendation</dt><dd>${escapeHtml(p.financeRecommendation||"Not recorded")}</dd></dl>${p.supportingDocument?`<a class="button secondary" href="${p.supportingDocument}" target="_blank">${icons.file} View supporting evidence</a>`:"<p>No project evidence uploaded.</p>"}</section></div>
       <section class="executive-project-related"><h3>Related records</h3><div><span>Transactions<strong>${data.transactions.length}</strong></span><span>Contracts<strong>${data.contracts.length}</strong></span><span>Assets<strong>${data.assets.length}</strong></span></div></section>
       <section><h3>Executive oversight history</h3><div class="executive-oversight-list">${data.oversight.map(o=>`<article><div>${status(o.actionType)}</div><strong>${escapeHtml(o.createdBy)}</strong><span>${new Date(o.createdAt).toLocaleString()}${o.targetDepartment?` - ${escapeHtml(o.targetDepartment)}`:""}</span><p>${escapeHtml(o.comment)}</p></article>`).join("")||`<div class="exec-empty">No Executive oversight actions recorded yet.</div>`}</div></section>
       <div class="executive-project-actions"><button data-project-action="comment">Add strategic comment</button><button data-project-action="escalate">Escalate concern</button>${p.status==="suspended"?`<button class="approve" data-project-action="reactivate">Reactivate</button>`:!(["completed"].includes(p.status))?`<button class="more" data-project-action="suspend">Suspend</button>`:""}${p.status!=="completed"?`<button class="reject" data-project-action="close">Authorize closure</button>`:""}</div></div></div></div>`);
@@ -1315,11 +1330,11 @@ function financeDashboardView() {
   // Operational cards only — live UAP/bank/loans live in the positions strip above (not report links).
   const cards=historical?[
     ["Cash & bank at period end",money(s.currentBankBalance),"wallet","finance-bank",`Statement ${escapeHtml(f.selectedFiscalLabel||("FY "+f.selectedFiscalYear))}`],
-    ["At UAP account",money(s.uapBalance||0),"building","finance-unit-trust","Old Mutual unit trust"],
+    ["UAP account",money(s.uapBalance||0),"building","finance-unit-trust","Old Mutual unit trust"],
     ["Total assets",money(s.totalAssets),"building","finance-assets","Statement assets"],
     ["Total liabilities",money(s.totalLiabilities),"file","finance-invoices","Statement liabilities"]
   ]:[
-    ["Income this month",money(s.monthlyIncome),"arrowDown","finance-income","Live organization receipts"],
+    ["Income this month",money(s.monthlyIncome),"arrowDown","finance-income","Organization receipts (excl. member savings)"],
     ["Expenses this month",money(s.monthlyExpenses),"arrowUp","finance-expenses","Live organization payments"],
     ["Pending payment requests",String(s.pendingPaymentRequests||0),"approvals","finance-approvals","Awaiting Finance / Executive"],
     ["Centenary bank account",money(s.currentBankBalance),"wallet","finance-bank","Company bank live balance"]
@@ -1335,17 +1350,48 @@ function financeDashboardView() {
     <div class="finance-stat-grid finance-current-grid">${cards.map((card,index)=>financeStatCard(...card,index)).join("")}</div>
     ${financePendingEntriesWidget(f)}
     ${financeSubscriptionProgressWidget(f)}
-    ${financeWelfareProgressWidget(f)}
+    ${financeWelfareStandingSection(f)}
     <div class="finance-dashboard-grid">
       ${financeRevenueGraph(f)}
-      ${financeBudgetWidget(f)}
       ${financeApprovalWidget(f)}
       ${financeCashPositionWidget(f)}
       ${financeIncomeWidget(f)}
       ${financeExpenseWidget(f)}
     </div>
-    <div class="finance-lower-grid">${financeRecentTransactionsWidget(f)}${financeDepartmentSpendingWidget(f)}${financeNotificationsWidget(f)}</div>
+    <div class="finance-lower-grid">${financeRecentTransactionsWidget(f)}${financeNotificationsWidget(f)}</div>
     ${financeQuickPanel()}`;
+}
+function financeWelfareStandingSection(f){
+  const standing=f.welfareStanding||{};
+  const pool=standing.standingMembers||standing.byMember||[];
+  const standingList=pool.filter(x=>!x.excluded&&!x.isVicent&&Number(x.collected)>0);
+  const sinceTotal=Number(standing.collectedSince||0)||standingList.reduce((sum,x)=>sum+Number(x.collected||0),0);
+  const newPool=standing.newMembers||[];
+  const standingRows=standingList.slice(0,20).map(x=>[x.member,x.memberNumber||"",money(x.collected),escapeHtml(x.sinceLabel||"June 2024")]);
+  const newRows=newPool.map(x=>[x.member,x.memberNumber||"",x.joinedAt?new Date(x.joinedAt).toLocaleDateString("en-GB"):"—",money(x.collected),money(x.savingsBalance||0),escapeHtml(x.sinceLabel||"July 2026")]);
+  const pending=Number(f.welfareProgress?.pendingRequests??0);
+  const monthly=Number(f.welfareProgress?.collected??0);
+  const open=Boolean(state.welfareStandingOpen?.finance);
+  const note=standing.note||"Most members hold UGX 650,000 welfare since June 2024 inside personal savings. Vicent holds UGX 50,000 since July 2026. Oketcho and Baraza are excluded from this standing.";
+  const body=`<div class="exec-module-metrics" style="margin-bottom:14px">
+      ${executiveModuleMetric("Since June 2024",money(sinceTotal),"violet")}
+      ${executiveModuleMetric("Members on standing",standing.membersContributing||standingList.length,"blue")}
+      ${executiveModuleMetric("Pending requests",pending,"orange")}
+      ${executiveModuleMetric("Monthly contributions",money(monthly),"blue")}
+    </div>
+    ${executiveRecordTable("Welfare standing since June 2024 (15 members)",["Member","Number","Welfare","Since"],standingRows)}
+    ${executiveRecordTable("New / recent members — welfare vs personal savings",["Member","Number","Joined","Welfare collected","Personal savings","Since"],newRows)}`;
+  return welfareStandingReveal("finance","Welfare standing",note,body,open);
+}
+function welfareStandingReveal(key,title,subtitle,body,open){
+  return `<section class="welfare-standing-reveal${open?" open":""}">
+    <button type="button" class="welfare-standing-toggle${open?" open":""}" data-welfare-standing-toggle="${escapeHtml(key)}" aria-expanded="${open?"true":"false"}">
+      <span>${icons.shield||icons.users}</span>
+      <div><strong>${escapeHtml(title)}</strong><small>${escapeHtml(subtitle)}</small></div>
+      <em>${open?"Hide":"Show"}</em>
+    </button>
+    ${open?`<div class="welfare-standing-panel" data-welfare-standing-panel="${escapeHtml(key)}">${body}</div>`:""}
+  </section>`;
 }
 function financeHistoricalSnapshot(f) {
   // Live company positions — not imported FY draft statements.
@@ -1355,7 +1401,7 @@ function financeHistoricalSnapshot(f) {
   const loans=Number(s.loansOutstanding??org.loansOutstanding??0);
   const total=Number(s.companyFunds??org.companyFunds??(uap+bank+loans));
   const cards=[
-    ["At UAP account",uap,"building","finance-unit-trust","Old Mutual unit trust live balance"],
+    ["UAP account",uap,"building","finance-unit-trust","Old Mutual unit trust live balance"],
     ["Centenary bank account",bank,"wallet","finance-bank","Company Centenary account"],
     ["Money in loans",loans,"loans","finance-bank","Outstanding loan principal (company funds)"],
     ["Total Company Funds",total,"reports","finance-bank","UAP + Centenary + loans"]
@@ -1388,8 +1434,8 @@ function financeWelfareProgressWidget(f){
   const w=f.welfareProgress;if(!w)return "";
   const standing=f.welfareStanding||{};
   const percent=Number(w.percent||0);
-  const newRows=(standing.newMembers||[]).slice(0,6).map(m=>`<tr><td><strong>${escapeHtml(m.member)}</strong><small>${escapeHtml(m.memberNumber||"")}${m.isNewMember?" · new":""}</small></td><td>${m.joinedAt?new Date(m.joinedAt).toLocaleDateString("en-GB"):"—"}</td><td>${money(m.collected)}</td><td>${money(m.savingsBalance||0)}</td></tr>`).join("")
-    ||`<tr><td colspan="4"><div class="member-empty">No new-member welfare rows yet.</div></td></tr>`;
+  const newRows=(standing.newMembers||[]).slice(0,6).map(m=>`<tr><td><strong>${escapeHtml(m.member)}</strong><small>${escapeHtml(m.memberNumber||"")}${m.isNewMember?" · new":""}</small></td><td>${m.joinedAt?new Date(m.joinedAt).toLocaleDateString("en-GB"):"—"}</td><td>${money(m.collected)}</td><td>${money(m.savingsBalance||0)}</td><td>${escapeHtml(m.sinceLabel||"—")}</td></tr>`).join("")
+    ||`<tr><td colspan="5"><div class="member-empty">No new-member welfare rows yet.</div></td></tr>`;
   return `<section class="finance-panel finance-subscription-progress">
     <div class="finance-subscription-bar">
       <div class="finance-panel-head"><div><h3>Monthly welfare contributions</h3><p>${escapeHtml(w.periodLabel||"This month")} · ${money(w.perMember)} welfare share of ${money(w.monthlyCombined||425000)} member deposit</p></div><strong>${percent}%</strong></div>
@@ -1398,10 +1444,9 @@ function financeWelfareProgressWidget(f){
     </div>
   </section>
   <section class="finance-panel finance-welfare-standing">
-    <div class="finance-panel-head"><div><h3>Welfare savings since ${escapeHtml(standing.sinceLabel||"June 2024")}</h3><p>${escapeHtml(standing.note||"Welfare share stays inside personal savings and is also tracked in the welfare register.")}</p></div><strong>${money(standing.collectedSince||0)}</strong></div>
-    <div class="finance-subscription-meta" style="margin-bottom:12px"><span>${standing.membersContributing||0} members contributing</span><span>Fund position ${money(standing.closingBalance||0)}</span><span>${money(standing.monthlyShare||25000)} / month each</span></div>
-    <div class="table-scroll"><table class="finance-compact-table"><thead><tr><th>New / recent member</th><th>Joined</th><th>Welfare collected</th><th>Personal savings</th></tr></thead><tbody>${newRows}</tbody></table></div>
-    <p class="exec-report-preview-note" style="margin-top:10px">Click a member's personal savings on the member portal to see the full 425k deposit (welfare included).</p>
+    <div class="finance-panel-head"><div><h3>Welfare savings since June 2024</h3><p>${escapeHtml(standing.note||"15 members hold UGX 650,000 welfare since June 2024 inside personal savings. Vicent holds UGX 50,000 since July 2026.")}</p></div><strong>${money(standing.collectedSince||0)}</strong></div>
+    <div class="finance-subscription-meta" style="margin-bottom:12px"><span>${standing.membersContributing||0} members on standing</span><span>${money(standing.standardMemberTarget||650000)} each</span><span>Vicent since July 2026</span></div>
+    <div class="table-scroll"><table class="finance-compact-table"><thead><tr><th>New / recent member</th><th>Joined</th><th>Welfare collected</th><th>Personal savings</th><th>Since</th></tr></thead><tbody>${newRows}</tbody></table></div>
   </section>`;
 }
 function openFinanceSubscriptionMembers(){
@@ -1424,11 +1469,23 @@ async function reviewFinanceEntry(id,decision){
     toast(decision==="approve"?"Payment verified and posted to the selected account.":"Payment verification rejected.");
   }catch(error){toast(error.message);}
 }
+function financeMonthSortKey(row){
+  if(row.monthKey)return String(row.monthKey);
+  const map={Jan:"01",Feb:"02",Mar:"03",Apr:"04",May:"05",Jun:"06",Jul:"07",Aug:"08",Sep:"09",Oct:"10",Nov:"11",Dec:"12"};
+  const label=String(row.month||"").slice(0,3);
+  return map[label]||"99";
+}
+function financeShortText(value,limit=72){
+  const text=String(value||"").replace(/\s+/g," ").trim();
+  if(!text)return "—";
+  return text.length>limit?`${escapeHtml(text.slice(0,limit-1))}…`:`${escapeHtml(text)}`;
+}
 function financeRevenueGraph(f) {
-  const max=Math.max(...f.monthly.flatMap(row=>[row.income,row.expenses]),1);
+  const months=[...(f.monthly||[])].sort((a,b)=>financeMonthSortKey(a).localeCompare(financeMonthSortKey(b)));
+  const max=Math.max(...months.flatMap(row=>[Number(row.income||0),Number(row.expenses||0)]),1);
   return `<section class="finance-panel finance-revenue"><div class="finance-panel-head"><div><h3>Revenue vs Expenses</h3><p>Monthly income, expenses and net position</p></div><button data-finance-page="finance-analytics">View analytics &gt;</button></div>
     <div class="finance-summary-row"><span>Income<strong class="positive">${money(f.stats.monthlyIncome)}</strong></span><span>Expenses<strong class="negative">${money(f.stats.monthlyExpenses)}</strong></span><span>Net position<strong>${money(f.stats.monthlyIncome-f.stats.monthlyExpenses)}</strong></span></div>
-    <div class="finance-chart">${f.monthly.length?f.monthly.map(row=>`<div><div><i style="height:${row.income/max*100}%"></i><i class="expense" style="height:${row.expenses/max*100}%"></i></div><span>${row.month}</span></div>`).join(""):`<div class="exec-empty">No financial history recorded yet.</div>`}</div><div class="exec-legend"><span><i></i>Income</span><span><i class="expense"></i>Expenses</span></div></section>`;
+    <div class="finance-chart">${months.length?months.map(row=>`<div><div><i class="income" style="height:${Math.max(3,(Number(row.income||0)/max)*100)}%"></i><i class="expense" style="height:${Math.max(Number(row.expenses||0)?3:0,(Number(row.expenses||0)/max)*100)}%"></i></div><span>${escapeHtml(row.month)}</span></div>`).join(""):`<div class="exec-empty">No financial history recorded yet.</div>`}</div><div class="exec-legend"><span><i class="income"></i>Income</span><span><i class="expense"></i>Expenses</span></div></section>`;
 }
 function financeBudgetWidget(f) {
   return `<section class="finance-panel finance-budget-widget"><div class="finance-panel-head"><div><h3>Budget Utilization by Department</h3><p>FY 2026 approved budgets</p></div><button data-finance-page="finance-budgets">View all ></button></div>
@@ -1441,33 +1498,46 @@ function financeApprovalActions(v,compact=false) {
 }
 function financeApprovalWidget(f) {
   const items=f.vouchers.filter(v=>v.status==="finance_review").slice(0,5);
-  return `<section class="finance-panel"><div class="finance-panel-head"><div><h3>Payment Approvals</h3><p>Routine finance review queue</p></div><button data-finance-page="finance-approvals">View all ></button></div>
+  return `<section class="finance-panel finance-approvals-panel"><div class="finance-panel-head"><div><h3>Payment Approvals</h3><p>Routine finance review queue</p></div><button data-finance-page="finance-approvals">View all ></button></div>
     <div class="finance-approval-list">${items.map(item=>`<div><span>${icons.file}</span><div><strong>${item.voucherNumber}</strong><small>${item.supplier} - ${item.category}</small></div><b>${money(item.amount)}</b>${financeApprovalActions(item,true)}</div>`).join("")||`<div class="exec-empty">No vouchers await Finance review.</div>`}</div></section>`;
 }
 function financeCashPositionWidget(f) {
-  const c=f.cashPosition,available=c.bankBalance+c.cashBalance+c.pettyCash;
-  const liquidityTotal=available+c.restrictedFunds,liquidity=liquidityTotal?Math.round(c.availableFunds/liquidityTotal*100):0;
-  return `<section class="finance-panel"><div class="finance-panel-head"><div><h3>Company funds position</h3><p>Bank, Unit Trust (UAP) and loans outstanding</p></div><button data-finance-page="finance-unit-trust">Unit Trust ></button></div><div class="finance-position-grid">
-    ${[["Centenary bank account",c.bankBalance],["At UAP account",c.uapBalance||0],["Money in loans",c.loansOutstanding||0],["Total Company Funds",c.companyFunds||((c.bankBalance||0)+(c.uapBalance||0)+(c.loansOutstanding||0))],["Available bank/cash",c.availableFunds]].map(([label,value])=>`<div><span>${label}</span><strong>${money(value)}</strong></div>`).join("")}</div>
+  const c=f.cashPosition||{},available=Number(c.bankBalance||0)+Number(c.cashBalance||0)+Number(c.pettyCash||0);
+  const liquidityTotal=available+Number(c.restrictedFunds||0),liquidity=liquidityTotal?Math.round(Number(c.availableFunds||0)/liquidityTotal*100):0;
+  const items=[
+    ["Centenary bank",c.bankBalance],
+    ["UAP account",c.uapBalance||0],
+    ["Money in loans",c.loansOutstanding||0],
+    ["Total company funds",c.companyFunds||((Number(c.bankBalance||0)+Number(c.uapBalance||0)+Number(c.loansOutstanding||0)))],
+    ["Available bank/cash",c.availableFunds]
+  ];
+  return `<section class="finance-panel finance-cash-strip"><div class="finance-panel-head"><div><h3>Company funds position</h3><p>Bank, Unit Trust (UAP) and loans outstanding</p></div><button data-finance-page="finance-unit-trust">Unit Trust ></button></div>
+    <div class="finance-position-grid finance-position-strip">${items.map(([label,value])=>`<div><span>${label}</span><strong>${money(value)}</strong></div>`).join("")}</div>
     ${progress("Available liquidity",`${liquidity}%`,liquidity,"lime")}</section>`;
 }
 function financeIncomeWidget(f) {
-  const max=Math.max(...f.incomeBySource.map(x=>x.amount),1);
-  return `<section class="finance-panel"><div class="finance-panel-head"><div><h3>Income by Source</h3><p>Organization revenue - not member savings</p></div><button data-finance-page="finance-income">Income ledger ></button></div><div class="finance-category-list">${f.incomeBySource.map(x=>`<div><span>${x.label}</span><i><b style="width:${x.amount/max*100}%"></b></i><strong>${money(x.amount)}</strong></div>`).join("")}</div></section>`;
+  const sources=[...(f.incomeBySource||[])].sort((a,b)=>Number(b.amount||0)-Number(a.amount||0));
+  const max=Math.max(...sources.map(x=>Number(x.amount||0)),1);
+  return `<section class="finance-panel finance-income-panel"><div class="finance-panel-head"><div><h3>Income by Source</h3><p>Receipts posted in the Finance ledger</p></div><button data-finance-page="finance-income">Income ledger ></button></div>
+    <div class="finance-category-list">${sources.length?sources.map(x=>`<div><span title="${escapeHtml(x.label)}">${escapeHtml(x.label)}</span><i><b style="width:${Number(x.amount||0)/max*100}%"></b></i><strong>${money(x.amount)}</strong></div>`).join(""):`<div class="exec-empty">No income posted yet.</div>`}</div></section>`;
 }
 function financeExpenseWidget(f) {
-  const max=Math.max(...f.expensesByCategory.map(x=>x.amount),1);
-  return `<section class="finance-panel"><div class="finance-panel-head"><div><h3>Expenses by Category</h3><p>Where organization funds are spent</p></div><button data-finance-page="finance-expenses">Expense ledger ></button></div><div class="finance-category-list expenses">${f.expensesByCategory.map(x=>`<div><span>${x.label}</span><i><b style="width:${x.amount/max*100}%"></b></i><strong>${money(x.amount)}</strong></div>`).join("")}</div></section>`;
+  const cats=[...(f.expensesByCategory||[])].sort((a,b)=>Number(b.amount||0)-Number(a.amount||0));
+  const max=Math.max(...cats.map(x=>Number(x.amount||0)),1);
+  return `<section class="finance-panel finance-expense-panel"><div class="finance-panel-head"><div><h3>Expenses by Category</h3><p>Where organization funds are spent</p></div><button data-finance-page="finance-expenses">Expense ledger ></button></div>
+    <div class="finance-category-list expenses">${cats.length?cats.map(x=>`<div><span title="${escapeHtml(x.label)}">${escapeHtml(x.label)}</span><i><b style="width:${Number(x.amount||0)/max*100}%"></b></i><strong>${money(x.amount)}</strong></div>`).join(""):`<div class="exec-empty">No expenses posted yet.</div>`}</div></section>`;
 }
 function financeRecentTransactionsWidget(f) {
-  return `<section class="finance-panel"><div class="finance-panel-head"><div><h3>Recent Transactions</h3><p>Latest receipts, payments and journal records</p></div><button data-finance-page="finance-cashbook">View all ></button></div>
-    <div class="table-scroll"><table class="finance-compact-table"><thead><tr><th>Date</th><th>Type</th><th>Description</th><th>Category</th><th>Amount</th><th>Status</th></tr></thead><tbody>${f.entries.slice(0,8).map(x=>`<tr><td>${new Date(x.transactionDate).toLocaleDateString()}</td><td>${status(x.entryType==="income"?"receipt":x.entryType==="transfer"?"transfer":"payment")}</td><td>${x.description}</td><td>${x.category}</td><td class="cell-main">${money(x.amount)}</td><td>${status(x.status)}</td></tr>`).join("")}</tbody></table></div></section>`;
+  const rows=(f.entries||[]).slice(0,8);
+  return `<section class="finance-panel finance-recent-panel"><div class="finance-panel-head"><div><h3>Recent Transactions</h3><p>Latest receipts, payments and journal records</p></div><button data-finance-page="finance-cashbook">View all ></button></div>
+    <div class="table-scroll"><table class="finance-compact-table"><thead><tr><th>Date</th><th>Type</th><th>Description</th><th>Category</th><th>Amount</th><th>Status</th></tr></thead><tbody>${rows.length?rows.map(x=>`<tr><td>${new Date(x.transactionDate).toLocaleDateString()}</td><td>${status(x.entryType==="income"?"receipt":x.entryType==="transfer"?"transfer":"payment")}</td><td title="${escapeHtml(x.description||"")}"><span class="finance-desc-clip">${financeShortText(x.description,64)}</span></td><td>${escapeHtml(x.category||"—")}</td><td class="cell-main">${money(x.amount)}</td><td>${status(x.status)}</td></tr>`).join(""):`<tr><td colspan="6"><div class="exec-empty">No transactions yet.</div></td></tr>`}</tbody></table></div></section>`;
 }
 function financeDepartmentSpendingWidget(f) {
   return `<section class="finance-panel"><div class="finance-panel-head"><div><h3>Department Spending</h3><p>Utilization and overspending alerts</p></div><button data-finance-page="finance-budgets">Budgets &gt;</button></div><div class="finance-spending-list">${[...f.budgets].sort((a,b)=>b.used-a.used).map(b=>`<div><div><span>${b.department}</span><strong>${money(b.used)}</strong></div><div class="exec-track"><i class="${b.utilization>=100?"low":b.utilization>=80?"watch":""}" style="width:${Math.min(100,b.utilization)}%"></i></div><small>${b.utilization}% of ${money(b.allocated)}</small></div>`).join("")}</div></section>`;
 }
 function financeNotificationsWidget(f) {
-  return `<section class="finance-panel"><div class="finance-panel-head"><div><h3>Notifications</h3><p>Financial alerts requiring attention</p></div></div><div class="finance-notifications">${f.notifications.map(n=>`<div class="${n.level}"><span>${n.level==="success"?icons.check:icons.info}</span><strong>${n.title}</strong><time>${relativeTime(n.createdAt||n.time)}</time></div>`).join("")}</div></section>`;
+  const notes=f.notifications||[];
+  return `<section class="finance-panel finance-notes-panel"><div class="finance-panel-head"><div><h3>Notifications</h3><p>Financial alerts requiring attention</p></div></div><div class="finance-notifications">${notes.length?notes.map(n=>`<div class="${n.level}"><span>${n.level==="success"?icons.check:icons.info}</span><strong>${escapeHtml(n.title)}</strong><time>${relativeTime(n.createdAt||n.time)}</time></div>`).join(""):`<div class="exec-empty">No finance alerts right now.</div>`}</div></section>`;
 }
 function financeQuickPanel() {
   return `<div class="exec-floating"><button class="exec-fab finance-fab" data-action="finance-quick">${icons.plus}<span>Quick Actions</span></button>${state.financeQuickOpen?`<div class="exec-quick-menu">
@@ -1476,9 +1546,13 @@ function financeQuickPanel() {
     <button data-finance-report="Financial Statement">${icons.reports}Generate report</button><button data-finance-page="finance-bank">${icons.building}Reconcile bank</button></div>`:""}</div>`;
 }
 function financeIncomeView() {
-  const f=state.finance,rows=f.entries.filter(x=>x.entryType==="income"&&!/management accounts import/i.test(x.paymentMethod||""));
+  const f=state.finance;
+  const isMemberSavings=cat=>/member\s*savings|savings\s*deposit/i.test(String(cat||""));
+  const rows=f.entries.filter(x=>x.entryType==="income"&&!/management accounts import/i.test(x.paymentMethod||"")&&!isMemberSavings(x.category));
   const topSource=[...(f.incomeBySource||[])].sort((a,b)=>b.amount-a.amount)[0];
-  return `<div class="exec-module-metrics">${executiveModuleMetric("Today",money(f.stats.incomeToday),"green")}${executiveModuleMetric("This month",money(f.stats.monthlyIncome),"blue")}${executiveModuleMetric("Receipts",rows.length,"violet")}${executiveModuleMetric("Top source",topSource?topSource.label:"—","orange")}</div>${financeIncomeWidget(f)}${financeDataTable("Organization income ledger",["Receipt","Date","Payer / Organization","Category","Method","Amount","Status"],rows.map(x=>[x.receiptNumber||x.reference,new Date(x.transactionDate).toLocaleDateString(),x.counterparty||"?",x.category,x.paymentMethod||"?",money(x.amount),status(x.status)]))}`;
+  return `<div class="exec-module-metrics">${executiveModuleMetric("Today",money(f.stats.incomeToday),"green")}${executiveModuleMetric("This month",money(f.stats.monthlyIncome),"blue")}${executiveModuleMetric("Org receipts",rows.length,"violet")}${executiveModuleMetric("Top source",topSource?topSource.label:"—","orange")}</div>
+    <p class="exec-report-preview-note">Organization income excludes member savings deposits (those stay on the Credits / member ledger).</p>
+    ${financeIncomeWidget(f)}${financeDataTable("Organization income ledger",["Receipt","Date","Payer / Organization","Category","Method","Amount","Status"],rows.map(x=>[x.receiptNumber||x.reference,new Date(x.transactionDate).toLocaleDateString(),x.counterparty||"?",x.category,x.paymentMethod||"?",money(x.amount),status(x.status)]))}`;
 }
 function financeExpensesView() {
   const f=state.finance,rows=f.entries.filter(x=>x.entryType==="expense"&&!/management accounts import/i.test(x.paymentMethod||""));
@@ -1532,8 +1606,8 @@ function financeBankView() {
   });
   const historical=Boolean(f.historicalPeriod);
   const canEdit=Boolean(f.access?.canCreate||f.access?.canEdit);
-  return `${canEdit&&!historical?`<div class="module-actions" style="margin-bottom:14px"><button class="button primary" data-finance-modal="transfer-uap">${icons.arrowUp||icons.wallet}Transfer to UAP</button><button class="button secondary" data-finance-page="finance-unit-trust">${icons.reports}Unit Trust movement</button></div>`:`<div class="module-actions" style="margin-bottom:14px"><button class="button secondary" data-finance-page="finance-unit-trust">${icons.reports}Unit Trust movement</button></div>`}
-  <div class="finance-account-grid">${accounts.map(a=>`<article><div><span>${icons[a.accountType==="bank"||a.accountCode==="GL-4500"?"building":"wallet"]}</span><div><small>${a.accountCode==="GL-4500"?"Unit Trust (UAP)":a.accountCode==="GL-4104"?"Centenary bank":(a.accountType||"account").replaceAll("_"," ")}</small><h3>${a.accountCode==="GL-4500"?"At UAP account":a.accountCode==="GL-4104"?"Centenary bank account":a.accountName}</h3><p>${a.bankName||"Organization cash"} ${a.accountNumber||""}</p></div></div><strong>${money(a.balance)}</strong><small>Opening balance: ${money(a.openingBalance||0)} - ${a.openingBalanceDate?new Date(a.openingBalanceDate).toLocaleDateString():"Date unavailable"}</small><small>${historical?`Statement period: ${f.selectedFiscalLabel||f.selectedFiscalYear}`:`Last reconciled: ${a.lastReconciledAt?new Date(a.lastReconciledAt).toLocaleDateString():"Never"}`}</small><div class="finance-account-actions">${historical?`<span class="status pending">Historical statement</span>`:`${a.accountType==="bank"?`<button data-finance-reconcile="${a.id}">Reconcile</button>`:""}${a.accountCode==="GL-4500"?`<button data-finance-page="finance-unit-trust">View movement</button>`:`<button data-finance-account-edit="${a.id}">Edit</button><button class="danger-action" data-finance-account-delete="${a.id}">Delete</button>`}`}</div></article>`).join("")||`<div class="exec-empty">No funded accounts yet.</div>`}</div>${historical?"":financeCashPositionWidget(f)}`;
+  return `${canEdit&&!historical?`<div class="module-actions" style="margin-bottom:14px"><button class="button primary" data-finance-modal="transfer-uap">${icons.arrowUp||icons.wallet}Transfer to UAP</button><button class="button secondary" data-finance-modal="withdraw-uap">${icons.withdraw}Withdraw from UAP</button><button class="button secondary" data-finance-page="finance-unit-trust">${icons.reports}Unit Trust movement</button></div>`:`<div class="module-actions" style="margin-bottom:14px"><button class="button secondary" data-finance-page="finance-unit-trust">${icons.reports}Unit Trust movement</button></div>`}
+  <div class="finance-account-grid">${accounts.map(a=>`<article><div><span>${icons[a.accountType==="bank"||a.accountCode==="GL-4500"?"building":"wallet"]}</span><div><small>${a.accountCode==="GL-4500"?"Unit Trust (UAP)":a.accountCode==="GL-4104"?"Centenary bank":(a.accountType||"account").replaceAll("_"," ")}</small><h3>${a.accountCode==="GL-4500"?"UAP account":a.accountCode==="GL-4104"?"Centenary bank account":a.accountName}</h3><p>${a.bankName||"Organization cash"} ${a.accountNumber||""}</p></div></div><strong>${money(a.balance)}</strong><small>Opening balance: ${money(a.openingBalance||0)} - ${a.openingBalanceDate?new Date(a.openingBalanceDate).toLocaleDateString():"Date unavailable"}</small><small>${historical?`Statement period: ${f.selectedFiscalLabel||f.selectedFiscalYear}`:`Last reconciled: ${a.lastReconciledAt?new Date(a.lastReconciledAt).toLocaleDateString():"Never"}`}</small><div class="finance-account-actions">${historical?`<span class="status pending">Historical statement</span>`:`${a.accountType==="bank"?`<button data-finance-reconcile="${a.id}">Reconcile</button>`:""}${a.accountCode==="GL-4500"?`<button data-finance-page="finance-unit-trust">View movement</button>`:`<button data-finance-account-edit="${a.id}">Edit</button><button class="danger-action" data-finance-account-delete="${a.id}">Delete</button>`}`}</div></article>`).join("")||`<div class="exec-empty">No funded accounts yet.</div>`}</div>${historical?"":financeCashPositionWidget(f)}`;
 }
 async function loadFinanceUnitTrust(month){
   const q=month?`?month=${encodeURIComponent(month)}`:"";
@@ -1554,17 +1628,18 @@ function financeUnitTrustView(){
     <div class="dashboard-year-control"><label>Month</label><select data-unit-trust-month><option value="">All months</option>${monthOptions}</select></div></div>
     <div class="module-actions" style="margin-bottom:14px">
       <button class="button primary" data-finance-modal="transfer-uap">${icons.arrowUp||icons.plus}Transfer to UAP</button>
+      <button class="button secondary" data-finance-modal="withdraw-uap">${icons.withdraw}Withdraw from UAP</button>
       <button class="button secondary" data-unit-trust-view="${escapeHtml(report.month||"")}">${icons.eye}View report</button>
       <button class="button secondary" data-unit-trust-download="${escapeHtml(report.month||"")}">${icons.download}Download report</button>
       <button class="button secondary" data-finance-page="finance-bank">${icons.building}Open company bank</button>
     </div>
     <div class="exec-module-metrics">
-      ${financeUnitTrustMetric("At UAP account",money(s.currentBalance||s.closingBalance),"Live Old Mutual balance","violet")}
+      ${financeUnitTrustMetric("UAP account",money(s.currentBalance||s.closingBalance),"Live Old Mutual balance","violet")}
       ${financeUnitTrustMetric("Interest earned",money(s.interestEarned),`${monthLabel} interest`,"green")}
       ${financeUnitTrustMetric("Deposits / transfers in",money(s.deposits),"From company bank","blue")}
       ${financeUnitTrustMetric("Withdrawals",money(s.withdrawals),`${monthLabel} outflows`,"orange")}
     </div>
-    <section class="finance-panel"><div class="finance-panel-head"><div><h3>At UAP account · ${escapeHtml(report.account?.accountName||"Old Mutual Unit Trust")}</h3><p>${escapeHtml(report.account?.accountNumber||"99171-CKA1073440")} · ${escapeHtml(report.account?.bankName||"Old Mutual Investment Group")} · month ${escapeHtml(monthLabel)}</p></div><strong>${money(s.currentBalance||s.closingBalance)}</strong></div>
+    <section class="finance-panel"><div class="finance-panel-head"><div><h3>UAP account · ${escapeHtml(report.account?.accountName||"Old Mutual Unit Trust")}</h3><p>${escapeHtml(report.account?.accountNumber||"99171-CKA1073440")} · ${escapeHtml(report.account?.bankName||"Old Mutual Investment Group")} · month ${escapeHtml(monthLabel)}</p></div><strong>${money(s.currentBalance||s.closingBalance)}</strong></div>
     <div class="table-scroll"><table><thead><tr><th>Date</th><th>Description</th><th>Deposit</th><th>Interest</th><th>Withdrawal</th><th>Rate</th><th>Balance</th>${canEdit?"<th>Actions</th>":""}</tr></thead>
     <tbody>${rows.map(r=>`<tr><td>${new Date(r.date).toLocaleDateString("en-GB")}</td><td>${escapeHtml(r.description)}</td><td>${Number(r.deposit)?money(r.deposit):"—"}</td><td>${Number(r.interest)?money(r.interest):"—"}</td><td class="${Number(r.withdrawal)?"negative":""}">${Number(r.withdrawal)?money(r.withdrawal):"—"}</td><td>${r.rate!=null?`${Number(r.rate).toFixed(2)}%`:"—"}</td><td><strong>${money(r.balance)}</strong></td>${canEdit?`<td><button class="danger-action" data-unit-trust-delete="${r.id}">Delete</button></td>`:""}</tr>`).join("")||`<tr><td colspan="${canEdit?8:7}">No Unit Trust movements for this period. Choose another month or record a transfer.</td></tr>`}</tbody></table></div></section>`;
 }
@@ -1586,7 +1661,7 @@ function financeReportsView() {
 }
 function financeAnalyticsView() {
   const f=state.finance;
-  return `<div class="exec-analytics-grid">${financeRevenueGraph(f)}${financeIncomeWidget(f)}${financeExpenseWidget(f)}${financeBudgetWidget(f)}${financeDepartmentSpendingWidget(f)}${financeForecastWidget(f)}</div>`;
+  return `<div class="exec-analytics-grid">${financeRevenueGraph(f)}${financeIncomeWidget(f)}${financeExpenseWidget(f)}${financeForecastWidget(f)}</div>`;
 }
 function financeForecastWidget(f) {
   const avg=f.monthly.length?f.monthly.reduce((sum,m)=>sum+m.net,0)/f.monthly.length:0;
@@ -1627,7 +1702,8 @@ function openFinanceModal(type) {
     budget:["Create or update department budget","Submit a spending plan for Executive approval; alerts appear at 80%, 90% and 100% utilization",`<form class="form" data-finance-form="budget"><div class="form-grid"><div class="field"><label>Department</label><select name="departmentId" required>${financeDepartmentOptions()}</select></div><div class="field"><label>Fiscal period</label><input name="fiscalPeriod" value="FY 2026" required></div><div class="field full"><label>Budget allocation (UGX)</label><input name="allocatedAmount" type="number" min="1" required></div></div>${formActions("Submit budget for approval")}</form>`],
     asset:["Register organization asset","Maintain the official asset register",`<form class="form" data-finance-form="asset"><div class="form-grid"><div class="field"><label>Asset code</label><input name="assetCode" required></div><div class="field"><label>Asset name</label><input name="assetName" required></div><div class="field"><label>Asset type</label><select name="assetType"><option>Land</option><option>Building</option><option>Vehicle</option><option>Furniture</option><option>Computers</option><option>Project Equipment</option></select></div><div class="field"><label>Purchase date</label><input name="purchaseDate" type="date" required></div><div class="field"><label>Purchase value</label><input name="purchaseValue" type="number" min="1" required></div><div class="field"><label>Current value</label><input name="currentValue" type="number" min="0"></div><div class="field"><label>Assigned department</label><select name="departmentId"><option value="">Organization-wide</option>${financeDepartmentOptions()}</select></div><div class="field"><label>Location</label><input name="location"></div><div class="field full"><label>Custodian</label><input name="custodian"></div></div>${formActions("Register asset")}</form>`],
     procurement:["Create procurement request","Begin the controlled request-to-payment workflow",`<form class="form" data-finance-form="procurement"><div class="form-grid"><div class="field"><label>Department</label><select name="departmentId">${financeDepartmentOptions()}</select></div><div class="field"><label>Estimated amount (UGX)</label><input name="estimatedAmount" type="number" min="1" required></div><div class="field full"><label>Item or service description</label><textarea name="itemDescription" required></textarea></div><div class="field full"><label>Suggested supplier</label><input name="supplier"></div></div>${formActions("Create procurement request")}</form>`],
-    "transfer-uap":["Transfer to UAP / Unit Trust","Move surplus company bank funds into Old Mutual Unit Trust. Finance keeps a running UAP balance with movement history.",`<form class="form" data-finance-form="transfer-uap"><div class="form-grid"><div class="field"><label>From company account</label><select name="fromAccountId" required>${(state.finance?.accounts||[]).filter(a=>a.accountCode!=="GL-4500"&&a.accountType==="bank").map(a=>`<option value="${a.id}">${escapeHtml(a.accountName)} - ${money(a.balance)}</option>`).join("")}</select></div><div class="field"><label>Amount (UGX)</label><input name="amount" type="number" min="1" step="1000" required placeholder="e.g. 10000000"></div><div class="field"><label>Transfer date</label><input name="date" type="date" value="${new Date().toISOString().slice(0,10)}" required></div><div class="field full"><label>Note</label><textarea name="note" placeholder="e.g. Surplus Centenary balance moved to Unit Trust"></textarea></div></div>${formActions("Transfer to UAP")}</form>`]
+    "transfer-uap":["Transfer to UAP / Unit Trust","Move surplus company bank funds into Old Mutual Unit Trust. Finance keeps a running UAP balance with movement history.",`<form class="form" data-finance-form="transfer-uap"><div class="form-grid"><div class="field"><label>From company account</label><select name="fromAccountId" required>${(state.finance?.accounts||[]).filter(a=>a.accountCode!=="GL-4500"&&a.accountType==="bank").map(a=>`<option value="${a.id}">${escapeHtml(a.accountName)} - ${money(a.balance)}</option>`).join("")}</select></div><div class="field"><label>Amount (UGX)</label><input name="amount" type="number" min="1" step="1000" required placeholder="e.g. 10000000"></div><div class="field"><label>Transfer date</label><input name="date" type="date" value="${new Date().toISOString().slice(0,10)}" required></div><div class="field full"><label>Note</label><textarea name="note" placeholder="e.g. Surplus Centenary balance moved to Unit Trust"></textarea></div></div>${formActions("Transfer to UAP")}</form>`],
+    "withdraw-uap":["Withdraw from UAP / Unit Trust","Move Unit Trust funds back into the company Centenary bank account. This updates the live UAP balance and movement history.",`<form class="form" data-finance-form="withdraw-uap"><div class="form-grid"><div class="field"><label>To company account</label><select name="toAccountId" required>${(state.finance?.accounts||[]).filter(a=>a.accountCode!=="GL-4500"&&a.accountType==="bank").map(a=>`<option value="${a.id}">${escapeHtml(a.accountName)} - ${money(a.balance)}</option>`).join("")}</select></div><div class="field"><label>Amount (UGX)</label><input name="amount" type="number" min="1" step="1000" required placeholder="e.g. 5000000"></div><div class="field"><label>Withdrawal date</label><input name="date" type="date" value="${new Date().toISOString().slice(0,10)}" required></div><div class="field full"><label>Note</label><textarea name="note" placeholder="e.g. Withdrawal from Unit Trust to Centenary for operations"></textarea></div></div>${formActions("Withdraw from UAP")}</form>`]
   };
   const [title,subtitle,form]=forms[type]||forms.income;
   document.body.insertAdjacentHTML("beforeend",`<div class="modal-backdrop" id="modal-backdrop"><div class="modal"><div class="modal-head"><div><h2>${title}</h2><p>${subtitle}</p></div><button class="modal-close" data-close>${icons.x}</button></div>${form}</div></div>`);
@@ -1650,16 +1726,18 @@ function configureFinanceIncomeAccounts(form) {
 }
 async function submitFinanceForm(event) {
   event.preventDefault();const form=event.currentTarget,type=form.dataset.financeForm;
-  if(type==="transfer-uap"){
-    const button=form.querySelector("button[type=submit]");button.disabled=true;button.textContent="Transferring…";
+  if(type==="transfer-uap"||type==="withdraw-uap"){
+    const button=form.querySelector("button[type=submit]");button.disabled=true;button.textContent=type==="withdraw-uap"?"Withdrawing…":"Transferring…";
     try{
       const data=Object.fromEntries(new FormData(form).entries());
-      const result=await api("/api/finance/transfer-to-uap",{method:"POST",body:JSON.stringify(data)});
+      const result=await api(type==="withdraw-uap"?"/api/finance/withdraw-from-uap":"/api/finance/transfer-to-uap",{method:"POST",body:JSON.stringify(data)});
       closeModal();
       state.finance=await api("/api/finance/command-center");
       state.unitTrust=await loadFinanceUnitTrust(state.unitTrust?.month||defaultUnitTrustMonth(state.unitTrust?.availableMonths));
       render();
-      toast(`Transferred ${money(result.amount)} to UAP. Unit Trust balance ${money(result.uapBalance)}.`);
+      toast(type==="withdraw-uap"
+        ?`Withdrew ${money(result.amount)} from UAP. Unit Trust balance ${money(result.uapBalance)}.`
+        :`Transferred ${money(result.amount)} to UAP. Unit Trust balance ${money(result.uapBalance)}.`);
     }catch(error){button.disabled=false;button.textContent="Try again";toast(error.message);}
     return;
   }
@@ -1965,7 +2043,7 @@ function executiveReportPreviewContent(name) {
     columns=["Project","Name","Status","Performance","Current value","Expected return"];
     rows=e.investmentProjects.map(x=>[x.reference,x.name,x.status,x.performanceStatus,money(x.currentValue),money(x.expectedReturn)]);
   } else if(name==="Welfare Report") {
-    metrics=[["Fund balance",money(s.welfareFundBalance)],["Monthly contributions",money(e.welfare.monthlyContributions)],["Pending requests",e.welfare.pending],["Approved requests",e.welfare.approved],["Approved assistance",money(e.welfare.approved_amount)]];
+    metrics=[["Since June 2024",money(e.welfare.collectedSince||e.welfareStanding?.collectedSince||0)],["Monthly contributions",money(e.welfare.monthlyContributions)],["Pending requests",e.welfare.pending],["Approved requests",e.welfare.approved],["Approved assistance",money(e.welfare.approved_amount)]];
     columns=["Reference","Member","Category","Amount","Status","Submitted"];
     rows=e.welfareRequests.map(x=>[x.reference,x.member,x.requestType,money(x.amount),x.status,new Date(x.createdAt).toLocaleDateString()]);
   } else if(name==="Legal Report") {
@@ -3484,7 +3562,11 @@ function bind() {
   document.querySelectorAll("[data-executive-page]").forEach(el=>el.addEventListener("click",async event=>{
     event.preventDefault();const target=el.dataset.executivePage;
     if(!rolePages["Executive Officer"].includes(target)&&target!=="executive-search")return toast("This Executive page is not available.");
-    state.executiveWorkspace=null;state.page=target;state.execQuickOpen=false;render();window.scrollTo(0,0);
+    state.executiveWorkspace=null;state.page=target;state.execQuickOpen=false;
+    if(target==="executive-welfare"||target==="executive-finance"){
+      try{state.executive=await api("/api/executive/command-center");}catch(error){toast(error.message);}
+    }
+    render();window.scrollTo(0,0);
     if(target==="executive-credits") await ensureExecutiveCreditsDesk();
   }));
   document.querySelectorAll("[data-executive-workspace]").forEach(el=>el.addEventListener("click",()=>openExecutiveWorkspace(el.dataset.executiveWorkspace)));
@@ -3507,6 +3589,14 @@ function bind() {
   document.querySelectorAll("[data-unit-trust-download]").forEach(el=>el.addEventListener("click",()=>downloadUnitTrustReport(el.dataset.unitTrustDownload||"")));
   document.querySelector("[data-finance-fy]")?.addEventListener("change",async event=>{try{event.target.disabled=true;state.finance=await api(`/api/finance/command-center?fy=${encodeURIComponent(event.target.value)}`);render();}catch(error){toast(error.message);}});
   document.querySelector("[data-finance-subscriptions]")?.addEventListener("click",()=>openFinanceSubscriptionMembers());
+  document.querySelectorAll("[data-welfare-standing-toggle]").forEach(el=>el.addEventListener("click",event=>{
+    event.preventDefault();
+    event.stopPropagation();
+    const key=el.dataset.welfareStandingToggle||"finance";
+    if(!state.welfareStandingOpen)state.welfareStandingOpen={};
+    state.welfareStandingOpen[key]=!Boolean(state.welfareStandingOpen[key]);
+    render();
+  }));
   document.querySelectorAll("[data-finance-modal]").forEach(el=>el.addEventListener("click",()=>openFinanceModal(el.dataset.financeModal)));
   document.querySelectorAll("[data-finance-voucher]").forEach(el=>el.addEventListener("click",()=>financeVoucherDecision(el.dataset.financeVoucher,el.dataset.decision)));
   document.querySelectorAll("[data-finance-entry-review]").forEach(el=>el.addEventListener("click",()=>reviewFinanceEntry(el.dataset.financeEntryReview,el.dataset.decision)));

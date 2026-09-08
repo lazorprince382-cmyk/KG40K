@@ -384,11 +384,21 @@ module.exports = function registerMemberAccountApi({
     const loansOutstanding=Number((await one(`SELECT COALESCE(SUM(balance),0)::float AS total FROM loans WHERE status IN ('active','overdue')`))?.total||0);
     const companyFunds=uapBalance+bankBalance+loansOutstanding;
     const welfarePaid=Number(contributionsTotal||0);
+    const memberName=String(member.fullName||member.full_name||"");
+    const memberNumber=String(member.memberNumber||member.member_number||"");
+    const welfareExcluded=/oketcho/i.test(memberName)||(/baraza/i.test(memberName)&&/nakayiza|olivia/i.test(memberName));
+    const welfareVicent=(/vicent|vincent/i.test(memberName)&&/gumisiriza/i.test(memberName))||memberNumber==="G40-2026-0002";
+    const welfareSinceLabel=welfareExcluded?null:welfareVicent?"July 2026":"June 2024";
+    const welfareCardNote=welfareExcluded
+      ?"Not on the welfare standing register"
+      :`Welfare since ${welfareSinceLabel}`;
     return {
       member, summary: {
         savings: member.savings, totalMemberFunds: Number(member.savings) + Number(member.shares),
         personalTotalFunds: Number(member.savings) + Number(member.shares),
         welfare: welfarePaid,
+        welfareSinceLabel,
+        welfareCardNote,
         activeLoanBalance: activeLoans.reduce((sum, item) => {
           const totalDue=Number(item.totalDue||item.amount||0);
           const totalPaid=Number(item.totalPaid||0);

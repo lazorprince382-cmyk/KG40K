@@ -21,6 +21,13 @@ const {
 } = require("./loan-security");
 const { getRunningLoan, getSavingsTargetStatus, getGuarantorEligibility } = require("./loan-eligibility");
 const { loadWelfareStanding } = require("./welfare-standing");
+
+/** Member savings dual-posted into Finance must not count as organization income. */
+function isMemberSavingsFinanceCategory(category="") {
+  return /member\s*savings|savings\s*deposit/i.test(String(category || ""));
+}
+const ORG_INCOME_NOT_MEMBER = `AND COALESCE(category,'') NOT ILIKE '%member savings%' AND COALESCE(category,'') NOT ILIKE '%savings deposit%'`;
+
 let loanApprovals = null;
 const getLoanApprovals = async () => {
   if (!loanApprovals) loanApprovals = await buildLoanApprovalHelpers({ query, one });
@@ -502,9 +509,17 @@ app.get("/api/executive/command-center",auth,requireExecutive("view"),asyncRoute
       WHERE a.status IN ('pending_executive','in_review') AND a.visibility_level<=$1
       ORDER BY CASE WHEN a.status='pending_executive' THEN 0 ELSE 1 END,a.id DESC LIMIT 30`,[level]),
     query(`SELECT COALESCE(SUM(amount) FILTER (WHERE entry_type='income' AND status IN ('approved','completed')
-        AND COALESCE(payment_method,'') NOT ILIKE 'Management accounts import'),0)::float AS income,
+        AND COALESCE(payment_method,'') NOT ILIKE 'Management accounts import'
+        ${ORG_INCOME_NOT_MEMBER}),0)::float AS income,
+      COALESCE(SUM(amount) FILTER (WHERE entry_type='income' AND status IN ('approved','completed')
+        AND COALESCE(payment_method,'') NOT ILIKE 'Management accounts import'
+        ${ORG_INCOME_NOT_MEMBER}
+        AND transaction_date>=date_trunc('month',CURRENT_DATE)::date),0)::float AS income_month,
       COALESCE(SUM(amount) FILTER (WHERE entry_type='expense' AND status IN ('approved','completed')
         AND COALESCE(payment_method,'') NOT ILIKE 'Management accounts import'),0)::float AS expenditure,
+      COALESCE(SUM(amount) FILTER (WHERE entry_type='expense' AND status IN ('approved','completed')
+        AND COALESCE(payment_method,'') NOT ILIKE 'Management accounts import'
+        AND transaction_date>=date_trunc('month',CURRENT_DATE)::date),0)::float AS expenditure_month,
       COALESCE(SUM(amount) FILTER (WHERE entry_type='expense' AND status IN ('pending','pending_finance_review')),0)::float AS pending_payments
       FROM organization_finance_entries`),
     query("SELECT COALESCE(SUM(savings_balance),0)::float AS total FROM members WHERE deleted_at IS NULL"),
@@ -660,7 +675,10 @@ app.get("/api/executive/command-center",auth,requireExecutive("view"),asyncRoute
       LEFT JOIN supervisory_scorecards s ON s.department_id=d.id GROUP BY d.code`),
     query(`WITH months AS (SELECT generate_series(date_trunc('month',CURRENT_DATE)-INTERVAL '5 months',date_trunc('month',CURRENT_DATE),INTERVAL '1 month') AS month)
       SELECT to_char(month,'Mon') AS month,
-      COALESCE((SELECT SUM(amount)/1000000 FROM organization_finance_entries f WHERE f.entry_type='income' AND f.status IN ('approved','completed') AND date_trunc('month',f.transaction_date)=months.month),0)::float AS income,
+      COALESCE((SELECT SUM(amount)/1000000 FROM organization_finance_entries f WHERE f.entry_type='income' AND f.status IN ('approved','completed')
+        AND COALESCE(f.payment_method,'') NOT ILIKE 'Management accounts import'
+        AND COALESCE(f.category,'') NOT ILIKE '%member savings%' AND COALESCE(f.category,'') NOT ILIKE '%savings deposit%'
+        AND date_trunc('month',f.transaction_date)=months.month),0)::float AS income,
       COALESCE((SELECT SUM(amount)/1000000 FROM organization_finance_entries f WHERE f.entry_type='expense' AND f.status IN ('approved','completed') AND date_trunc('month',f.transaction_date)=months.month),0)::float AS expenses,
       COALESCE((SELECT SUM(amount)/1000000 FROM transactions tx WHERE tx.type='Savings deposit' AND tx.status='completed' AND date_trunc('month',tx.created_at)=months.month),0)::float AS savings,
       COALESCE((SELECT SUM(amount)/1000000 FROM loans l WHERE date_trunc('month',l.created_at)=months.month),0)::float AS loans,
@@ -684,7 +702,29 @@ app.get("/api/executive/command-center",auth,requireExecutive("view"),asyncRoute
     if(account.restricted)totals.restrictedFunds+=amount;else totals.availableFunds+=amount;
     return totals;
   },{bankBalance:0,cashBalance:0,pettyCash:0,restrictedFunds:0,availableFunds:0});
-  const investmentGrowth=investment.invested?Math.round((investment.current_value-investment.invested)/investment.invested*1000)/10:0;
+  const uapBalance=Number((await one(`SELECT balance::float AS balance FROM finance_accounts WHERE account_code='GL-4500' AND active=true`))?.balance
+    ||(await one(`SELECT value FROM settings WHERE key='organizationUapBalance'`))?.value||0);
+  const uapInterestEarned=Number((await one(`SELECT COALESCE(SUM(interest_amount),0)::float AS total FROM unit_trust_movements`))?.total||0);
+  const investmentProjectsLive=investmentProjects.map(project=>{
+    const blob=`${project.reference||""} ${project.name||""} ${project.category||""}`;
+    if(!/unit trust|old mutual|\buap\b|INV-FUND-OM/i.test(blob))return project;
+    const invested=Number(project.raisedAmount||project.targetAmount||150000000);
+    const interest=Number(uapInterestEarned)||Math.max(0,uapBalance-invested);
+    return {
+      ...project,
+      isUnitTrust:true,
+      currentValue:uapBalance,
+      expectedReturn:interest,
+      revenue:interest,
+      expenses:0,
+      profit:interest,
+      progress:100,
+      performanceStatus:uapBalance>=invested?"profitable":(project.performanceStatus||"watch")
+    };
+  });
+  const investmentCurrentValue=investmentProjectsLive.reduce((sum,project)=>sum+Number(project.currentValue||0),0);
+  const investmentExpectedReturn=investmentProjectsLive.reduce((sum,project)=>sum+Number(project.expectedReturn||0),0);
+  const investmentGrowth=investment.invested?Math.round((investmentCurrentValue-Number(investment.invested))/Number(investment.invested)*1000)/10:0;
   const welfareBalance=welfareStanding.closingBalance;
   const notifications=[
     ...approvals.rows.slice(0,5).map(item=>({type:"approval",title:item.title,detail:`${item.department} approval required`,time:item.createdAt})),
@@ -723,8 +763,6 @@ app.get("/api/executive/command-center",auth,requireExecutive("view"),asyncRoute
   const performanceSource=Object.fromEntries(Object.keys(computedPerformance).map(code=>[
     code,supervisoryPerformance[code]>0?"assessed":"live"
   ]));
-  const uapBalance=Number((await one(`SELECT balance::float AS balance FROM finance_accounts WHERE account_code='GL-4500' AND active=true`))?.balance
-    ||(await one(`SELECT value FROM settings WHERE key='organizationUapBalance'`))?.value||0);
   const companyBankBalance=Number((await one(`SELECT balance::float AS balance FROM finance_accounts WHERE account_code='GL-4104' AND active=true`))?.balance
     ||accountTotals.bankBalance||0);
   const loansOutstandingLive=Number(loans.outstanding||0);
@@ -733,7 +771,9 @@ app.get("/api/executive/command-center",auth,requireExecutive("view"),asyncRoute
     selectedFiscalYear,availableFiscalYears,historicalPeriod:selectedFiscalYear!==defaultFiscalYear,
     stats:{totalMembers:memberStats.rows[0].total,activeMembers:memberStats.rows[0].active,newMembers:memberStats.rows[0].new_this_month,
       totalDepartments:departments.rows.length,pendingApprovals:approvals.rows.length+pendingDocumentCount,organizationIncome:finance.income,
-      organizationExpenditure:finance.expenditure,netBalance:finance.income-finance.expenditure,totalSavings:savings.rows[0].total,
+      organizationIncomeMonth:finance.income_month,
+      organizationExpenditure:finance.expenditure,organizationExpenditureMonth:finance.expenditure_month,
+      netBalance:finance.income-finance.expenditure,totalSavings:savings.rows[0].total,
       outstandingLoans:loansOutstandingLive,uapBalance,bankBalance:companyBankBalance,companyFunds,
       activeInvestments:investment.running,welfareFundBalance:welfareBalance,
       legalCases:legal.rows[0].open_cases,auditIssues:auditIssues.rows[0].open,
@@ -744,10 +784,12 @@ app.get("/api/executive/command-center",auth,requireExecutive("view"),asyncRoute
       accounts:financeAccounts.rows,cashPosition:{...accountTotals,bankBalance:companyBankBalance,uapBalance,loansOutstanding:loansOutstandingLive,companyFunds},monthly},
     organizationStanding:{uapBalance,bankBalance:companyBankBalance,loansOutstanding:loansOutstandingLive,companyFunds},
     loans:{...loans,outstanding:loansOutstandingLive,recoveryRate:loans.issued?Math.round(loans.recovered/loans.issued*100):0},
-    investment:{...investment,growth:investmentGrowth},investmentProjects,recentLoans,
+    investment:{...investment,current_value:investmentCurrentValue,expected_return:investmentExpectedReturn,growth:investmentGrowth},
+    investmentProjects:investmentProjectsLive,recentLoans,
     welfare:{...welfare.rows[0],fundBalance:welfareBalance,monthlyContributions:welfareMonth.total,
-      collectedSince:welfareStanding.collectedSince,sinceLabel:welfareStanding.sinceLabel,
+      collectedSince:welfareStanding.collectedSince,sinceLabel:welfareStanding.sinceLabel||"June 2024",
       membersContributing:welfareStanding.membersContributing,newMembers:welfareStanding.newMembers,
+      standingMembers:welfareStanding.standingMembers,byMember:welfareStanding.byMember,
       note:welfareStanding.note},
     welfareStanding,
     legal:legal.rows[0],audit:{...auditIssues.rows[0],open:auditSummary.open,departmentsUnderReview:auditSummary.departments,compliance:auditSummary.compliance},
@@ -852,9 +894,26 @@ app.get("/api/executive/projects/:id",auth,requireExecutive("view"),asyncRoute(a
     LEFT JOIN investment_transactions t ON t.project_id=p.id
     WHERE p.id=$1 AND p.status<>'archived' GROUP BY p.id,proposal.id,approver.full_name`,[Number(req.params.id)]);
   if(!project)return res.status(404).json({error:"Investment project not found"});
+  const blob=`${project.reference||""} ${project.name||""} ${project.category||""}`;
+  if(/unit trust|old mutual|\buap\b|INV-FUND-OM/i.test(blob)){
+    const uapBalance=Number((await one(`SELECT balance::float AS balance FROM finance_accounts WHERE account_code='GL-4500' AND active=true`))?.balance
+      ||(await one(`SELECT value FROM settings WHERE key='organizationUapBalance'`))?.value||0);
+    const uapInterestEarned=Number((await one(`SELECT COALESCE(SUM(interest_amount),0)::float AS total FROM unit_trust_movements`))?.total||0);
+    const invested=Number(project.capitalRaised||project.budget||150000000);
+    const interest=uapInterestEarned||Math.max(0,uapBalance-invested);
+    project.isUnitTrust=true;
+    project.currentValue=uapBalance;
+    project.expectedReturn=interest;
+    project.revenue=interest;
+    project.expenses=0;
+    project.progress=100;
+    project.performanceStatus=uapBalance>=invested?"profitable":(project.performanceStatus||"watch");
+  }
   project.profit=Number(project.revenue)-Number(project.expenses);
   project.roi=Number(project.budget)?Number((project.profit/Number(project.budget)*100).toFixed(1)):0;
-  project.budgetUtilization=Number(project.budget)?Number((Number(project.expenses)/Number(project.budget)*100).toFixed(1)):0;
+  project.budgetUtilization=project.isUnitTrust
+    ? (Number(project.budget)?Number((Number(project.capitalRaised||project.budget)/Number(project.budget)*100).toFixed(1)):100)
+    : (Number(project.budget)?Number((Number(project.expenses)/Number(project.budget)*100).toFixed(1)):0);
   const [oversight,transactions,contracts,assets]=await Promise.all([
     query(`SELECT o.id,o.action_type AS "actionType",o.previous_status AS "previousStatus",o.new_status AS "newStatus",
       o.comment,o.created_at AS "createdAt",u.full_name AS "createdBy",d.name AS "targetDepartment"
@@ -992,11 +1051,13 @@ app.get("/api/finance/command-center",auth,requireFinance("view"),asyncRoute(asy
       FROM finance_accounts WHERE active=true ORDER BY id`),
     query(`SELECT
       COALESCE(SUM(amount) FILTER (WHERE entry_type='income' AND status IN ('completed','approved') AND transaction_date=CURRENT_DATE
-        AND COALESCE(payment_method,'') NOT ILIKE 'Management accounts import'),0)::float AS income_today,
+        AND COALESCE(payment_method,'') NOT ILIKE 'Management accounts import'
+        AND COALESCE(category,'') NOT ILIKE '%member savings%' AND COALESCE(category,'') NOT ILIKE '%savings deposit%'),0)::float AS income_today,
       COALESCE(SUM(amount) FILTER (WHERE entry_type='expense' AND status IN ('completed','approved') AND transaction_date=CURRENT_DATE
         AND COALESCE(payment_method,'') NOT ILIKE 'Management accounts import'),0)::float AS expense_today,
       COALESCE(SUM(amount) FILTER (WHERE entry_type='income' AND status IN ('completed','approved') AND transaction_date>=date_trunc('month',CURRENT_DATE)::date
-        AND COALESCE(payment_method,'') NOT ILIKE 'Management accounts import'),0)::float AS income_month,
+        AND COALESCE(payment_method,'') NOT ILIKE 'Management accounts import'
+        AND COALESCE(category,'') NOT ILIKE '%member savings%' AND COALESCE(category,'') NOT ILIKE '%savings deposit%'),0)::float AS income_month,
       COALESCE(SUM(amount) FILTER (WHERE entry_type='expense' AND status IN ('completed','approved') AND transaction_date>=date_trunc('month',CURRENT_DATE)::date
         AND COALESCE(payment_method,'') NOT ILIKE 'Management accounts import'),0)::float AS expense_month
       FROM organization_finance_entries`),
@@ -1064,15 +1125,18 @@ app.get("/api/finance/command-center",auth,requireFinance("view"),asyncRoute(asy
   const budgetRows=[...budgets.rows]
     .map(row=>({...row,utilization:row.allocated?Math.round(row.used/row.allocated*100):0}))
     .sort((a,b)=>(budgetOrder[a.departmentCode]||99)-(budgetOrder[b.departmentCode]||99));
-  const incomeBySource=Object.entries(entries.rows.filter(x=>x.entryType==="income"&&["completed","approved"].includes(x.status)&&!/management accounts import/i.test(x.paymentMethod||""))
+  const incomeBySource=Object.entries(entries.rows.filter(x=>x.entryType==="income"&&["completed","approved"].includes(x.status)&&!/management accounts import/i.test(x.paymentMethod||"")&&!isMemberSavingsFinanceCategory(x.category))
     .reduce((totals,row)=>(totals[row.category]=(totals[row.category]||0)+row.amount,totals),{})).map(([label,amount])=>({label,amount}));
   const expensesByCategory=Object.entries(entries.rows.filter(x=>x.entryType==="expense"&&["completed","approved"].includes(x.status)&&!/management accounts import/i.test(x.paymentMethod||""))
     .reduce((totals,row)=>(totals[row.category]=(totals[row.category]||0)+row.amount,totals),{})).map(([label,amount])=>({label,amount}));
   const monthly=(await query(`WITH months AS (
       SELECT generate_series(date_trunc('month',CURRENT_DATE)-INTERVAL '5 months',date_trunc('month',CURRENT_DATE),INTERVAL '1 month') AS month)
     SELECT to_char(month,'Mon') AS month,
+      to_char(month,'YYYY-MM') AS "monthKey",
       COALESCE((SELECT SUM(amount) FROM organization_finance_entries f WHERE f.entry_type='income' AND f.status IN ('approved','completed')
-        AND COALESCE(f.payment_method,'') NOT ILIKE 'Management accounts import' AND date_trunc('month',f.transaction_date)=months.month),0)::float AS income,
+        AND COALESCE(f.payment_method,'') NOT ILIKE 'Management accounts import'
+        AND COALESCE(f.category,'') NOT ILIKE '%member savings%' AND COALESCE(f.category,'') NOT ILIKE '%savings deposit%'
+        AND date_trunc('month',f.transaction_date)=months.month),0)::float AS income,
       COALESCE((SELECT SUM(amount) FROM organization_finance_entries f WHERE f.entry_type='expense' AND f.status IN ('approved','completed')
         AND COALESCE(f.payment_method,'') NOT ILIKE 'Management accounts import' AND date_trunc('month',f.transaction_date)=months.month),0)::float AS expenses
       FROM months ORDER BY month`)).rows;
@@ -1531,6 +1595,50 @@ app.post("/api/finance/transfer-to-uap",auth,requireFinance("create"),asyncRoute
   });
   await audit({userId:req.user.id,action:"FINANCE_TRANSFER_TO_UAP",entityType:"finance_account",
     details:`UGX ${amount} → UAP (${result.outRef} / ${result.inRef})`,...metadata(req)});
+  res.status(201).json(result);
+}));
+app.post("/api/finance/withdraw-from-uap",auth,requireFinance("create"),asyncRoute(async(req,res)=>{
+  const amount=Number(req.body.amount),toAccountId=Number(req.body.toAccountId||req.body.accountId);
+  const transferDate=String(req.body.date||new Date().toISOString().slice(0,10));
+  const note=String(req.body.note||req.body.description||"").trim();
+  if(!Number.isFinite(amount)||amount<=0)return res.status(400).json({error:"Enter a positive withdrawal amount"});
+  if(!Number.isInteger(toAccountId))return res.status(400).json({error:"Choose the company bank account receiving money from UAP"});
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(transferDate))return res.status(400).json({error:"Use a valid withdrawal date"});
+  const result=await transaction(async client=>{
+    const destination=(await client.query(`SELECT * FROM finance_accounts WHERE id=$1 AND active=true FOR UPDATE`,[toAccountId])).rows[0];
+    if(!destination){const error=new Error("Destination bank account not found");error.status=404;throw error;}
+    if(destination.account_code==="GL-4500"){const error=new Error("Choose Centenary or another bank account, not the UAP account");error.status=400;throw error;}
+    const uap=(await client.query(`SELECT * FROM finance_accounts WHERE account_code='GL-4500' AND active=true FOR UPDATE`)).rows[0];
+    if(!uap){const error=new Error("UAP account not found");error.status=404;throw error;}
+    if(Number(uap.balance)<amount-0.005){const error=new Error("UAP account does not have enough balance for this withdrawal");error.status=400;throw error;}
+    const financeDepartment=(await client.query(`SELECT id FROM departments WHERE code='finance'`)).rows[0];
+    const outRef=reference("FIN-UAP-WD"),inRef=reference("FIN-UAP-BANK");
+    const outEntry=(await client.query(`INSERT INTO organization_finance_entries
+      (department_id,reference,entry_type,category,description,counterparty,payment_method,amount,status,receipt_number,
+        transaction_date,recorded_by,approved_by,approved_at,finance_account_id)
+      VALUES ($1,$2,'transfer','Internal withdrawal from UAP',$3,$4,'Bank transfer',$5,'completed',$6,$7,$8,$8,NOW(),$9)
+      RETURNING id,reference`,[financeDepartment.id,outRef,
+      note||`Internal withdrawal from Old Mutual Unit Trust (UAP) to company bank — not organization expense`,destination.account_name,amount,receiptReference("UAPWD"),transferDate,req.user.id,uap.id])).rows[0];
+    await client.query(`INSERT INTO organization_finance_entries
+      (department_id,reference,entry_type,category,description,counterparty,payment_method,amount,status,receipt_number,
+        transaction_date,recorded_by,approved_by,approved_at,finance_account_id)
+      VALUES ($1,$2,'transfer','Internal transfer from UAP',$3,$4,'Bank transfer',$5,'completed',$6,$7,$8,$8,NOW(),$9)`,
+      [financeDepartment.id,inRef,
+      note||`Company bank received internal withdrawal from UAP — already held as company funds`,uap.account_name,amount,receiptReference("UAPBK"),transferDate,req.user.id,destination.id]);
+    const uapUpdated=(await client.query(`UPDATE finance_accounts SET balance=balance-$1,updated_at=NOW() WHERE id=$2 RETURNING balance::float AS balance`,[amount,uap.id])).rows[0];
+    await client.query(`UPDATE finance_accounts SET balance=balance+$1,updated_at=NOW() WHERE id=$2`,[amount,destination.id]);
+    await client.query(`INSERT INTO unit_trust_movements
+      (movement_date,description,deposit_amount,interest_amount,withdrawal_amount,balance_after,source_reference,finance_entry_id,created_by)
+      VALUES ($1,'Withdrawal to company bank (Centenary)',0,0,$2,$3,$4,$5,$6)`,
+      [transferDate,amount,uapUpdated.balance,outRef,outEntry.id,req.user.id]);
+    await client.query(`INSERT INTO settings (key,value) VALUES ('organizationUapBalance',$1)
+      ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value,updated_at=NOW()`,[String(uapUpdated.balance)]);
+    await client.query(`UPDATE investment_fund_accounts SET current_value=$1,updated_at=NOW()
+      WHERE reference IN ('FUND-OLD-MUTUAL-2025','FUND-UAP-UMBRELLA')`,[uapUpdated.balance]);
+    return {outRef,inRef,uapBalance:uapUpdated.balance,toBalance:Number(destination.balance)+amount,amount};
+  });
+  await audit({userId:req.user.id,action:"FINANCE_WITHDRAW_FROM_UAP",entityType:"finance_account",
+    details:`UGX ${amount} ← UAP (${result.outRef} / ${result.inRef})`,...metadata(req)});
   res.status(201).json(result);
 }));
 app.get("/api/finance/unit-trust",auth,requireFinance("view"),asyncRoute(async(req,res)=>{
@@ -2298,9 +2406,23 @@ app.get("/api/investment/command-center",auth,requireInvestment("view"),asyncRou
       FROM member_investment_applications a JOIN investment_projects p ON p.id=a.project_id
       JOIN members m ON m.id=a.member_id ORDER BY a.id DESC`)
   ]);
-  const projectRows=projects.rows.map(project=>({...project,
-    roi:project.capitalInvested?Number((project.profit/project.capitalInvested*100).toFixed(1)):0,
-    budgetUtilization:project.budget?Number((project.expenses/project.budget*100).toFixed(1)):0}));
+  const uapBalance=Number((await one(`SELECT balance::float AS balance FROM finance_accounts WHERE account_code='GL-4500' AND active=true`))?.balance
+    ||(await one(`SELECT value FROM settings WHERE key='organizationUapBalance'`))?.value||0);
+  const uapInterestEarned=Number((await one(`SELECT COALESCE(SUM(interest_amount),0)::float AS total FROM unit_trust_movements`))?.total||0);
+  const projectRows=projects.rows.map(project=>{
+    const blob=`${project.reference||""} ${project.name||""} ${project.category||""}`;
+    const liveUap=/unit trust|old mutual|\buap\b|INV-FUND-OM/i.test(blob);
+    const invested=Number(project.capitalInvested||project.budget||0);
+    const currentValue=liveUap?uapBalance:Number(project.currentValue||0);
+    const expectedReturn=liveUap?(uapInterestEarned||Math.max(0,currentValue-invested)):Number(project.expectedReturn||0);
+    const profit=liveUap?expectedReturn:Number(project.profit||0);
+    const row={...project,isUnitTrust:liveUap,currentValue,expectedReturn,profit,revenue:liveUap?expectedReturn:project.revenue,
+      expenses:liveUap?0:project.expenses,progress:liveUap?100:project.progress,
+      performanceStatus:liveUap?(currentValue>=invested?"profitable":"watch"):project.performanceStatus};
+    return {...row,
+      roi:invested?Number((row.profit/invested*100).toFixed(1)):0,
+      budgetUtilization:liveUap?(row.budget?100:0):(row.budget?Number((row.expenses/row.budget*100).toFixed(1)):0)};
+  });
   const revenue=transactionsResult.rows.filter(t=>t.transactionType==="revenue").reduce((sum,t)=>sum+t.amount,0);
   const expenses=transactionsResult.rows.filter(t=>t.transactionType==="expense").reduce((sum,t)=>sum+t.amount,0);
   const profit=revenue-expenses,totalInvested=projectRows.reduce((sum,p)=>sum+p.capitalInvested,0);

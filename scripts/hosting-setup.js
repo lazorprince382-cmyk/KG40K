@@ -73,6 +73,10 @@ if (!skipSync) {
     "scripts/sync-vicent-welfare-start.js",
     ...dry,
   ]);
+  run("Member welfare standing (650k / Vicent 50k)", "node", [
+    "scripts/sync-welfare-member-balances.js",
+    ...dry,
+  ]);
 } else {
   console.log("\n== Sync ==\nSkipped (--skip-sync)");
 }
@@ -92,6 +96,7 @@ console.log("  npm run db:sync-uap-flow");
 console.log("  npm run db:clarify-uap-flow");
 console.log("  npm run db:sync-sep2026-live");
 console.log("  npm run db:sync-vicent-welfare");
+console.log("  npm run db:sync-welfare-balances");
 console.log("  npm run db:sync-live-pack");
 console.log("  npm run db:verify-live");
 console.log("  npm run db:export-system      # refresh dump after local data changes");

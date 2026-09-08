@@ -149,9 +149,17 @@
     const bank=Number(s.bankBalance??org.bankBalance??0);
     const loansOut=Number(s.loansOutstanding??org.loansOutstanding??0);
     const company=Number(s.companyFunds??org.companyFunds??(uap+bank+loansOut));
+    const memberName=String(m.fullName||m.full_name||"");
+    const memberNumber=String(m.memberNumber||m.member_number||"");
+    const welfareExcluded=/oketcho/i.test(memberName)||(/baraza/i.test(memberName)&&/nakayiza|olivia/i.test(memberName));
+    const welfareVicent=(/vicent|vincent/i.test(memberName)&&/gumisiriza/i.test(memberName))||memberNumber==="G40-2026-0002";
+    const welfareSinceLabel=welfareExcluded?null:welfareVicent?"July 2026":(s.welfareSinceLabel||"June 2024");
+    const welfareCardNote=welfareExcluded
+      ?"Not on the welfare standing register"
+      :`Welfare since ${welfareSinceLabel}`;
     return `${oversightBanner()}<div class="member-portal"><section class="member-welcome member-hero-card"><div class="member-welcome-top"><span>${g}</span><h2>${esc(m.fullName)}</h2></div>${loanNeedCta(c)}</section>
-      <div class="member-summary-grid">${metric("My Savings",money(s.savings),"savings","member-savings","Current carried-forward balance")}${metric("Share Capital",money(s.shares),"building","member-savings","Current share balance")}${metric("Personal Total Funds",money(s.personalTotalFunds??s.totalMemberFunds),"wallet","member-savings","Savings plus share capital")}${metric("Welfare",money(s.welfare??s.welfareContributions??0),"shield","member-welfare","UGX 25,000 of each UGX 425,000 monthly deposit")}${metric("Active Loan Balance",money(s.activeLoanBalance),"loans","member-loans","Remaining total repayment including interest")}</div>
-      <div class="member-summary-grid member-org-standing">${metric("At UAP account",money(uap),"building","member-dashboard","Old Mutual unit trust standing amount")}${metric("Centenary bank account",money(bank),"wallet","member-dashboard","Company Centenary account")}${metric("Money in loans",money(loansOut),"loans","member-loans","Outstanding loan principal across members")}${metric("Total Company Funds",money(company),"reports","member-dashboard","UAP + Centenary + money in loans")}</div>
+      <div class="member-summary-grid">${metric("My Savings",money(s.savings),"savings","member-savings","Current carried-forward balance")}${metric("Share Capital",money(s.shares),"building","member-savings","Current share balance")}${metric("Personal Total Funds",money(s.personalTotalFunds??s.totalMemberFunds),"wallet","member-savings","Savings plus share capital")}${metric("Welfare",money(s.welfare??s.welfareContributions??0),"shield","member-welfare",welfareCardNote)}${metric("Active Loan Balance",money(s.activeLoanBalance),"loans","member-loans","Remaining total repayment including interest")}</div>
+      <div class="member-summary-grid member-org-standing">${metric("UAP account",money(uap),"building","member-dashboard","Old Mutual unit trust standing amount")}${metric("Centenary bank account",money(bank),"wallet","member-dashboard","Company Centenary account")}${metric("Money in loans",money(loansOut),"loans","member-loans","Outstanding loan principal across members")}${metric("Total Company Funds",money(company),"reports","member-dashboard","UAP + Centenary + money in loans")}</div>
       ${dashboardNextUp(c)}
       <div class="member-dashboard-reveals">${contributionProgressReveal()}${recentActivityReveal()}</div></div>`;
   }

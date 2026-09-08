@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 "use strict";
 /**
- * Align Vicent Gumisiriza as a recent member (joined last month) and ensure
+ * Align Vicent Gumisiriza joined_at to July 2026 and ensure
  * welfare collection start date is June 2024.
  */
 const { Pool } = require("pg");
@@ -19,7 +19,7 @@ if (fs.existsSync(envFile)) {
 
 const dryRun = process.argv.includes("--dry-run");
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 2 });
-const JOINED = "2026-08-01"; // last month relative to Sep 2026 ops
+const JOINED = "2026-07-01"; // Vicent welfare/personal savings since July 2026
 
 async function main() {
   console.log(dryRun ? "DRY RUN\n" : "Aligning Vicent + welfare collection start\n");
@@ -58,7 +58,7 @@ async function main() {
           [JOINED, vicent.id]
         );
       }
-      console.log(`Vicent joined_at → ${JOINED} (new member / started last month)`);
+      console.log(`Vicent joined_at → ${JOINED} (since July 2026)`);
     } else {
       console.log("Vicent not found — create via membership onboarding if needed");
     }
