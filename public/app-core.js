@@ -1046,19 +1046,20 @@ function executiveDashboardView() {
     ["Centenary bank account",money(bank),"wallet","executive-finance","Company bank live balance"],
     ["Money in loans",money(loansOut),"loans","executive-credits","Outstanding loan principal"],
     ["Total Company Funds",money(company),"reports","executive-finance","UAP + Centenary + loans"],
+    ["Welfare Fund Balance",money(s.welfareFundBalance),"users","executive-welfare","Available fund"],
+    ["Welfare since June 2024",money(e.welfare?.collectedSince||e.welfareStanding?.collectedSince||0),"receipt","executive-welfare",e.welfare?.sinceLabel?`Collected since ${e.welfare.sinceLabel}`:"Also inside personal savings"],
     ["Income this month",money(s.organizationIncome),"arrowDown","executive-finance","Live operational receipts"],
     ["Expenditure this month",money(s.organizationExpenditure),"arrowUp","executive-finance","Live operational payments"],
     ["Total SACCO Savings",money(s.totalSavings),"savings","executive-credits","Member savings"],
     ["Active Investments",s.activeInvestments,"reports","executive-investments","Running projects"],
-    ["Welfare Fund Balance",money(s.welfareFundBalance),"users","executive-welfare","Available fund"],
     ["Legal Cases",s.legalCases,"file","executive-legal","Open matters"],
     ["Audit Issues",s.auditIssues,"audit","executive-audit","Open findings"],
     ["Supervisory Recommendations",s.supervisoryRecommendations,"shield","executive-supervisory","Pending follow-up"],
     ["Upcoming Meetings",s.upcomingMeetings,"clock","executive-meetings","Organization calendar"]
   ];
   const yearOptions=(e.availableFiscalYears||[]).map(y=>`<option value="${y.year}" ${Number(y.year)===Number(e.selectedFiscalYear)?"selected":""}>${escapeHtml(y.label||`FY ending ${y.year}`)}</option>`).join("");
-  return `<div class="exec-welcome"><div><p class="eyebrow">Executive command center</p><h2>Good ${new Date().getHours()<12?"morning":new Date().getHours()<17?"afternoon":"evening"}, ${actor().split(" ")[0]}</h2><p>${e.historicalPeriod?`Viewing the supplied FY ${e.selectedFiscalYear} closing records.`:"Live positions match the Finance dashboard — UAP, Centenary, loans and company funds."}</p></div><div class="dashboard-year-control"><label>Financial year</label><select data-executive-fy>${yearOptions}</select><span class="exec-live"><i></i>${e.historicalPeriod?"Historical statement":"Live organization overview"}</span></div></div>
-    <div class="exec-stat-grid">${cards.slice(0,8).map((c,i)=>executiveStatCard(...c,i)).join("")}</div>
+  return `<div class="exec-welcome"><div><p class="eyebrow">Executive command center</p><h2>Good ${new Date().getHours()<12?"morning":new Date().getHours()<17?"afternoon":"evening"}, ${actor().split(" ")[0]}</h2><p>${e.historicalPeriod?`Viewing the supplied FY ${e.selectedFiscalYear} closing records.`:"Live positions match Finance — UAP, Centenary, loans, and welfare savings since June 2024."}</p></div><div class="dashboard-year-control"><label>Financial year</label><select data-executive-fy>${yearOptions}</select><span class="exec-live"><i></i>${e.historicalPeriod?"Historical statement":"Live organization overview"}</span></div></div>
+    <div class="exec-stat-grid">${cards.slice(0,9).map((c,i)=>executiveStatCard(...c,i)).join("")}</div>
     <div class="exec-command-grid">
       ${executivePerformanceWidget(e)}
       ${executiveApprovalWidget(e.approvals.slice(0,5))}
@@ -1073,8 +1074,9 @@ function executiveDashboardView() {
         ["Projects running",e.investment.running],["Profitable projects",e.investment.profitable],["Projects losing money",e.investment.losing],
         ["Expected returns",money(e.investment.expected_return)],["Investment growth",`${e.investment.growth}%`]])}
       ${executiveHealthCard("Welfare","executive-welfare","users",[
-        ["Fund balance",money(e.welfare.fundBalance)],["Emergency requests",e.welfare.pending],["Approved requests",e.welfare.approved],
-        ["Pending requests",e.welfare.pending],["Monthly contributions",money(e.welfare.monthlyContributions)]])}
+        ["Fund balance",money(e.welfare.fundBalance)],["Since June 2024",money(e.welfare.collectedSince||0)],
+        ["Members contributing",e.welfare.membersContributing||0],["New members tracked",(e.welfare.newMembers||[]).length],
+        ["Monthly contributions",money(e.welfare.monthlyContributions)]])}
       ${executiveHealthCard("Audit","executive-audit","audit",[
         ["Open audit issues",e.audit.open],["Resolved issues",e.audit.resolved],["Departments under review",e.audit.departmentsUnderReview],
         ["Compliance",`${e.audit.compliance}%`]])}
@@ -1183,7 +1185,14 @@ function executiveModuleView(module) {
         ${hasCreditsDesk?creditsActiveLoansView():`<div class="exec-empty">Loading Credits portfolio… Open the Credits desk if this stays empty.</div>`}</section>`;
   }
   if(module==="investments") return executiveProjectsView();
-  if(module==="welfare") return `<div class="exec-module-metrics">${executiveModuleMetric("Fund balance",money(e.welfare.fundBalance),"green")}${executiveModuleMetric("Pending requests",e.welfare.pending,"orange")}${executiveModuleMetric("Approved requests",e.welfare.approved,"blue")}${executiveModuleMetric("Monthly contributions",money(e.welfare.monthlyContributions),"violet")}</div>${executiveRecordTable("Welfare request summary",["Reference","Member","Request","Amount","Status"],e.welfareRequests.map(x=>[x.reference,x.member,x.requestType,money(x.amount),status(x.status)]))}`;
+  if(module==="welfare") {
+    const standing=e.welfareStanding||{};
+    const newRows=(standing.newMembers||e.welfare.newMembers||[]).map(x=>[x.member,x.memberNumber||"",x.joinedAt?new Date(x.joinedAt).toLocaleDateString("en-GB"):"—",money(x.collected),money(x.savingsBalance||0)]);
+    return `<div class="exec-module-metrics">${executiveModuleMetric("Fund balance",money(e.welfare.fundBalance),"green")}${executiveModuleMetric(`Since ${standing.sinceLabel||"June 2024"}`,money(standing.collectedSince||e.welfare.collectedSince||0),"violet")}${executiveModuleMetric("Pending requests",e.welfare.pending,"orange")}${executiveModuleMetric("Monthly contributions",money(e.welfare.monthlyContributions),"blue")}</div>
+      <p class="exec-report-preview-note">${escapeHtml(standing.note||e.welfare.note||"Welfare share is part of personal savings and tracked in the welfare register.")}</p>
+      ${executiveRecordTable("New / recent members — welfare vs personal savings",["Member","Number","Joined","Welfare collected","Personal savings"],newRows)}
+      ${executiveRecordTable("Welfare request summary",["Reference","Member","Request","Amount","Status"],e.welfareRequests.map(x=>[x.reference,x.member,x.requestType,money(x.amount),status(x.status)]))}`;
+  }
   if(["legal","audit","supervisory"].includes(module)) {
     const rows=e.governance.filter(x=>module==="legal"?x.departmentCode==="legal":x.departmentCode==="supervisory"&&(module==="audit"?x.recordType==="audit":true));
     const title=module==="legal"?"Legal cases, contracts and policies":module==="audit"?"Audit issues":"Supervisory recommendations and follow-ups";
@@ -1377,13 +1386,22 @@ function financeSubscriptionProgressWidget(f){
 }
 function financeWelfareProgressWidget(f){
   const w=f.welfareProgress;if(!w)return "";
+  const standing=f.welfareStanding||{};
   const percent=Number(w.percent||0);
+  const newRows=(standing.newMembers||[]).slice(0,6).map(m=>`<tr><td><strong>${escapeHtml(m.member)}</strong><small>${escapeHtml(m.memberNumber||"")}${m.isNewMember?" · new":""}</small></td><td>${m.joinedAt?new Date(m.joinedAt).toLocaleDateString("en-GB"):"—"}</td><td>${money(m.collected)}</td><td>${money(m.savingsBalance||0)}</td></tr>`).join("")
+    ||`<tr><td colspan="4"><div class="member-empty">No new-member welfare rows yet.</div></td></tr>`;
   return `<section class="finance-panel finance-subscription-progress">
     <div class="finance-subscription-bar">
       <div class="finance-panel-head"><div><h3>Monthly welfare contributions</h3><p>${escapeHtml(w.periodLabel||"This month")} · ${money(w.perMember)} welfare share of ${money(w.monthlyCombined||425000)} member deposit</p></div><strong>${percent}%</strong></div>
       <div class="finance-subscription-track"><em style="width:${percent}%"></em></div>
       <div class="finance-subscription-meta"><span>${money(w.collected)} collected</span><span>${money(w.expected)} expected</span><span>${w.membersPaid||0} of ${w.activeMembers||0} members</span></div>
     </div>
+  </section>
+  <section class="finance-panel finance-welfare-standing">
+    <div class="finance-panel-head"><div><h3>Welfare savings since ${escapeHtml(standing.sinceLabel||"June 2024")}</h3><p>${escapeHtml(standing.note||"Welfare share stays inside personal savings and is also tracked in the welfare register.")}</p></div><strong>${money(standing.collectedSince||0)}</strong></div>
+    <div class="finance-subscription-meta" style="margin-bottom:12px"><span>${standing.membersContributing||0} members contributing</span><span>Fund position ${money(standing.closingBalance||0)}</span><span>${money(standing.monthlyShare||25000)} / month each</span></div>
+    <div class="table-scroll"><table class="finance-compact-table"><thead><tr><th>New / recent member</th><th>Joined</th><th>Welfare collected</th><th>Personal savings</th></tr></thead><tbody>${newRows}</tbody></table></div>
+    <p class="exec-report-preview-note" style="margin-top:10px">Click a member's personal savings on the member portal to see the full 425k deposit (welfare included).</p>
   </section>`;
 }
 function openFinanceSubscriptionMembers(){

@@ -76,16 +76,24 @@ if (!skipSync) {
     "scripts/sync-sep2026-live-cleanup.js",
     ...dry,
   ]);
+  run("Vicent join date + welfare collection start June 2024", "node", [
+    "scripts/sync-vicent-welfare-start.js",
+    ...dry,
+  ]);
 } else {
   console.log("\n== Sync ==\nSkipped (--skip-sync)");
 }
 
 console.log("\nDone. Start the app with: npm start");
 console.log("Migrations (incl. unit_trust_movements) run automatically on start.");
+console.log("\nRecurring auto-update (schedule this — NOT dump import):");
+console.log("  npm run system:auto-update");
+console.log("  npm run system:auto-update -- --pull");
 console.log("\nIndividual refresh commands:");
 console.log("  npm run db:sync-sep2026-dan");
 console.log("  npm run db:sync-uap-flow");
 console.log("  npm run db:clarify-uap-flow");
 console.log("  npm run db:sync-sep2026-live");
-console.log("  npm run db:sync-live-pack     # all four syncs, no dump import");
+console.log("  npm run db:sync-vicent-welfare");
+console.log("  npm run db:sync-live-pack");
 console.log("  npm run db:export-system      # refresh dump after local data changes");

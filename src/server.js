@@ -20,6 +20,7 @@ const {
   allocateGuarantorPledges
 } = require("./loan-security");
 const { getRunningLoan, getSavingsTargetStatus, getGuarantorEligibility } = require("./loan-eligibility");
+const { loadWelfareStanding } = require("./welfare-standing");
 let loanApprovals = null;
 const getLoanApprovals = async () => {
   if (!loanApprovals) loanApprovals = await buildLoanApprovalHelpers({ query, one });
@@ -640,6 +641,7 @@ app.get("/api/executive/command-center",auth,requireExecutive("view"),asyncRoute
     l.status,l.term_months AS "termMonths",l.created_at AS "createdAt" FROM loans l JOIN members m ON m.id=l.member_id
     JOIN loan_products p ON p.id=l.product_id ORDER BY l.id DESC LIMIT 20`)).rows;
   const welfareOpeningBalance=Number((await one("SELECT value FROM settings WHERE key='welfareFundBalance'"))?.value||0);
+  const welfareStanding=await loadWelfareStanding();
   const [budgetSummary,welfareMonth,welfareLedger,auditSummary,supervisorySummary,performanceRows,monthlyRows,financeAccounts]=await Promise.all([
     one(`SELECT COALESCE(SUM(allocated_amount),0)::float AS allocated,COALESCE(SUM(used_amount),0)::float AS used
       FROM finance_budgets WHERE status='approved'`),
@@ -683,7 +685,7 @@ app.get("/api/executive/command-center",auth,requireExecutive("view"),asyncRoute
     return totals;
   },{bankBalance:0,cashBalance:0,pettyCash:0,restrictedFunds:0,availableFunds:0});
   const investmentGrowth=investment.invested?Math.round((investment.current_value-investment.invested)/investment.invested*1000)/10:0;
-  const welfareBalance=welfareOpeningBalance+Number(welfareLedger.contributed||0)-Number(welfareLedger.paid||0);
+  const welfareBalance=welfareStanding.closingBalance;
   const notifications=[
     ...approvals.rows.slice(0,5).map(item=>({type:"approval",title:item.title,detail:`${item.department} approval required`,time:item.createdAt})),
     ...documents.rows.filter(d=>d.status==="pending_executive").slice(0,3).map(item=>({type:"approval",title:item.title,detail:`${item.department||"Legal"} document publication required`,time:item.updatedAt})),
@@ -743,7 +745,11 @@ app.get("/api/executive/command-center",auth,requireExecutive("view"),asyncRoute
     organizationStanding:{uapBalance,bankBalance:companyBankBalance,loansOutstanding:loansOutstandingLive,companyFunds},
     loans:{...loans,outstanding:loansOutstandingLive,recoveryRate:loans.issued?Math.round(loans.recovered/loans.issued*100):0},
     investment:{...investment,growth:investmentGrowth},investmentProjects,recentLoans,
-    welfare:{...welfare.rows[0],fundBalance:welfareBalance,monthlyContributions:welfareMonth.total},
+    welfare:{...welfare.rows[0],fundBalance:welfareBalance,monthlyContributions:welfareMonth.total,
+      collectedSince:welfareStanding.collectedSince,sinceLabel:welfareStanding.sinceLabel,
+      membersContributing:welfareStanding.membersContributing,newMembers:welfareStanding.newMembers,
+      note:welfareStanding.note},
+    welfareStanding,
     legal:legal.rows[0],audit:{...auditIssues.rows[0],open:auditSummary.open,departmentsUnderReview:auditSummary.departments,compliance:auditSummary.compliance},
     supervisory:{...supervisory.rows[0],departmentsBelowTarget:supervisorySummary.below},monthly,notifications
   });
@@ -1137,6 +1143,7 @@ app.get("/api/finance/command-center",auth,requireFinance("view"),asyncRoute(asy
     activeMembers:activeMemberCount,
     membersPaid:new Set(welfareMonthContributions.map(row=>row.memberId)).size
   };
+  const welfareStanding=await loadWelfareStanding();
   const displayBank=historicalPeriod
     ? (snapshotAmount("gl_4104")||snapshotAmount("cash_bank")||periodAccounts.filter(a=>a.accountType==="bank").reduce((s,a)=>s+a.balance,0))
     : bank;
@@ -1164,7 +1171,7 @@ app.get("/api/finance/command-center",auth,requireFinance("view"),asyncRoute(asy
     financialSnapshot,accounts:periodAccounts,departments:departments.rows,budgets:budgetRows,vouchers:vouchers.rows,entries:entries.rows,
     pendingEntries:pendingFinanceEntries,invoices:invoices.rows,assets:assets.rows,
     procurements:procurements.rows,documents:documents.rows,investmentAnalyses:investmentAnalyses.rows,monthly,daily,
-    incomeBySource,expensesByCategory,subscriptionProgress,welfareProgress,
+    incomeBySource,expensesByCategory,subscriptionProgress,welfareProgress,welfareStanding,
     organizationStanding:{uapBalance,bankBalance:companyBankBalance,loansOutstanding,companyFunds},
     notifications:[
       ...pendingFinanceEntries.slice(0,4).map(x=>({level:"warning",title:`${x.reference} awaits Finance verification`,createdAt:x.createdAt||x.transactionDate})),
@@ -2627,10 +2634,11 @@ app.get("/api/welfare/command-center",auth,requireWelfare("view"),asyncRoute(asy
       ORDER BY doc.updated_at DESC`)
   ]);
   const openingBalance=Number((await one("SELECT value FROM settings WHERE key='welfareFundBalance'"))?.value||0);
+  const welfareStanding=await loadWelfareStanding();
   const verifiedContributions=contributions.rows.filter(c=>["verified","completed"].includes(c.status)),
     contributed=verifiedContributions.reduce((s,c)=>s+c.amount,0);
   const assistancePaid=payments.rows.filter(p=>["paid","processed"].includes(p.status)).reduce((s,p)=>s+p.amount,0);
-  const otherExpenses=0,closingBalance=openingBalance+contributed-assistancePaid-otherExpenses;
+  const otherExpenses=0,closingBalance=welfareStanding.closingBalance;
   const requestRows=requests.rows,pending=requestRows.filter(r=>!["approved","rejected","closed"].includes(r.status));
   const approved=requestRows.filter(r=>r.status==="approved"),rejected=requestRows.filter(r=>r.status==="rejected");
   const emergencies=requestRows.filter(r=>["critical","high"].includes(r.urgency)&&!["closed","rejected"].includes(r.status));
@@ -2660,14 +2668,19 @@ app.get("/api/welfare/command-center",auth,requireWelfare("view"),asyncRoute(asy
       pendingRequests:pending.length,approvedRequests:approved.length,rejectedRequests:rejected.length,
       emergencyCases:emergencies.length,activeBeneficiaries:beneficiaries.size,membersInArrears:arrears,
       upcomingEvents:activities.rows.filter(a=>new Date(a.activityDate)>new Date()).length,averageApprovalTime:averageApproval,
-      remainingBalance:closingBalance},
+      remainingBalance:closingBalance,
+      collectedSince:welfareStanding.collectedSince,sinceLabel:welfareStanding.sinceLabel,
+      membersContributing:welfareStanding.membersContributing},
     fund:{openingBalance,contributions:contributed,assistancePaid,otherExpenses,closingBalance,
-      growth:openingBalance?Number(((closingBalance-openingBalance)/openingBalance*100).toFixed(2)):0},
+      growth:openingBalance?Number(((closingBalance-openingBalance)/openingBalance*100).toFixed(2)):0,
+      collectedSince:welfareStanding.collectedSince,sinceLabel:welfareStanding.sinceLabel,sinceDate:welfareStanding.sinceDate,
+      note:welfareStanding.note},
     contributionStatus:{fullyPaid,partiallyPaid,arrears,expected,collected,
       collectionPercentage:expected?Number((collected/expected*100).toFixed(1)):0,
       perMember:monthlyWelfareExpected,monthlyCombined:425000},
     beneficiarySummary:{total:beneficiaries.size,totalPaid:assistancePaid,averageSupport:beneficiaries.size?assistancePaid/beneficiaries.size:0,
       repeat:payments.rows.length-beneficiaries.size,highestCategory:Object.entries(categories).sort((a,b)=>b[1]-a[1])[0]?.[0]||"None"},
+    welfareStanding,
     requests:requestRows,contributions:contributions.rows,payments:payments.rows,activities:activities.rows,
     meetings:meetings.rows,documents:documents.rows,monthly,categories:Object.entries(categories).map(([category,amount])=>({category,amount})),
     notifications:[
