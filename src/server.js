@@ -75,7 +75,11 @@ const upload=multer({
     filename:(req,file,cb)=>cb(null,`${Date.now()}-${crypto.randomBytes(12).toString("hex")}${path.extname(file.originalname).toLowerCase().slice(0,10)}`)
   }),
   limits:{fileSize:15*1024*1024,files:5},
-  fileFilter:(req,file,cb)=>allowedFileTypes.has(file.mimetype)?cb(null,true):cb(new Error("This file type is not allowed"))
+  fileFilter:(req,file,cb)=>{
+    const mime=String(file.mimetype||"").toLowerCase();
+    if(allowedFileTypes.has(mime)||mime.startsWith("image/"))return cb(null,true);
+    cb(new Error("This file type is not allowed"));
+  }
 });
 const typingPresence=new Map();
 

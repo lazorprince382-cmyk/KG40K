@@ -10,7 +10,7 @@ module.exports = function registerLegalMembershipApi({
     investment:"Investment Officer",welfare:"Welfare Officer",legal:"Legal Officer",
     audit:"Auditor",supervisory:"Supervisory Officer"
   };
-  const imageTypes=new Set(["image/jpeg","image/png","image/webp"]);
+  const imageTypes=new Set(["image/jpeg","image/png","image/webp","image/gif","image/jpg"]);
   const requireLegal=action=>asyncRoute(async(req,res,next)=>{
     const access=await departmentPermission(req.user,"legal",action);
     if(!access)return res.status(403).json({error:`Legal ${action} authority is required`});
@@ -145,13 +145,16 @@ module.exports = function registerLegalMembershipApi({
   }));
 
   app.post("/api/legal/members/:memberId/passport-photo",auth,requireLegal("edit"),upload.single("passportPhoto"),asyncRoute(async(req,res)=>{
-    if(!req.file)return res.status(400).json({error:"Choose a JPG, PNG or WebP passport photo"});
-    if(!imageTypes.has(req.file.mimetype)){removeUpload(req.file);return res.status(400).json({error:"Passport photo must be JPG, PNG or WebP"});}
+    if(!req.file)return res.status(400).json({error:"Choose a passport photo to upload"});
+    const mime=String(req.file.mimetype||"").toLowerCase();
+    if(!imageTypes.has(mime)&&!mime.startsWith("image/")){removeUpload(req.file);return res.status(400).json({error:"Passport photo must be an image file"});}
     const old=await one(`SELECT passport_photo_stored_name AS stored FROM member_bio_data WHERE member_id=$1`,[req.params.memberId]);
     const result=await query(`UPDATE member_bio_data SET passport_photo_stored_name=$1,passport_photo_original_name=$2,
       passport_photo_mime_type=$3,updated_at=NOW() WHERE member_id=$4 RETURNING member_id`,
-    [req.file.filename,req.file.originalname,req.file.mimetype,req.params.memberId]);
+    [req.file.filename,req.file.originalname,req.file.mimetype||"image/jpeg",req.params.memberId]);
     if(!result.rowCount){removeUpload(req.file);return res.status(404).json({error:"Member bio record not found"});}
+    await query(`UPDATE users SET profile_photo_stored_name=$1,profile_photo_original_name=$2,profile_photo_mime_type=$3
+      WHERE member_id=$4`,[req.file.filename,req.file.originalname,req.file.mimetype||"image/jpeg",req.params.memberId]);
     if(old?.stored&&path.basename(old.stored)===old.stored){const target=path.join(uploadsDir,old.stored);if(target.startsWith(`${uploadsDir}${path.sep}`))fs.unlink(target,()=>{});}
     await audit({userId:req.user.id,action:"MEMBER_PASSPORT_PHOTO_UPDATED",entityType:"member_bio_data",
       entityId:String(req.params.memberId),...metadata(req)});

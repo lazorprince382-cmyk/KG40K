@@ -103,15 +103,15 @@
   }
   function accountSettings(){
     const photo=state.user?.has_profile_photo,m=C()?.member;
-    return `<section class="account-settings"><div class="account-settings-head"><div><p class="eyebrow">Personal account</p><h2>Account & security</h2><p>Edit your profile information, profile picture and password.</p></div><div class="account-photo">${photo?`<img src="/api/account/profile-photo?v=${state.profilePhotoVersion||0}" alt="Profile photo">`:`<span>${initials(actor())}</span>`}</div></div>
+    return `<section class="account-settings"><div class="account-settings-head"><div><p class="eyebrow">Personal account</p><h2>Account & security</h2><p>Edit your profile information, profile picture and password. Changes sync to Legal bio data.</p></div><div class="account-photo">${photo?`<img src="/api/account/profile-photo?v=${state.profilePhotoVersion||0}" alt="Profile photo">`:`<span>${initials(actor())}</span>`}</div></div>
       <div class="account-settings-grid">
-        <form class="card account-form account-profile-form" data-account-profile><h3>Profile information</h3><p>Saved details are used throughout dashboards, messages and your linked member record.</p><div class="form-grid">
+        <form class="card account-form account-profile-form" data-account-profile><h3>Profile information</h3><p>Saved details update your linked member record and Legal bio-data register.</p><div class="form-grid">
           <div class="field"><label>Full name</label><input name="fullName" value="${esc(actor())}" minlength="2" maxlength="120" required></div>
           <div class="field"><label>Email address</label><input name="email" type="email" value="${esc(state.user?.email||m?.email||"")}" required></div>
-          <div class="field"><label>Phone number</label><input name="phone" value="${esc(state.user?.phone||m?.phone||"")}" required></div>
-          ${m?`<div class="field"><label>National ID</label><input name="nationalId" value="${esc(m.nationalId||"")}"></div><div class="field"><label>Date of birth</label><input name="dateOfBirth" type="date" value="${m.dateOfBirth?String(m.dateOfBirth).slice(0,10):""}"></div><div class="field"><label>Gender</label><select name="gender"><option value="">Not recorded</option>${["female","male","other","prefer_not_to_say"].map(x=>`<option value="${x}" ${m.gender===x?"selected":""}>${x.replaceAll("_"," ")}</option>`).join("")}</select></div><div class="field"><label>Marital status</label><select name="maritalStatus"><option value="">Not recorded</option>${["single","married","divorced","widowed","separated","other"].map(x=>`<option value="${x}" ${m.maritalStatus===x?"selected":""}>${x}</option>`).join("")}</select></div><div class="field"><label>Nationality</label><input name="nationality" value="${esc(m.nationality||"")}"></div><div class="field"><label>Occupation</label><input name="occupation" value="${esc(m.occupation||"")}"></div><div class="field"><label>Employer</label><input name="employer" value="${esc(m.employer||"")}"></div><div class="field full"><label>Residence / address</label><input name="address" value="${esc(m.address||"")}"></div><div class="field"><label>Home district</label><input name="homeDistrict" value="${esc(m.homeDistrict||"")}"></div><div class="field"><label>Subcounty</label><input name="subcounty" value="${esc(m.subcounty||"")}"></div><div class="field"><label>Parish</label><input name="parish" value="${esc(m.parish||"")}"></div><div class="field"><label>Village</label><input name="village" value="${esc(m.village||"")}"></div><div class="field"><label>Next of kin</label><input name="nextOfKin" value="${esc(m.nextOfKin||"")}"></div><div class="field"><label>Beneficiaries</label><input name="beneficiaries" value="${esc(m.beneficiaries||"")}"></div><div class="field"><label>Emergency contact</label><input name="emergencyContactName" value="${esc(m.emergencyContactName||"")}"></div><div class="field"><label>Emergency phone</label><input name="emergencyContactPhone" value="${esc(m.emergencyContactPhone||"")}"></div><div class="field"><label>Emergency relationship</label><input name="emergencyContactRelationship" value="${esc(m.emergencyContactRelationship||"")}"></div><input type="hidden" name="membershipStatus" value="${esc(m.status||"active")}">`:""}
-        </div><button class="button primary">Save profile information</button></form>
-        <form class="card account-form" data-account-photo><h3>Profile picture</h3><p>JPG, PNG or WebP.</p><div class="field"><label>Choose photo</label><input name="photo" type="file" accept="image/jpeg,image/png,image/webp" required></div><div class="form-actions"><button class="button primary">Upload</button>${photo?`<button class="button secondary" type="button" data-remove-photo>Remove</button>`:""}</div></form>
+          <div class="field"><label>Phone number</label><input name="phone" value="${esc(state.user?.phone||m?.phone||"")}" minlength="7" maxlength="30" placeholder="Optional if not yet recorded"></div>
+          ${m?`<div class="field"><label>National ID</label><input name="nationalId" value="${esc(m.nationalId||"")}"></div><div class="field"><label>Date of birth</label><input name="dateOfBirth" type="date" value="${m.dateOfBirth?String(m.dateOfBirth).slice(0,10):""}"></div><div class="field"><label>Gender</label><select name="gender"><option value="">Not recorded</option>${["female","male","other","prefer_not_to_say"].map(x=>`<option value="${x}" ${m.gender===x?"selected":""}>${x.replaceAll("_"," ")}</option>`).join("")}</select></div><div class="field"><label>Marital status</label><select name="maritalStatus"><option value="">Not recorded</option>${["single","married","divorced","widowed","separated","other"].map(x=>`<option value="${x}" ${m.maritalStatus===x?"selected":""}>${x}</option>`).join("")}</select></div><div class="field"><label>Nationality</label><input name="nationality" value="${esc(m.nationality||"Ugandan")}"></div><div class="field"><label>Occupation</label><input name="occupation" value="${esc(m.occupation||"")}"></div><div class="field"><label>Employer</label><input name="employer" value="${esc(m.employer||"")}"></div><div class="field full"><label>Residence / address</label><input name="address" value="${esc(m.address||"")}"></div><div class="field"><label>Home district</label><input name="homeDistrict" value="${esc(m.homeDistrict||"")}"></div><div class="field"><label>Subcounty</label><input name="subcounty" value="${esc(m.subcounty||"")}"></div><div class="field"><label>Parish</label><input name="parish" value="${esc(m.parish||"")}"></div><div class="field"><label>Village</label><input name="village" value="${esc(m.village||"")}"></div><div class="field"><label>Next of kin</label><input name="nextOfKin" value="${esc(m.nextOfKin||"")}"></div><div class="field"><label>Beneficiaries</label><input name="beneficiaries" value="${esc(m.beneficiaries||"")}"></div><div class="field"><label>Emergency contact</label><input name="emergencyContactName" value="${esc(m.emergencyContactName||"")}"></div><div class="field"><label>Emergency phone</label><input name="emergencyContactPhone" value="${esc(m.emergencyContactPhone||"")}"></div><div class="field"><label>Emergency relationship</label><input name="emergencyContactRelationship" value="${esc(m.emergencyContactRelationship||"")}"></div><input type="hidden" name="membershipStatus" value="${esc(m.status||"active")}">`:""}
+        </div><button class="button primary" type="submit">Save profile information</button></form>
+        <form class="card account-form" data-account-photo><h3>Profile picture</h3><p>Any image format or size. You will crop it before saving.</p><div class="field"><label>Choose photo</label><input name="photo" type="file" accept="image/*" data-photo-pick></div><div class="photo-crop-preview" data-photo-crop-preview hidden><img alt="Cropped preview" data-photo-crop-img><small data-photo-crop-label>Cropped photo ready to save</small></div><div class="form-actions"><button class="button primary" type="submit" data-photo-save disabled>Save profile picture</button>${photo?`<button class="button secondary" type="button" data-remove-photo>Remove</button>`:""}</div></form>
         <form class="card account-form" data-account-password><h3>Change password</h3><p>Changing it signs out every session.</p><div class="field"><label>Current password</label><input name="currentPassword" type="password" required></div><div class="field"><label>New password</label><input name="newPassword" type="password" minlength="8" required><small>Uppercase, lowercase, number and symbol.</small></div><button class="button primary">Change password</button></form>
       </div></section>`;
   }
@@ -634,9 +634,136 @@
       closeModal();await reload(`Deposit ${result.reference} sent to Credits for verification.`);
     }catch(error){button.disabled=false;button.textContent="Send for verification";fail(error.message||"Deposit submission failed. Please try again.");}
   }
+  async function reloadMemberCenter(){
+    if(!linked())return;
+    try{
+      const url=state.memberOversight&&C()?.member?.id?`/api/members/${C().member.id}/command-center`:"/api/member/command-center";
+      state.memberCenter=await api(url);
+      state.memberSelfService=await api("/api/member/self-service");
+      syncMemberPending();
+    }catch{}
+  }
+  function cropProfilePhoto(file){
+    return new Promise((resolve,reject)=>{
+      if(!file)return reject(new Error("Choose a photo first"));
+      const url=URL.createObjectURL(file);
+      const img=new Image();
+      img.onload=()=>{
+        const naturalW=img.naturalWidth||img.width,naturalH=img.naturalHeight||img.height;
+        if(!naturalW||!naturalH){URL.revokeObjectURL(url);return reject(new Error("Could not read that image. Try another format."));}
+        const minSide=Math.min(naturalW,naturalH);
+        let zoom=1,offsetX=0,offsetY=0,dragging=false,lastX=0,lastY=0;
+        modal("Crop profile picture","Adjust the square crop, then save",`<div class="photo-crop-modal"><div class="photo-crop-stage" data-crop-stage><canvas data-crop-canvas width="360" height="360"></canvas></div><div class="field"><label>Zoom</label><input type="range" min="1" max="3" step="0.01" value="1" data-crop-zoom></div><p class="photo-crop-hint">Drag to reposition. Any image format works — the crop is saved as a square photo.</p><div class="form-actions"><button type="button" class="button secondary" data-crop-cancel>Cancel</button><button type="button" class="button primary" data-crop-apply>Use this crop</button></div></div>`);
+        const canvas=document.querySelector("[data-crop-canvas]"),stage=document.querySelector("[data-crop-stage]"),zoomInput=document.querySelector("[data-crop-zoom]");
+        const ctx=canvas?.getContext("2d");
+        if(!canvas||!ctx||!stage||!zoomInput){URL.revokeObjectURL(url);closeModal();return reject(new Error("Crop tool failed to open"));}
+        const draw=()=>{
+          const view=minSide/zoom;
+          const maxX=Math.max(0,naturalW-view),maxY=Math.max(0,naturalH-view);
+          offsetX=Math.min(Math.max(0,offsetX),maxX);offsetY=Math.min(Math.max(0,offsetY),maxY);
+          ctx.clearRect(0,0,canvas.width,canvas.height);
+          ctx.drawImage(img,offsetX,offsetY,view,view,0,0,canvas.width,canvas.height);
+        };
+        draw();
+        zoomInput.addEventListener("input",()=>{zoom=Number(zoomInput.value)||1;draw();});
+        const onMove=event=>{
+          if(!dragging)return;
+          const point=event.touches?event.touches[0]:event;
+          const dx=point.clientX-lastX,dy=point.clientY-lastY;
+          lastX=point.clientX;lastY=point.clientY;
+          const view=minSide/zoom,scale=view/canvas.width;
+          offsetX-=dx*scale;offsetY-=dy*scale;draw();
+          event.preventDefault();
+        };
+        const stopDrag=()=>{dragging=false;};
+        const startDrag=event=>{
+          const point=event.touches?event.touches[0]:event;
+          dragging=true;lastX=point.clientX;lastY=point.clientY;event.preventDefault();
+        };
+        stage.addEventListener("mousedown",startDrag);
+        stage.addEventListener("touchstart",startDrag,{passive:false});
+        window.addEventListener("mousemove",onMove);
+        window.addEventListener("touchmove",onMove,{passive:false});
+        window.addEventListener("mouseup",stopDrag);
+        window.addEventListener("touchend",stopDrag);
+        const cleanup=()=>{
+          window.removeEventListener("mousemove",onMove);
+          window.removeEventListener("touchmove",onMove);
+          window.removeEventListener("mouseup",stopDrag);
+          window.removeEventListener("touchend",stopDrag);
+          URL.revokeObjectURL(url);
+        };
+        document.querySelector("[data-crop-cancel]")?.addEventListener("click",()=>{cleanup();closeModal();reject(new Error("Crop cancelled"));});
+        document.querySelector("[data-crop-apply]")?.addEventListener("click",()=>{
+          const out=document.createElement("canvas");out.width=512;out.height=512;
+          const outCtx=out.getContext("2d");
+          const view=minSide/zoom;
+          outCtx.drawImage(img,offsetX,offsetY,view,view,0,0,512,512);
+          out.toBlob(blob=>{
+            cleanup();closeModal();
+            if(!blob)return reject(new Error("Could not create cropped photo"));
+            resolve(new File([blob],"profile-photo.jpg",{type:"image/jpeg"}));
+          },"image/jpeg",0.92);
+        });
+      };
+      img.onerror=()=>{URL.revokeObjectURL(url);reject(new Error("This image could not be opened. Try JPG, PNG, WebP or another common format."));};
+      img.src=url;
+    });
+  }
   function bindAccount(){
-    document.querySelector("[data-account-profile]")?.addEventListener("submit",async e=>{e.preventDefault();try{await api("/api/account/profile",{method:"PATCH",body:JSON.stringify(Object.fromEntries(new FormData(e.currentTarget)))});await refreshData();render();toast("Profile information updated throughout the system.");}catch(error){toast(error.message);}});
-    document.querySelector("[data-account-photo]")?.addEventListener("submit",async e=>{e.preventDefault();try{const response=await fetch("/api/account/profile-photo",{method:"POST",credentials:"same-origin",body:new FormData(e.currentTarget)}),data=await response.json();if(!response.ok)throw new Error(data.error);state.user.has_profile_photo=true;state.profilePhotoVersion=Date.now();render();toast("Profile picture updated throughout the system.");}catch(error){toast(error.message);}});
+    let pendingCroppedPhoto=null;
+    document.querySelector("[data-account-profile]")?.addEventListener("submit",async e=>{
+      e.preventDefault();
+      const form=e.currentTarget,button=form.querySelector("button[type=submit]");
+      const payload=Object.fromEntries(new FormData(form));
+      if(button){button.disabled=true;button.textContent="Saving...";}
+      try{
+        await api("/api/account/profile",{method:"PATCH",body:JSON.stringify(payload)});
+        await refreshData();
+        await reloadMemberCenter();
+        render();
+        toast("Profile information saved and synced to Legal bio data.");
+      }catch(error){toast(error.message||"Could not save profile information.");}
+      finally{if(button){button.disabled=false;button.textContent="Save profile information";}}
+    });
+    document.querySelector("[data-photo-pick]")?.addEventListener("change",async e=>{
+      const input=e.currentTarget,file=input.files?.[0];
+      pendingCroppedPhoto=null;
+      const saveBtn=document.querySelector("[data-photo-save]"),preview=document.querySelector("[data-photo-crop-preview]"),previewImg=document.querySelector("[data-photo-crop-img]");
+      if(saveBtn)saveBtn.disabled=true;
+      if(preview)preview.hidden=true;
+      if(!file)return;
+      try{
+        pendingCroppedPhoto=await cropProfilePhoto(file);
+        if(preview&&previewImg){
+          if(previewImg.dataset.url)URL.revokeObjectURL(previewImg.dataset.url);
+          const previewUrl=URL.createObjectURL(pendingCroppedPhoto);
+          previewImg.src=previewUrl;previewImg.dataset.url=previewUrl;preview.hidden=false;
+        }
+        if(saveBtn)saveBtn.disabled=false;
+        toast("Crop ready — click Save profile picture.");
+      }catch(error){
+        if(error.message!=="Crop cancelled")toast(error.message||"Could not crop photo.");
+        input.value="";
+      }
+    });
+    document.querySelector("[data-account-photo]")?.addEventListener("submit",async e=>{
+      e.preventDefault();
+      if(!pendingCroppedPhoto)return toast("Choose a photo and crop it first.");
+      const button=e.currentTarget.querySelector("[data-photo-save]");
+      if(button){button.disabled=true;button.textContent="Saving...";}
+      try{
+        const body=new FormData();
+        body.append("photo",pendingCroppedPhoto,pendingCroppedPhoto.name||"profile-photo.jpg");
+        const response=await fetch("/api/account/profile-photo",{method:"POST",credentials:"same-origin",body}),data=await response.json();
+        if(!response.ok)throw new Error(data.error||"Photo upload failed");
+        pendingCroppedPhoto=null;
+        state.user.has_profile_photo=true;state.profilePhotoVersion=Date.now();
+        await reloadMemberCenter();
+        render();
+        toast("Profile picture saved and synced to Legal bio data.");
+      }catch(error){toast(error.message);if(button){button.disabled=false;button.textContent="Save profile picture";}}
+    });
     document.querySelector("[data-remove-photo]")?.addEventListener("click",async()=>{try{await api("/api/account/profile-photo",{method:"DELETE"});state.user.has_profile_photo=false;state.profilePhotoVersion=Date.now();render();toast("Profile picture removed throughout the system.");}catch(error){toast(error.message);}});
     document.querySelector("[data-account-password]")?.addEventListener("submit",async e=>{e.preventDefault();try{await api("/api/auth/change-password",{method:"POST",body:JSON.stringify(Object.fromEntries(new FormData(e.currentTarget)))});state.user=null;loginView();toast("Password changed. Sign in again.");}catch(error){toast(error.message);}});
   }

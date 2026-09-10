@@ -25,8 +25,23 @@
     state.legalBio=await api(`/api/legal/bio-data?q=${encodeURIComponent(q)}&status=${encodeURIComponent(status)}&department=${encodeURIComponent(department)}`);
     return state.legalBio;
   }
+  function canLoadLegalBio(){
+    return state.role==="Legal Officer"||state.executiveWorkspace==="legal"||state.page==="legal-bio-data";
+  }
+  let bioLoadAttempted=false;
+  async function ensureLegalBio(force=false){
+    if(!canLoadLegalBio())return;
+    if(!force&&(state.legalBio?.records?.length||bioLoadAttempted))return state.legalBio;
+    bioLoadAttempted=true;
+    try{
+      await loadBio(state.legalBio?.query||"",state.legalBio?.status||"all",state.legalBio?.department||"all");
+    }catch(error){
+      toast(error.message||"Could not load member bio data.");
+    }
+    return state.legalBio;
+  }
   const baseRefresh=refreshData;
-  refreshData=async function(){await baseRefresh();if(state.role==="Legal Officer")await loadBio();};
+  refreshData=async function(){await baseRefresh();if(canLoadLegalBio())await ensureLegalBio(true);};
 
   function profile(record){
     const depts=deptList(record);
@@ -114,8 +129,8 @@
       <div class="form-grid">
         <div class="field full"><label>Full legal name</label><input name="fullName" value="${esc(record.fullName||"")}" required></div>
         <div class="field"><label>Email address</label><input name="email" type="email" value="${esc(record.email||"")}"></div>
-        <div class="field"><label>Phone number</label><input name="phone" value="${esc(record.phone||"")}" required></div>
-        <div class="field"><label>National ID</label><input name="nationalId" value="${esc(record.nationalId||"")}" required></div>
+        <div class="field"><label>Phone number</label><input name="phone" value="${esc(record.phone||"")}"></div>
+        <div class="field"><label>National ID</label><input name="nationalId" value="${esc(record.nationalId||"")}"></div>
         <div class="field"><label>Membership status</label><select name="membershipStatus">${["active","suspended","inactive"].map(x=>option(record.membershipStatus,x)).join("")}</select></div>
         <div class="field"><label>Occupation</label><input name="occupation" value="${esc(record.occupation||"")}"></div>
         <div class="field"><label>Employer</label><input name="employer" value="${esc(record.employer||"")}"></div>
@@ -124,8 +139,12 @@
         <div class="field"><label>Beneficiaries</label><input name="beneficiaries" value="${esc(record.beneficiaries||"")}"></div>
         <div class="field"><label>Gender</label><select name="gender"><option value="">Not recorded</option>${["female","male","other","prefer_not_to_say"].map(x=>option(record.gender,x)).join("")}</select></div>
         <div class="field"><label>Marital status</label><select name="maritalStatus"><option value="">Not recorded</option>${["single","married","divorced","widowed","separated","other"].map(x=>option(record.maritalStatus,x)).join("")}</select></div>
-        ${fields.map(([name,label,type="text"])=>`<div class="field"><label>${label}</label><input name="${name}" type="${type}" value="${esc(record[name]||"")}"></div>`).join("")}
-        <div class="field full"><label>Replace passport photo</label><input name="passportPhoto" type="file" accept="image/jpeg,image/png,image/webp"><small>Leave empty to keep the current photo.</small></div>
+        ${fields.map(([name,label,type="text"])=>{
+          const raw=record[name]||"";
+          const val=type==="date"&&raw?String(raw).slice(0,10):raw;
+          return `<div class="field"><label>${label}</label><input name="${name}" type="${type}" value="${esc(val)}"></div>`;
+        }).join("")}
+        <div class="field full"><label>Replace passport photo</label><input name="passportPhoto" type="file" accept="image/*"><small>Any image format. Leave empty to keep the current photo.</small></div>
         <div class="field"><label>Record status</label><select name="bioStatus">${["pending","complete","verified","needs_update"].map(x=>option(record.bioStatus,x)).join("")}</select></div>
       </div>
       <div class="form-actions"><button type="button" class="button secondary" data-close-modal>Cancel</button><button type="submit" class="button primary">${icons.check}Save protected record</button></div>
@@ -137,6 +156,7 @@
   }
   D.binders.push(cfg=>{
     if(cfg.key!=="legal"||state.page!=="legal-bio-data")return;
+    if(!state.legalBio)ensureLegalBio(true).then(()=>render()).catch(()=>{});
     document.querySelector("[data-bio-search]")?.addEventListener("submit",async event=>{
       event.preventDefault();const data=Object.fromEntries(new FormData(event.currentTarget));
       try{await loadBio(data.q,data.status,data.department||"all");render();}catch(error){toast(error.message);}

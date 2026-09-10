@@ -2,7 +2,7 @@ module.exports = function registerMemberAccountApi({
   app, auth, asyncRoute, query, one, transaction, audit, metadata, upload, fs, path, uploadsDir
 }) {
   const { notifyCreditsVerificationQueue } = require("./credits-queue");
-  const imageTypes = new Set(["image/jpeg","image/png","image/webp"]);
+  const imageTypes = new Set(["image/jpeg","image/png","image/webp","image/gif","image/jpg"]);
   const receiptTypes = new Set(["image/jpeg","image/png","image/webp","application/pdf"]);
   const removeStoredFile = storedName => {
     if (!storedName || path.basename(storedName) !== storedName) return;
@@ -18,13 +18,14 @@ module.exports = function registerMemberAccountApi({
       phone=String(b.phone||"").trim();
     if(fullName.length<2||fullName.length>120)return res.status(400).json({error:"Enter a valid account name"});
     if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))return res.status(400).json({error:"Enter a valid email address"});
-    if(phone.length<7||phone.length>30)return res.status(400).json({error:"Enter a valid phone number"});
+    if(phone&&(phone.length<7||phone.length>30))return res.status(400).json({error:"Enter a valid phone number"});
+    const nationality=String(b.nationality||"").trim()||"Ugandan";
     try {
       await transaction(async client=>{
-        await client.query("UPDATE users SET full_name=$1,email=$2,phone=$3 WHERE id=$4",[fullName,email,phone,req.user.id]);
+        await client.query("UPDATE users SET full_name=$1,email=$2,phone=COALESCE(NULLIF($3,''),phone) WHERE id=$4",[fullName,email,phone,req.user.id]);
         if(!req.user.member_id)return;
         // Members cannot self-change membership status — keep existing status
-        await client.query(`UPDATE members SET full_name=$1,email=$2,phone=$3,national_id=NULLIF($4,''),
+        await client.query(`UPDATE members SET full_name=$1,email=$2,phone=COALESCE(NULLIF($3,''),phone),national_id=NULLIF($4,''),
           provisional=CASE WHEN NULLIF($4,'') IS NOT NULL THEN false ELSE provisional END,
           occupation=NULLIF($5,''),employer=NULLIF($6,''),address=NULLIF($7,''),next_of_kin=NULLIF($8,''),
           beneficiaries=NULLIF($9,'') WHERE id=$10`,
@@ -35,9 +36,9 @@ module.exports = function registerMemberAccountApi({
           (member_id,date_of_birth,gender,marital_status,nationality,home_district,subcounty,parish,village,
            emergency_contact_name,emergency_contact_phone,emergency_contact_relationship,blood_group,
            bio_status,created_by,updated_at)
-          VALUES ($1,NULLIF($2,'')::date,NULLIF($3,''),NULLIF($4,''),NULLIF($5,''),NULLIF($6,''),
+          VALUES ($1,NULLIF($2,'')::date,NULLIF($3,''),NULLIF($4,''),$5,NULLIF($6,''),
             NULLIF($7,''),NULLIF($8,''),NULLIF($9,''),NULLIF($10,''),NULLIF($11,''),NULLIF($12,''),
-            NULLIF($13,''),'draft',$14,NOW())
+            NULLIF($13,''),'pending',$14,NOW())
           ON CONFLICT (member_id) DO UPDATE SET date_of_birth=EXCLUDED.date_of_birth,gender=EXCLUDED.gender,
             marital_status=EXCLUDED.marital_status,nationality=EXCLUDED.nationality,
             home_district=EXCLUDED.home_district,subcounty=EXCLUDED.subcounty,parish=EXCLUDED.parish,
@@ -45,9 +46,9 @@ module.exports = function registerMemberAccountApi({
             emergency_contact_phone=EXCLUDED.emergency_contact_phone,
             emergency_contact_relationship=EXCLUDED.emergency_contact_relationship,
             blood_group=EXCLUDED.blood_group,
-            bio_status=CASE WHEN member_bio_data.bio_status IN ('verified','complete') THEN member_bio_data.bio_status ELSE 'draft' END,
+            bio_status=CASE WHEN member_bio_data.bio_status IN ('verified','complete') THEN 'needs_update' ELSE 'pending' END,
             updated_at=NOW()`,
-        [req.user.member_id,b.dateOfBirth||"",b.gender||"",b.maritalStatus||"",String(b.nationality||"").trim(),
+        [req.user.member_id,b.dateOfBirth||"",b.gender||"",b.maritalStatus||"",nationality,
           String(b.homeDistrict||"").trim(),String(b.subcounty||"").trim(),String(b.parish||"").trim(),
           String(b.village||"").trim(),String(b.emergencyContactName||"").trim(),
           String(b.emergencyContactPhone||"").trim(),String(b.emergencyContactRelationship||"").trim(),
@@ -58,7 +59,7 @@ module.exports = function registerMemberAccountApi({
       throw error;
     }
     await audit({userId:req.user.id,action:"ACCOUNT_PROFILE_UPDATED",entityType:"user",entityId:String(req.user.id),
-      details:req.user.member_id?"Account and linked membership profile updated":"Account profile updated",...metadata(req)});
+      details:req.user.member_id?"Account and linked membership / bio profile updated":"Account profile updated",...metadata(req)});
     res.json({ok:true,fullName,email,phone});
   }));
 
@@ -82,15 +83,33 @@ module.exports = function registerMemberAccountApi({
   }));
 
   app.post("/api/account/profile-photo",auth,upload.single("photo"),asyncRoute(async(req,res)=>{
-    if(!req.file)return res.status(400).json({error:"Choose a JPG, PNG or WebP photo"});
-    if(!imageTypes.has(req.file.mimetype)){
+    if(!req.file)return res.status(400).json({error:"Choose a photo to crop and upload"});
+    const mime=String(req.file.mimetype||"").toLowerCase();
+    if(!imageTypes.has(mime)&&!/^image\//.test(mime)){
       removeStoredFile(req.file.filename);
-      return res.status(400).json({error:"Profile photos must be JPG, PNG or WebP"});
+      return res.status(400).json({error:"Use an image file (JPG, PNG, WebP, GIF or similar)"});
     }
     const old=await one("SELECT profile_photo_stored_name AS stored FROM users WHERE id=$1",[req.user.id]);
+    const oldPassport=req.user.member_id
+      ? await one("SELECT passport_photo_stored_name AS stored FROM member_bio_data WHERE member_id=$1",[req.user.member_id])
+      : null;
     await query(`UPDATE users SET profile_photo_stored_name=$1,profile_photo_original_name=$2,
-      profile_photo_mime_type=$3 WHERE id=$4`,[req.file.filename,req.file.originalname,req.file.mimetype,req.user.id]);
-    removeStoredFile(old?.stored);
+      profile_photo_mime_type=$3 WHERE id=$4`,[req.file.filename,req.file.originalname,req.file.mimetype||"image/jpeg",req.user.id]);
+    // Keep Legal bio passport in sync when the member has a linked membership.
+    if(req.user.member_id){
+      await query(`INSERT INTO member_bio_data
+        (member_id,nationality,bio_status,passport_photo_stored_name,passport_photo_original_name,passport_photo_mime_type,created_by,updated_at)
+        VALUES ($1,'Ugandan','pending',$2,$3,$4,$5,NOW())
+        ON CONFLICT (member_id) DO UPDATE SET
+          passport_photo_stored_name=EXCLUDED.passport_photo_stored_name,
+          passport_photo_original_name=EXCLUDED.passport_photo_original_name,
+          passport_photo_mime_type=EXCLUDED.passport_photo_mime_type,
+          bio_status=CASE WHEN member_bio_data.bio_status IN ('verified','complete') THEN 'needs_update' ELSE member_bio_data.bio_status END,
+          updated_at=NOW()`,
+        [req.user.member_id,req.file.filename,req.file.originalname,req.file.mimetype||"image/jpeg",req.user.id]);
+    }
+    if(old?.stored&&old.stored!==req.file.filename)removeStoredFile(old.stored);
+    if(oldPassport?.stored&&oldPassport.stored!==req.file.filename&&oldPassport.stored!==old?.stored)removeStoredFile(oldPassport.stored);
     await audit({userId:req.user.id,action:"PROFILE_PHOTO_UPDATED",entityType:"user",entityId:String(req.user.id),...metadata(req)});
     res.json({ok:true});
   }));

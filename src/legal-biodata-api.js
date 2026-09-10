@@ -136,8 +136,9 @@ module.exports = function registerLegalBioDataApi({
       String(b.village||"").trim()||null,String(b.emergencyContactName||"").trim()||null,
       String(b.emergencyContactPhone||"").trim()||null,String(b.emergencyContactRelationship||"").trim()||null,
           b.bioStatus,req.user.id]);
-        await client.query(`UPDATE users SET full_name=$1,email=COALESCE(NULLIF($2,''),email),phone=$3
-          WHERE member_id=$4`,[String(b.fullName||member.full_name).trim(),String(b.email||"").trim().toLowerCase(),
+        await client.query(`UPDATE users SET full_name=$1,email=COALESCE(NULLIF($2,''),email),
+          phone=COALESCE(NULLIF($3,''),phone) WHERE member_id=$4`,
+          [String(b.fullName||member.full_name).trim(),String(b.email||"").trim().toLowerCase(),
           String(b.phone||"").trim(),member.id]);
       });
     } catch(error) {
