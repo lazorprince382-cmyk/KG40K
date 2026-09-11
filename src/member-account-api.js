@@ -25,7 +25,8 @@ module.exports = function registerMemberAccountApi({
         await client.query("UPDATE users SET full_name=$1,email=$2,phone=COALESCE(NULLIF($3,''),phone) WHERE id=$4",[fullName,email,phone,req.user.id]);
         if(!req.user.member_id)return;
         // Members cannot self-change membership status — keep existing status
-        await client.query(`UPDATE members SET full_name=$1,email=$2,phone=COALESCE(NULLIF($3,''),phone),national_id=NULLIF($4,''),
+        await client.query(`UPDATE members SET full_name=$1,email=$2,phone=COALESCE(NULLIF($3,''),phone),
+          national_id=COALESCE(NULLIF($4,''),national_id),
           provisional=CASE WHEN NULLIF($4,'') IS NOT NULL THEN false ELSE provisional END,
           occupation=NULLIF($5,''),employer=NULLIF($6,''),address=NULLIF($7,''),next_of_kin=NULLIF($8,''),
           beneficiaries=NULLIF($9,'') WHERE id=$10`,
@@ -56,6 +57,7 @@ module.exports = function registerMemberAccountApi({
       });
     } catch(error) {
       if(error.code==="23505")return res.status(409).json({error:"That email address or National ID is already registered"});
+      if(error.code==="23502")return res.status(400).json({error:"Required membership fields could not be updated. Keep National ID and phone if already recorded, or ask Legal to complete them."});
       throw error;
     }
     await audit({userId:req.user.id,action:"ACCOUNT_PROFILE_UPDATED",entityType:"user",entityId:String(req.user.id),

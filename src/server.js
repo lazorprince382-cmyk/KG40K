@@ -2023,9 +2023,9 @@ app.get("/api/credits/command-center",auth,requireCredits("view"),asyncRoute(asy
     const guaranteed=activeGuarantees.filter(g=>Number(g.memberId)===Number(member.id)).reduce((sum,g)=>sum+g.guaranteedAmount,0);
     return guaranteed>member.savings;
   }).length;
-  const pendingMemberVerifications=transactionsResult.rows.filter(t=>t.status==="pending"&&t.submissionSource==="member");
+  const pendingMemberVerifications=transactionsResult.rows.filter(t=>t.status==="pending");
   const pendingRepaymentVerifications=pendingMemberVerifications.filter(t=>t.type==="Loan repayment");
-  const pendingContributionVerifications=pendingMemberVerifications.filter(t=>t.type!=="Loan repayment");
+  const pendingContributionVerifications=pendingMemberVerifications.filter(t=>["Savings deposit","Share purchase","Annual subscription fee"].includes(t.type));
   const primaryCreditsOfficer=await getPrimaryCreditsOfficer({query});
   res.json({
     stats:{totalMembers:summary.rows[0].active_members,totalSavings,availableFunds,activeLoans:portfolioSummary.rows[0].active,
@@ -3466,7 +3466,11 @@ app.get("/api/transactions/:id/evidence",auth,asyncRoute(async(req,res)=>{
   res.set("Content-Disposition",`inline; filename*=UTF-8''${encodeURIComponent(evidence.original||"deposit-evidence")}`);
   res.type(evidence.mime||"application/octet-stream").sendFile(filePath);
 }));
-app.post("/api/transactions/:id/verify",auth,requireCredits("approve"),asyncRoute(async(req,res)=>{
+app.post("/api/transactions/:id/verify",auth,asyncRoute(async(req,res,next)=>{
+  const access=await departmentPermission(req.user,"credits","approve")||await departmentPermission(req.user,"credits","edit");
+  if(!access)return res.status(403).json({error:"Your Credits assignment does not allow verification access"});
+  req.creditsAccess=access;next();
+}),asyncRoute(async(req,res)=>{
   const decision=String(req.body.decision||"approve").toLowerCase(),comment=String(req.body.comment||"").trim();
   if(!["approve","reject"].includes(decision))return res.status(400).json({error:"Choose approve or reject"});
   if(decision==="reject"&&comment.length<3)return res.status(400).json({error:"Enter a reason for rejecting this submission"});
