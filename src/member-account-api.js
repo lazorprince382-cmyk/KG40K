@@ -186,17 +186,28 @@ module.exports = function registerMemberAccountApi({
       const row=await one(`INSERT INTO transactions
         (reference,member_id,type,method,amount,status,external_reference,notes,recorded_by,submission_source,
          evidence_stored_name,evidence_original_name,evidence_mime_type,target_fiscal_year)
-        VALUES ($1,$2,$3,$4,$5,'pending',$6,$7,$8,'member',$9,$10,$11,$12)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'member',$10,$11,$12,$13)
         RETURNING id,reference,status,created_at AS "createdAt"`,
-      [reference,req.user.member_id,transactionType,method,amount,externalReference,String(req.body.notes||"").trim()||null,req.user.id,
+      [reference,req.user.member_id,transactionType,method,amount,transactionType==="Savings deposit"?"pending_finance_review":"pending",externalReference,String(req.body.notes||"").trim()||null,req.user.id,
         req.file.filename,req.file.originalname,req.file.mimetype,targetFiscalYear]);
+      const waiting=transactionType==="Savings deposit"?"Finance approval":"Credits Officer verification";
       await query("INSERT INTO notifications (member_id,title,message) VALUES ($1,$2,$3)",
-        [req.user.member_id,`${transactionType} submitted`,`${reference} is awaiting Credits Officer verification.`]);
-      await notifyCreditsVerificationQueue({query},{
-        title:"Member contribution awaiting verification",
-        message:`${reference} — UGX ${Number(amount).toLocaleString()} ${transactionType.toLowerCase()} with receipt evidence.`,
-        kind:"contribution"
-      });
+        [req.user.member_id,`${transactionType} submitted`,`${reference} is awaiting ${waiting}.`]);
+      if(transactionType==="Savings deposit"){
+        const member=await one("SELECT full_name AS name FROM members WHERE id=$1",[req.user.member_id]);
+        await query(`INSERT INTO notifications (user_id,title,message)
+          SELECT DISTINCT u.id,$1,$2 FROM department_assignments da
+          JOIN departments d ON d.id=da.department_id AND d.code='finance'
+          JOIN users u ON u.id=da.user_id AND u.active=true
+          WHERE da.active=true AND da.can_view=true AND u.role<>'Auditor'`,
+          ["Member savings awaiting approval",`${member?.name||"A member"} submitted ${reference} for UGX ${Number(amount).toLocaleString()}. Open Finance → Approvals to approve.`]);
+      }else{
+        await notifyCreditsVerificationQueue({query},{
+          title:"Member contribution awaiting verification",
+          message:`${reference} — UGX ${Number(amount).toLocaleString()} ${transactionType.toLowerCase()} with receipt evidence.`,
+          kind:"contribution"
+        });
+      }
       await audit({userId:req.user.id,action:"MEMBER_DEPOSIT_SUBMITTED",entityType:"transaction",entityId:String(row.id),
         details:`${reference} - ${method} - UGX ${amount}`,...metadata(req)});
       res.status(201).json(row);
@@ -505,12 +516,22 @@ module.exports = function registerMemberAccountApi({
       const row=await one(`INSERT INTO transactions
         (reference,member_id,type,method,amount,status,external_reference,notes,recorded_by,submission_source,
          evidence_stored_name,evidence_original_name,evidence_mime_type,target_fiscal_year)
-        VALUES ($1,$2,$3,$4,$5,'pending',$6,$7,$8,'staff',$9,$10,$11,$12)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'staff',$10,$11,$12,$13)
         RETURNING id,reference,status,created_at AS "createdAt"`,
-      [reference,memberId,transactionType,method,amount,externalReference,String(req.body.notes||"").trim()||null,req.user.id,
+      [reference,memberId,transactionType,method,amount,transactionType==="Savings deposit"?"pending_finance_review":"pending",externalReference,String(req.body.notes||"").trim()||null,req.user.id,
         req.file.filename,req.file.originalname,req.file.mimetype,targetFiscalYear]);
+      const waiting=transactionType==="Savings deposit"?"Finance approval":"Credits verification";
       await query("INSERT INTO notifications (member_id,title,message) VALUES ($1,$2,$3)",
-        [memberId,`${transactionType} submitted`,`${reference} is awaiting Credits verification.`]);
+        [memberId,`${transactionType} submitted`,`${reference} is awaiting ${waiting}.`]);
+      if(transactionType==="Savings deposit"){
+        const member=await one("SELECT full_name AS name FROM members WHERE id=$1",[memberId]);
+        await query(`INSERT INTO notifications (user_id,title,message)
+          SELECT DISTINCT u.id,$1,$2 FROM department_assignments da
+          JOIN departments d ON d.id=da.department_id AND d.code='finance'
+          JOIN users u ON u.id=da.user_id AND u.active=true
+          WHERE da.active=true AND da.can_view=true AND u.role<>'Auditor'`,
+          ["Member savings awaiting approval",`${member?.name||"A member"} savings ${reference} for UGX ${Number(amount).toLocaleString()} is waiting in Finance → Approvals.`]);
+      }
       await audit({userId:req.user.id,action:"MEMBER_DEPOSIT_SUBMITTED",entityType:"transaction",entityId:String(row.id),
         details:`${reference} - ${method} - UGX ${amount} (oversight)`,...metadata(req)});
       res.status(201).json(row);

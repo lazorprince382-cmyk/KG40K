@@ -50,20 +50,23 @@ async function applyMonthlySavingsSplit(client,{memberId,grossAmount,onDate,user
     await client.query("UPDATE members SET savings_balance=savings_balance+$1 WHERE id=$2",[savingsAmount,memberId]);
   }
   let welfareReference=null;
+  let welfareId=null;
   if(welfareAmount>0){
     const receipt=receiptReference("WRCPT");
     welfareReference=reference("WCON");
-    await client.query(`INSERT INTO welfare_contributions
+    const welfare=(await client.query(`INSERT INTO welfare_contributions
       (reference,member_id,contribution_type,period,expected_amount,amount,payment_method,receipt_number,status,
        contribution_date,recorded_by,verified_by,verified_at,verification_comment,payment_reference)
-      VALUES ($1,$2,'Monthly Welfare Contribution',to_char($3::date,'YYYY-MM'),$4,$4,$5,$6,'verified',$3::date,$7,$7,NOW(),$8,$9)`,
+      VALUES ($1,$2,'Monthly Welfare Contribution',to_char($3::date,'YYYY-MM'),$4,$4,$5,$6,'verified',$3::date,$7,$7,NOW(),$8,$9)
+      RETURNING id`,
       [welfareReference,memberId,paidOn,welfareAmount,method||"Bank transfer",receipt,userId,
-        `Taken once this month from ${sourceRef||"member savings receipt"}`,paymentReference||null]);
+        `Taken once this month from ${sourceRef||"member savings receipt"}`,paymentReference||null])).rows[0];
+    welfareId=welfare?.id||null;
     await client.query(`INSERT INTO settings (key,value) VALUES ('welfareFundBalance',$1)
       ON CONFLICT (key) DO UPDATE SET value=(COALESCE(NULLIF(settings.value,''),'0')::numeric+$2)::text, updated_at=NOW()`,
       [String(welfareAmount),welfareAmount]);
   }
-  return {welfareAmount,savingsAmount,welfareAlreadyPaid:Boolean(already),welfareReference};
+  return {welfareAmount,savingsAmount,welfareAlreadyPaid:Boolean(already),welfareReference,welfareId};
 }
 async function postReceiptToCentenary(client,{grossAmount,memberName,method,description,onDate,userId,category}){
   const account=(await client.query(`SELECT id,account_name FROM finance_accounts
@@ -79,6 +82,107 @@ async function postReceiptToCentenary(client,{grossAmount,memberName,method,desc
     [department.id,ref,category||"Member savings",description,memberName,method||"Bank transfer",grossAmount,receipt,onDate||new Date(),userId,account.id])).rows[0];
   await client.query("UPDATE finance_accounts SET balance=balance+$1,updated_at=NOW() WHERE id=$2",[grossAmount,account.id]);
   return {...inserted,accountName:account.account_name,accountId:account.id};
+}
+function welfareTakenFrom(text){
+  const raw=String(text||"");
+  if(/welfare already (paid|taken)/i.test(raw))return 0;
+  const after=raw.match(/welfare[^0-9]{0,24}([\d,]+)/i);
+  const before=raw.match(/([\d,]+)[^0-9]{0,16}welfare/i);
+  const amount=Number(String((after||before)?.[1]||"").replace(/,/g,""));
+  return Number.isFinite(amount)&&amount>0?amount:0;
+}
+async function reverseIncomeReceipt(client,entry){
+  const effects={accountName:null,accountDeducted:0,savingsReversed:0,welfareReversed:0,savingsMatched:true};
+  if(["completed","approved"].includes(entry.status)&&entry.finance_account_id){
+    const account=(await client.query("SELECT id,account_name FROM finance_accounts WHERE id=$1 FOR UPDATE",[entry.finance_account_id])).rows[0];
+    if(account){
+      await client.query("UPDATE finance_accounts SET balance=balance-$1,updated_at=NOW() WHERE id=$2",[entry.amount,account.id]);
+      effects.accountName=account.account_name;
+      effects.accountDeducted=Number(entry.amount);
+    }
+  }
+  const receipt=String(entry.receipt_number||"").trim();
+  const ref=String(entry.reference||"").trim();
+  const linked=(await client.query(`SELECT id,member_id,amount,notes FROM transactions
+    WHERE finance_entry_id=$1 AND type='Savings deposit' FOR UPDATE`,[entry.id])).rows;
+  let savingsRows=linked;
+  if(!savingsRows.length&&isMemberSavingsFinanceCategory(entry.category)&&receipt.length>=6){
+    const member=(await client.query(`SELECT id FROM members WHERE deleted_at IS NULL AND lower(trim(full_name))=lower(trim($1))
+      ORDER BY id LIMIT 1`,[entry.counterparty||""])).rows[0];
+    if(!member)effects.savingsMatched=false;
+    else{
+      const exact=(await client.query(`SELECT id,member_id,amount,notes FROM transactions
+        WHERE member_id=$1 AND type='Savings deposit' AND status IN ('completed','verified') AND finance_entry_id IS NULL
+          AND (
+            external_reference=$2 OR receipt_number=$2 OR receipt_number='RCPT-'||$2
+            OR notes ILIKE '%'||$2||'%' OR ($3<>'' AND (external_reference=$3 OR notes ILIKE '%'||$3||'%'))
+          )
+        FOR UPDATE`,[member.id,receipt,ref])).rows;
+      if(exact.length)savingsRows=exact;
+      else{
+        const welfareDue=await monthlyWelfareAmount(client);
+        const gross=Number(entry.amount);
+        const recorded=(await client.query(`SELECT id,member_id,amount,notes FROM transactions
+          WHERE member_id=$1 AND type='Savings deposit' AND status IN ('completed','verified') AND finance_entry_id IS NULL
+            AND notes ILIKE 'Finance recorded%'
+            AND created_at>=$2::date - INTERVAL '1 day' AND created_at<$2::date + INTERVAL '2 days'
+            AND (amount=$3 OR amount=$3-$4)
+          FOR UPDATE`,[member.id,entry.transaction_date,gross,welfareDue])).rows;
+        if(recorded.length===1)savingsRows=recorded;
+        else effects.savingsMatched=false;
+      }
+    }
+  }
+  for(const tx of savingsRows){
+    await client.query("UPDATE members SET savings_balance=savings_balance-$1 WHERE id=$2",[tx.amount,tx.member_id]);
+    effects.savingsReversed+=Number(tx.amount);
+    await client.query("SAVEPOINT reverse_savings_tx");
+    try{
+      await client.query("DELETE FROM transactions WHERE id=$1",[tx.id]);
+      await client.query("RELEASE SAVEPOINT reverse_savings_tx");
+    }catch(error){
+      await client.query("ROLLBACK TO SAVEPOINT reverse_savings_tx");
+      if(error.code!=="23503")throw error;
+      await client.query("UPDATE transactions SET status='voided',finance_entry_id=NULL,notes=TRIM(BOTH FROM COALESCE(notes,'')||' | Voided when finance receipt was deleted') WHERE id=$1",[tx.id]);
+    }
+  }
+  let welfareRows=(await client.query(`SELECT id,member_id,amount FROM welfare_contributions
+    WHERE finance_entry_id=$1
+      OR ($2<>'' AND length($2)>=6 AND (payment_reference=$2 OR receipt_number=$2 OR receipt_number=$2||'-WEL' OR receipt_number ILIKE '%'||$2||'%' OR COALESCE(verification_comment,'') ILIKE '%'||$2||'%'))
+    FOR UPDATE`,[entry.id,receipt])).rows;
+  const welfareFromReceipt=welfareTakenFrom(entry.description);
+  if(!welfareRows.length&&welfareFromReceipt>0&&isMemberSavingsFinanceCategory(entry.category)){
+    const member=(await client.query(`SELECT id FROM members WHERE deleted_at IS NULL AND lower(trim(full_name))=lower(trim($1))
+      ORDER BY id LIMIT 1`,[entry.counterparty||""])).rows[0];
+    if(member){
+      const extra=(await client.query(`SELECT id,member_id,amount FROM welfare_contributions
+        WHERE member_id=$1 AND finance_entry_id IS NULL AND amount=$2 AND status IN ('verified','completed','recorded')
+          AND (period=to_char($3::date,'YYYY-MM')
+            OR (contribution_date>=date_trunc('month',$3::date) AND contribution_date<date_trunc('month',$3::date)+INTERVAL '1 month'))
+        FOR UPDATE`,[member.id,welfareFromReceipt,entry.transaction_date])).rows;
+      if(extra.length===1)welfareRows=extra;
+    }
+  }
+  for(const row of welfareRows){
+    await client.query(`UPDATE settings SET value=GREATEST(0,COALESCE(NULLIF(value,''),'0')::numeric-$1)::text, updated_at=NOW()
+      WHERE key='welfareFundBalance'`,[row.amount]);
+    effects.welfareReversed+=Number(row.amount);
+    await client.query("SAVEPOINT reverse_welfare");
+    try{
+      await client.query("DELETE FROM welfare_contributions WHERE id=$1",[row.id]);
+      await client.query("RELEASE SAVEPOINT reverse_welfare");
+    }catch(error){
+      await client.query("ROLLBACK TO SAVEPOINT reverse_welfare");
+      if(error.code!=="23503")throw error;
+      await client.query("UPDATE welfare_contributions SET status='voided',amount=0,finance_entry_id=NULL,verification_comment=TRIM(BOTH FROM COALESCE(verification_comment,'')||' | Voided when finance receipt was deleted') WHERE id=$1",[row.id]);
+    }
+  }
+  await client.query("UPDATE investment_transactions SET finance_entry_id=NULL WHERE finance_entry_id=$1",[entry.id]);
+  await client.query("UPDATE member_investment_applications SET finance_entry_id=NULL WHERE finance_entry_id=$1",[entry.id]);
+  await client.query("UPDATE unit_trust_movements SET finance_entry_id=NULL WHERE finance_entry_id=$1",[entry.id]);
+  await client.query("UPDATE transactions SET finance_entry_id=NULL WHERE finance_entry_id=$1",[entry.id]);
+  await client.query("UPDATE welfare_contributions SET finance_entry_id=NULL WHERE finance_entry_id=$1",[entry.id]);
+  return effects;
 }
 
 let loanApprovals = null;
@@ -1289,6 +1393,13 @@ app.get("/api/finance/command-center",auth,requireFinance("view"),asyncRoute(asy
     incomeBySource,expensesByCategory,subscriptionProgress,welfareProgress,welfareStanding,
     savingsMembers:(await query(`SELECT id, member_number AS "memberNumber", full_name AS name
       FROM members WHERE deleted_at IS NULL AND status='active' ORDER BY full_name`)).rows,
+    pendingSavings:(await query(`SELECT t.id,t.reference,t.amount::float,t.method,t.status,t.external_reference AS "paymentReference",
+      t.created_at AS "createdAt",(t.evidence_stored_name IS NOT NULL) AS "hasEvidence",t.submission_source AS "submissionSource",
+      m.full_name AS member,m.member_number AS "memberNumber",recorder.full_name AS "submittedBy"
+      FROM transactions t JOIN members m ON m.id=t.member_id
+      LEFT JOIN users recorder ON recorder.id=t.recorded_by
+      WHERE t.type='Savings deposit' AND t.status IN ('pending','pending_finance_review')
+      ORDER BY t.id DESC LIMIT 80`)).rows,
     organizationStanding:{uapBalance,bankBalance:companyBankBalance,loansOutstanding,companyFunds},
     notifications:[
       ...pendingFinanceEntries.slice(0,4).map(x=>({level:"warning",title:`${x.reference} awaits Finance verification`,createdAt:x.createdAt||x.transactionDate})),
@@ -1297,10 +1408,20 @@ app.get("/api/finance/command-center",auth,requireFinance("view"),asyncRoute(asy
       ...invoices.rows.filter(x=>x.status!=="paid"&&new Date(x.dueDate)<new Date()).slice(0,3).map(x=>({level:"danger",title:`Invoice ${x.invoiceNumber} is overdue`,createdAt:x.dueDate}))
     ],
     access:{authorityLevel:req.financeAccess.authority_level,canCreate:Boolean(req.financeAccess.can_create),
-      canEdit:Boolean(req.financeAccess.can_edit),canApprove:Boolean(req.financeAccess.can_approve)}
+      canEdit:Boolean(req.financeAccess.can_edit),canApprove:Boolean(req.financeAccess.can_approve),
+      canDeleteIncome:req.user.role!=="Auditor",
+      canApproveSavings:req.user.role!=="Auditor"}
   });
 }));
-app.post("/api/finance/income",auth,requireFinance("create"),asyncRoute(async(req,res)=>{
+app.post("/api/finance/income",auth,asyncRoute(async(req,res,next)=>{
+  const create=await departmentPermission(req.user,"finance","create");
+  if(create){req.financeAccess=create;return next();}
+  if(req.user.role==="Auditor")return res.status(403).json({error:"Auditors can view Finance records but cannot record income"});
+  const view=await departmentPermission(req.user,"finance","view");
+  if(!view)return res.status(403).json({error:"Your Finance assignment does not allow create access"});
+  req.financeAccess={...view,can_create:true};
+  next();
+}),asyncRoute(async(req,res)=>{
   const b=req.body,amount=Number(b.amount);
   const category=String(b.category||"").trim();
   const savings=isMemberSavingsFinanceCategory(category);
@@ -1333,12 +1454,13 @@ app.post("/api/finance/income",auth,requireFinance("create"),asyncRoute(async(re
         const yearRow=(await client.query(`SELECT EXTRACT(YEAR FROM ends_on)::int AS year
           FROM member_financial_year_policies WHERE status='active' AND $1::date BETWEEN starts_on AND ends_on
           ORDER BY starts_on DESC LIMIT 1`,[paidOn])).rows[0];
-        await client.query(`INSERT INTO transactions
+        split.savingsTxId=(await client.query(`INSERT INTO transactions
           (reference,member_id,type,method,amount,status,external_reference,notes,recorded_by,verified_by,verified_at,created_at,receipt_number,target_fiscal_year,submission_source)
-          VALUES ($1,$2,'Savings deposit',$3,$4,'completed',$5,$6,$7,$7,NOW(),COALESCE($8::timestamptz,NOW()),$9,$10,'finance')`,
+          VALUES ($1,$2,'Savings deposit',$3,$4,'completed',$5,$6,$7,$7,NOW(),COALESCE($8::timestamptz,NOW()),$9,$10,'finance')
+          RETURNING id`,
           [reference("TRX"),member.id,paymentMethod,split.savingsAmount,String(b.supportingDocument||"").trim()||null,
             `Finance recorded UGX ${amount.toLocaleString()} on Centenary. Welfare UGX ${split.welfareAmount.toLocaleString()}${split.welfareAlreadyPaid?" (already paid this month)":""}. Savings UGX ${split.savingsAmount.toLocaleString()}.`,
-            req.user.id,paidOn,receiptReference("RCPT"),yearRow?.year||null]);
+            req.user.id,paidOn,receiptReference("RCPT"),yearRow?.year||null])).rows[0].id;
       }
     }
     const ref=reference("FIN-INC"),receipt=receiptReference("RCPT");
@@ -1353,11 +1475,97 @@ app.post("/api/finance/income",auth,requireFinance("create"),asyncRoute(async(re
     [department.id,ref,savings?"Member savings":category,description,payer,paymentMethod,
       amount,receipt,String(b.supportingDocument||"").trim()||null,paidOn,req.user.id,account.id])).rows[0];
     await client.query("UPDATE finance_accounts SET balance=balance+$1,updated_at=NOW() WHERE id=$2",[amount,account.id]);
+    if(split?.savingsTxId) await client.query("UPDATE transactions SET finance_entry_id=$1, receipt_number=$2 WHERE id=$3",[inserted.id,receipt,split.savingsTxId]);
+    if(split?.welfareId) await client.query("UPDATE welfare_contributions SET finance_entry_id=$1 WHERE id=$2",[inserted.id,split.welfareId]);
     return {...inserted,accountName:account.account_name,savings:Boolean(savings),split};
   });
   await audit({userId:req.user.id,action:"FINANCE_INCOME_RECORDED",entityType:"organization_finance",entityId:String(row.id),
     details:`${row.receiptNumber} - ${category} - ${row.accountName} - UGX ${amount}`,...metadata(req)});
   res.status(201).json(row);
+}));
+app.delete("/api/finance/income/:id",auth,asyncRoute(async(req,res,next)=>{
+  const edit=await departmentPermission(req.user,"finance","edit");
+  const create=edit||await departmentPermission(req.user,"finance","create");
+  if(create){req.financeAccess=create;return next();}
+  if(req.user.role==="Auditor")return res.status(403).json({error:"Auditors can view Finance records but cannot delete receipts"});
+  const view=await departmentPermission(req.user,"finance","view");
+  if(!view)return res.status(403).json({error:"Your Finance assignment does not allow this change"});
+  req.financeAccess={...view,can_create:true};
+  next();
+}),asyncRoute(async(req,res)=>{
+  const result=await transaction(async client=>{
+    const entry=(await client.query("SELECT * FROM organization_finance_entries WHERE id=$1 FOR UPDATE",[req.params.id])).rows[0];
+    if(!entry||entry.entry_type!=="income"){const error=new Error("Income receipt not found");error.status=404;throw error;}
+    if(entry.status==="voided"){const error=new Error("This receipt is already deleted");error.status=409;throw error;}
+    const effects=await reverseIncomeReceipt(client,entry);
+    await client.query("DELETE FROM organization_finance_entries WHERE id=$1",[entry.id]);
+    return {entry,effects};
+  });
+  const amount=Number(result.entry.amount);
+  const account=result.effects.accountName||"the receiving account";
+  let message=`Receipt ${result.entry.receipt_number||result.entry.reference} deleted. UGX ${amount.toLocaleString()} deducted from ${account}.`;
+  if(result.effects.savingsReversed>0)message+=` Member savings reduced by UGX ${result.effects.savingsReversed.toLocaleString()}.`;
+  if(result.effects.welfareReversed>0)message+=` Welfare reduced by UGX ${result.effects.welfareReversed.toLocaleString()}.`;
+  if(isMemberSavingsFinanceCategory(result.entry.category)&&!result.effects.savingsMatched)message+=" No matching savings record was found, so the member savings balance was left unchanged.";
+  await audit({userId:req.user.id,action:"FINANCE_INCOME_DELETED",entityType:"organization_finance",entityId:String(result.entry.id),
+    details:`${result.entry.receipt_number||result.entry.reference} - UGX ${amount} reversed from ${account}`,...metadata(req)});
+  res.json({ok:true,message,amount,accountName:result.effects.accountName,savingsReversed:result.effects.savingsReversed,welfareReversed:result.effects.welfareReversed});
+}));
+app.post("/api/finance/savings/:id/review",auth,asyncRoute(async(req,res,next)=>{
+  if(req.user.role==="Auditor")return res.status(403).json({error:"Auditors can view records but cannot approve savings"});
+  if(req.user.role==="Member")return res.status(403).json({error:"Members cannot approve savings submissions"});
+  const finance=await departmentPermission(req.user,"finance","view");
+  const credits=finance?null:await departmentPermission(req.user,"credits","view");
+  if(!finance&&!credits&&req.user.role!=="System Admin")return res.status(403).json({error:"Sign in with Finance or Credits access to approve savings"});
+  next();
+}),asyncRoute(async(req,res)=>{
+  const decision=String(req.body.decision||"").toLowerCase();
+  const comment=String(req.body.comment||"").trim();
+  if(!["approve","reject"].includes(decision))return res.status(400).json({error:"Choose approve or reject"});
+  if(decision==="reject"&&comment.length<3)return res.status(400).json({error:"Enter a reason for rejecting this savings submission"});
+  const result=await transaction(async client=>{
+    const locked=(await client.query(`SELECT t.*,m.full_name,m.member_number FROM transactions t
+      JOIN members m ON m.id=t.member_id WHERE t.id=$1 FOR UPDATE`,[req.params.id])).rows[0];
+    if(!locked||locked.type!=="Savings deposit"){const error=new Error("Savings submission not found");error.status=404;throw error;}
+    if(!["pending","pending_finance_review"].includes(locked.status)){const error=new Error("This savings submission has already been reviewed");error.status=409;throw error;}
+    if(decision==="reject"){
+      await client.query(`UPDATE transactions SET status='rejected',verified_by=$1,verified_at=NOW(),verification_comment=$2 WHERE id=$3`,
+        [req.user.id,comment,locked.id]);
+      if(locked.finance_entry_id)await client.query(`UPDATE organization_finance_entries SET status='rejected',approved_by=$1,approved_at=NOW()
+        WHERE id=$2 AND status='pending_finance_review'`,[req.user.id,locked.finance_entry_id]);
+      await client.query("INSERT INTO notifications (member_id,title,message) VALUES ($1,'Savings deposit rejected',$2)",
+        [locked.member_id,`${locked.reference} was rejected by Finance. ${comment}`]);
+      return {locked,decision};
+    }
+    const split=await applyMonthlySavingsSplit(client,{
+      memberId:locked.member_id,grossAmount:Number(locked.amount),onDate:locked.created_at||new Date(),
+      userId:req.user.id,method:locked.method,paymentReference:locked.external_reference,sourceRef:locked.reference
+    });
+    const posted=await postReceiptToCentenary(client,{
+      grossAmount:Number(locked.amount),memberName:locked.full_name,method:locked.method,
+      description:`${locked.reference} | Centenary receipt UGX ${Number(locked.amount).toLocaleString()}. Welfare UGX ${split.welfareAmount.toLocaleString()}. Savings UGX ${split.savingsAmount.toLocaleString()}.`,
+      onDate:locked.created_at||new Date(),userId:req.user.id,category:"Member savings"
+    });
+    if(locked.finance_entry_id&&posted?.id&&Number(locked.finance_entry_id)!==Number(posted.id)){
+      await client.query(`UPDATE organization_finance_entries SET status='rejected',approved_by=$1,approved_at=NOW()
+        WHERE id=$2 AND status='pending_finance_review'`,[req.user.id,locked.finance_entry_id]);
+    }
+    const note=`received=${Number(locked.amount).toFixed(2)}, welfare=${split.welfareAmount.toFixed(2)}, savings=${split.savingsAmount.toFixed(2)}${split.welfareAlreadyPaid?" | welfare already taken this month":""}`;
+    await client.query(`UPDATE transactions SET status='completed',amount=$1,verified_by=$2,verified_at=NOW(),
+      verification_comment=$3,finance_entry_id=$4,receipt_number=COALESCE($5,receipt_number),
+      notes=TRIM(BOTH FROM COALESCE(notes,'')||' | '||$6) WHERE id=$7`,
+      [split.savingsAmount,req.user.id,comment||"Approved by Finance and posted to Centenary",posted.id,posted.receiptNumber,note,locked.id]);
+    if(split.welfareId)await client.query("UPDATE welfare_contributions SET finance_entry_id=$1 WHERE id=$2",[posted.id,split.welfareId]);
+    await client.query("INSERT INTO notifications (member_id,title,message) VALUES ($1,'Savings deposit approved',$2)",
+      [locked.member_id,`${locked.reference} was approved. UGX ${Number(locked.amount).toLocaleString()} is on the Centenary account. Welfare UGX ${split.welfareAmount.toLocaleString()}. Savings UGX ${split.savingsAmount.toLocaleString()}. Receipt ${posted.receiptNumber}.`]);
+    return {locked,decision,split,posted};
+  });
+  await audit({userId:req.user.id,action:`FINANCE_SAVINGS_${decision.toUpperCase()}`,entityType:"transaction",entityId:String(result.locked.id),
+    details:`${result.locked.reference} - UGX ${result.locked.amount}`,...metadata(req)});
+  const message=decision==="approve"
+    ?`Savings approved. UGX ${Number(result.locked.amount).toLocaleString()} posted to Centenary${result.split?.welfareAmount?`; UGX ${result.split.welfareAmount.toLocaleString()} welfare, UGX ${result.split.savingsAmount.toLocaleString()} savings`:""}.`
+    :"Savings submission rejected.";
+  res.json({ok:true,message});
 }));
 app.post("/api/finance/accounts",auth,requireFinance("create"),asyncRoute(async(req,res)=>{
   const b=req.body,type=String(b.accountType||"").toLowerCase(),openingBalance=Number(b.openingBalance||0),
@@ -3542,7 +3750,8 @@ app.get("/api/transactions/:id/evidence",auth,asyncRoute(async(req,res)=>{
   if(!evidence?.stored)return res.status(404).json({error:"Deposit evidence not found"});
   const ownsEvidence=Number(req.user.member_id)===Number(evidence.member_id);
   const creditsAccess=ownsEvidence?null:await departmentPermission(req.user,"credits","view");
-  if(!ownsEvidence&&!creditsAccess&&req.user.role!=="System Admin")return res.status(403).json({error:"You cannot view this deposit evidence"});
+  const financeAccess=ownsEvidence||creditsAccess?null:await departmentPermission(req.user,"finance","view");
+  if(!ownsEvidence&&!creditsAccess&&!financeAccess&&req.user.role!=="System Admin")return res.status(403).json({error:"You cannot view this deposit evidence"});
   const filePath=path.join(uploadsDir,path.basename(evidence.stored));
   if(!fs.existsSync(filePath))return res.status(404).json({error:"Deposit evidence file is missing"});
   res.set("Content-Disposition",`inline; filename*=UTF-8''${encodeURIComponent(evidence.original||"deposit-evidence")}`);
@@ -3588,11 +3797,15 @@ app.post("/api/transactions/:id/verify",auth,asyncRoute(async(req,res,next)=>{
           [split.savingsAmount,allocationNotes,locked.id]);
       }
       if(member){
-        await postReceiptToCentenary(client,{
+        const posted=await postReceiptToCentenary(client,{
           grossAmount:Number(locked.amount),memberName:member.full_name,method:locked.method,
           description:`${locked.reference} | Centenary receipt UGX ${Number(locked.amount).toLocaleString()}. Welfare UGX ${split.welfareAmount.toLocaleString()}. Savings UGX ${split.savingsAmount.toLocaleString()}.`,
           onDate:locked.created_at||new Date(),userId:req.user.id,category:"Member savings"
         });
+        if(posted?.id){
+          await client.query("UPDATE transactions SET finance_entry_id=$1 WHERE id=$2",[posted.id,locked.id]);
+          if(split.welfareId) await client.query("UPDATE welfare_contributions SET finance_entry_id=$1 WHERE id=$2",[posted.id,split.welfareId]);
+        }
       }
     }
     if(decision==="approve"&&locked.type==="Share purchase") await client.query("UPDATE members SET share_capital=share_capital+$1 WHERE id=$2",[locked.amount,locked.member_id]);
