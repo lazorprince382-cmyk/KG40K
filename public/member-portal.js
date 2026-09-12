@@ -173,15 +173,38 @@
     const rows=c.transactions.map(x=>`<tr><td><strong>${esc(x.reference)}</strong><small>${esc(x.externalReference||"")}</small></td><td>${esc(x.type)}</td><td>${esc(x.method)}</td><td>${money(x.amount)}</td><td>${esc(x.receiptNumber||"Issued after verification")}</td><td>${date(x.createdAt)}</td><td>${status(x.status)}</td><td><button class="button small secondary" data-member-transaction="${x.id}">${icons.eye}Details</button></td></tr>`).join("");
     return `<div class="member-module"><div class="member-summary-grid compact">${metric("Current balance",money(c.member.savings),"savings","member-savings")}${metric("Verified this month",money(monthly),"receipt","member-savings")}${metric("Share capital",money(c.member.shares),"building","member-savings")}</div><div class="module-actions">${canActOnMember()?`<button class="button primary" data-member-action="deposit">${icons.plus}Submit deposit</button>`:""}${!readOnlyMember()?`<button class="button secondary" data-member-action="withdraw">${icons.arrowUp}Request withdrawal</button><a class="button secondary" href="/api/member/reports/transactions.csv">${icons.download}Download statement</a>`:""}</div>${panel("Savings history","Submitted evidence, verification decisions and official receipts",gridTable(["Reference","Type","Method","Amount","Official receipt","Submitted","Status","Actions"],rows))}</div>`;
   }
+  function requestAmount(x){
+    const raw=String(x.notes||"");
+    const num=value=>Number(String(value||"").replace(/,/g,""));
+    const savings=num((raw.match(/savings(?:=|\s+ugx\s*)([\d,]+(?:\.\d+)?)/i)||[])[1]);
+    const received=num((raw.match(/(?:received(?:=|\s+ugx\s*)|recorded ugx\s*)([\d,]+(?:\.\d+)?)/i)||[])[1]);
+    const welfare=num((raw.match(/welfare(?:=|\s+ugx\s*)([\d,]+(?:\.\d+)?)/i)||[])[1]);
+    const stored=Number(x.amount||0);
+    if(savings>0&&savings<stored-0.5)return `${money(savings)}<small>${money(received||stored)} received</small>`;
+    if(welfare>0&&received>welfare&&stored>=received-0.5)return `${money(Math.max(0,received-welfare))}<small>${money(received)} received · welfare ${money(welfare)}</small>`;
+    return money(stored);
+  }
+  function requestRecord(x){
+    if(x.status==="voided")return false;
+    if(["pending","pending_finance_review","rejected"].includes(x.status))return true;
+    return ["Savings deposit","Share purchase","Annual subscription fee"].includes(x.type)&&["completed","verified","approved"].includes(x.status)&&x.submissionSource!=="finance"&&(x.submissionSource==="member"||x.verificationComment);
+  }
+  function requestLabel(x){
+    return ["completed","verified","approved"].includes(x.status)?"approved":x.status;
+  }
+  function requestActions(x){
+    const canDelete=!readOnlyMember()||canActOnMember();
+    return `<div class="table-actions"><button type="button" class="button small secondary" data-member-transaction="${x.id}">${icons.eye}Details</button>${canDelete?`<button type="button" class="button small danger" data-member-request-delete="${x.id}">Delete</button>`:""}</div>`;
+  }
   function requests(){
-    const c=C(),pendingTransactions=c.transactions.filter(x=>["pending","pending_finance_review"].includes(x.status)),pendingLoans=c.loans.filter(x=>!["active","completed","rejected","closed"].includes(x.status)),pendingGuarantees=c.guarantees.filter(x=>x.guaranteeStatus==="pending"),pendingWelfare=c.welfare.requests.filter(x=>!["paid","closed","rejected"].includes(x.status));
-    const deposits=pendingTransactions.filter(x=>x.type!=="Loan repayment").map(x=>`<tr><td><strong>${esc(x.reference)}</strong><small>${esc(x.externalReference||"")}</small></td><td>${esc(x.type)}</td><td>${money(x.amount)}</td><td>${date(x.createdAt)}</td><td>${status(x.status)}</td><td><button class="button small secondary" data-member-transaction="${x.id}">${icons.eye}Details</button></td></tr>`).join("");
-    const loanRepayments=pendingTransactions.filter(x=>x.type==="Loan repayment").map(x=>`<tr><td><strong>${esc(x.reference)}</strong><small>${esc(x.externalReference||"")}</small></td><td>${esc(x.type)}</td><td>${money(x.amount)}</td><td>${date(x.createdAt)}</td><td>${status(x.status)}</td><td><button class="button small secondary" data-member-transaction="${x.id}">${icons.eye}Details</button></td></tr>`).join("");
+    const c=C(),requestRows=c.transactions.filter(requestRecord),pendingLoans=c.loans.filter(x=>!["active","completed","rejected","closed"].includes(x.status)),pendingGuarantees=c.guarantees.filter(x=>x.guaranteeStatus==="pending"),pendingWelfare=c.welfare.requests.filter(x=>!["paid","closed","rejected"].includes(x.status));
+    const deposits=requestRows.filter(x=>x.type!=="Loan repayment").map(x=>`<tr><td><strong>${esc(x.reference)}</strong><small>${esc(x.externalReference||"")}</small></td><td>${esc(x.type)}</td><td>${requestAmount(x)}</td><td>${date(x.createdAt)}</td><td>${status(requestLabel(x))}</td><td>${requestActions(x)}</td></tr>`).join("");
+    const loanRepayments=requestRows.filter(x=>x.type==="Loan repayment"&&["pending","pending_finance_review"].includes(x.status)).map(x=>`<tr><td><strong>${esc(x.reference)}</strong><small>${esc(x.externalReference||"")}</small></td><td>${esc(x.type)}</td><td>${money(x.amount)}</td><td>${date(x.createdAt)}</td><td>${status(x.status)}</td><td>${requestActions(x)}</td></tr>`).join("");
     const loans=pendingLoans.map(x=>`<tr><td><strong>${esc(x.reference)}</strong></td><td>${esc(x.product)}</td><td>${money(x.amount)}</td><td>${date(x.createdAt)}</td><td>${status(x.status)}</td></tr>`).join("");
     const guarantees=pendingGuarantees.map(x=>`<tr><td><strong>${esc(x.reference)}</strong></td><td>${esc(x.borrower)}</td><td>${money(x.amount)}</td><td>${status(x.guaranteeStatus)}</td><td><div class="table-actions"><button class="button small secondary" data-member-guarantee="${x.loanId}" data-response="reject">Reject</button><button class="button small primary" data-member-guarantee="${x.loanId}" data-response="accept">Accept</button></div></td></tr>`).join("");
     const welfare=pendingWelfare.map(x=>`<tr><td><strong>${esc(x.reference)}</strong></td><td>${esc(x.category)}</td><td>${money(x.amount)}</td><td>${status(x.urgency)}</td><td>${status(x.status)}</td></tr>`).join("");
     const contributions=c.welfare.contributions.filter(x=>["pending","pending_finance_review"].includes(x.status)).map(x=>`<tr><td><strong>${esc(x.reference)}</strong></td><td>${esc(x.type)}</td><td>${money(x.amount)}</td><td>${date(x.contributionDate)}</td><td>${status(x.status)}</td></tr>`).join("");
-    return `<div class="member-stack">${panel("Pending savings transactions","Savings deposits awaiting Finance approval",gridTable(["Reference","Type","Amount","Submitted","Status","Actions"],deposits))}${loanRepayments?panel("Pending loan repayments","Loan payments awaiting Credits verification before progress updates",gridTable(["Reference","Type","Amount","Submitted","Status","Actions"],loanRepayments)):""}${panel("Pending welfare contributions","Payment evidence awaiting Finance verification",gridTable(["Reference","Type","Amount","Submitted","Status"],contributions))}${panel("Pending loan applications","Applications still moving through approval",gridTable(["Loan","Product","Amount","Submitted","Stage"],loans))}${panel("Guarantee requests","Loan guarantees awaiting your response",gridTable(["Loan","Borrower","Amount","Status","Actions"],guarantees))}${panel("Welfare requests","Support requests awaiting a final decision",gridTable(["Request","Category","Amount","Urgency","Status"],welfare))}</div>`;
+    return `<div class="member-stack">${panel("My requests","Pending requests can be deleted. Approved requests stay here as a record and can still be deleted.",gridTable(["Reference","Type","Amount","Submitted","Status","Actions"],deposits))}${loanRepayments?panel("Pending loan repayments","Loan payments awaiting Credits verification before progress updates",gridTable(["Reference","Type","Amount","Submitted","Status","Actions"],loanRepayments)):""}${panel("Pending welfare contributions","Payment evidence awaiting Finance verification",gridTable(["Reference","Type","Amount","Submitted","Status"],contributions))}${panel("Pending loan applications","Applications still moving through approval",gridTable(["Loan","Product","Amount","Submitted","Stage"],loans))}${panel("Guarantee requests","Loan guarantees awaiting your response",gridTable(["Loan","Borrower","Amount","Status","Actions"],guarantees))}${panel("Welfare requests","Support requests awaiting a final decision",gridTable(["Request","Category","Amount","Urgency","Status"],welfare))}</div>`;
   }
   function loans(){
     const all=C().loans,active=all.filter(x=>["active","overdue"].includes(x.status)),history=all.filter(x=>["completed","closed"].includes(x.status));
@@ -548,6 +571,7 @@
       state.memberContext=false;state.page="dashboard";window.render();
     });
     document.querySelectorAll("[data-member-transaction]").forEach(x=>x.addEventListener("click",()=>transactionDetails(x.dataset.memberTransaction)));
+    document.querySelectorAll("[data-member-request-delete]").forEach(x=>x.addEventListener("click",()=>deleteMemberRequest(x.dataset.memberRequestDelete)));
     document.querySelectorAll("[data-close-modal]").forEach(x=>x.onclick=closeModal);
     if(!canActOnMember())return;
     document.querySelector("[data-member-action='apply-loan']")?.addEventListener("click",loanForm);
@@ -631,8 +655,18 @@
       const url=state.memberOversight&&C()?.member?.id?`/api/members/${C().member.id}/deposits`:"/api/member/deposits";
       const response=await fetch(url,{method:"POST",credentials:"same-origin",body:new FormData(form)}),raw=await response.text();let result={};try{result=raw?JSON.parse(raw):{};}catch{result={error:raw||"The server returned an unreadable response"};}
       if(!response.ok)throw new Error(result.error||`Deposit submission failed (${response.status})`);
-      closeModal();await reload(`Deposit ${result.reference} sent to Credits for verification.`);
+      closeModal();await reload(`Deposit ${result.reference} sent to Finance for approval.`);
     }catch(error){button.disabled=false;button.textContent="Send for verification";fail(error.message||"Deposit submission failed. Please try again.");}
+  }
+  async function deleteMemberRequest(id){
+    if(!await confirmDialog("Delete this request? It will also be removed from Finance approvals. If it was already approved, the receipt, savings and any welfare taken from it will be reversed."))return;
+    try{
+      const result=await api(`/api/member/transactions/${id}`,{method:"DELETE"});
+      closeModal();
+      await reloadMemberCenter();
+      toast(result.message||"Request deleted.");
+      window.render();
+    }catch(error){toast(error.message||"Could not delete this request.");}
   }
   async function reloadMemberCenter(){
     if(!linked())return;

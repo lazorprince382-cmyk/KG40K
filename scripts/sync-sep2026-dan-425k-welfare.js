@@ -48,7 +48,7 @@ const FINANCE_ACCOUNT_NUMBER = "3100111892";
 const FINAL_BALANCE = 8351473;
 const DEPOSIT_TOTAL = 425000;
 const WELFARE_SHARE = 25000;
-const SAVINGS_SHARE = DEPOSIT_TOTAL; // member ledger shows full 425k as savings progress
+const SAVINGS_SHARE = DEPOSIT_TOTAL - WELFARE_SHARE; // 400,000 stays on savings after the 25,000 welfare share
 const PIN_SAVINGS = 8900000; // official current savings; not posted to finance_accounts
 const TX_AT = "2026-09-01T18:20:00+03:00";
 const BANK_REF = "394886009";
@@ -135,9 +135,9 @@ async function main() {
         `UPDATE member_financial_year_policies
          SET monthly_savings_target = $1
          WHERE status = 'active'`,
-        [DEPOSIT_TOTAL]
+        [SAVINGS_SHARE]
       );
-      console.log(`  Policy: monthly savings target UGX ${DEPOSIT_TOTAL.toLocaleString()}; welfare UGX ${WELFARE_SHARE.toLocaleString()}`);
+      console.log(`  Policy: monthly savings target UGX ${SAVINGS_SHARE.toLocaleString()}; welfare UGX ${WELFARE_SHARE.toLocaleString()}; receipt UGX ${DEPOSIT_TOTAL.toLocaleString()}`);
 
       // Reconcile bank to SMS closing balance (deposit already reflected in SMS figure).
       await client.query(
@@ -186,15 +186,15 @@ async function main() {
             member.id,
             SAVINGS_SHARE,
             BANK_REF,
-            `${MARKER} ${TX_AT.slice(0, 10)} ${BANK_NOTE}; member dashboard treats full ${DEPOSIT_TOTAL} as monthly savings (welfare ${WELFARE_SHARE} tracked separately)`,
+            `${MARKER} ${TX_AT.slice(0, 10)} ${BANK_NOTE}; received=${DEPOSIT_TOTAL.toFixed(2)}, welfare=${WELFARE_SHARE.toFixed(2)}, savings=${SAVINGS_SHARE.toFixed(2)}. Savings UGX ${SAVINGS_SHARE.toLocaleString()}.`,
             actor,
             TX_AT,
             `RCPT-${BANK_REF}`,
           ]
         );
-        console.log(`  Savings receipt ${txRef} recorded (member ledger pinned below; bank already in SMS figure)`);
+        console.log(`  Savings receipt ${txRef} recorded at UGX ${SAVINGS_SHARE.toLocaleString()} (bank receipt stays UGX ${DEPOSIT_TOTAL.toLocaleString()})`);
       } else {
-        console.log(`  SKIP savings tx — ${txRef} exists`);
+        console.log(`  SKIP savings tx — ${txRef} already recorded; existing amount left unchanged`);
       }
 
       // Official current savings. Do not add the 425k on top of the pin, and do not

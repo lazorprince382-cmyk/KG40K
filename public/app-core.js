@@ -123,8 +123,12 @@ async function api(url, options = {}) {
     ...options
   });
   const type = response.headers.get("content-type") || "";
-  const data = type.includes("application/json") ? await response.json() : await response.text();
-  if (!response.ok) throw new Error(data.error || "Request failed");
+  const data = type.includes("application/json") ? await response.json() : await response.text().then(text=>{
+    const tagged=text.match(/<pre>([\s\S]*?)<\/pre>/i)||text.match(/<title>([\s\S]*?)<\/title>/i);
+    const plain=String(tagged?.[1]||text||"").replace(/<[^>]+>/g," ").replace(/\s+/g," ").trim();
+    return {error:plain.slice(0,240)};
+  });
+  if (!response.ok) throw new Error((typeof data==="string"?data:data?.error) || `Request failed (${response.status})`);
   return data;
 }
 async function uploadDepartmentFile(file,departmentCode) {
@@ -1416,12 +1420,52 @@ function financeStatCard(label,value,icon,target,note,index) {
 function financeCanApproveSavings(f=state.finance){
   return f?.access?.canApproveSavings!==false&&state.role!=="Auditor"&&state.user?.role!=="Auditor";
 }
+function financeCanDeleteSavings(f=state.finance){
+  return f?.access?.canDeleteSavings!==false&&state.role!=="Auditor"&&state.user?.role!=="Auditor"&&state.role!=="Member"&&state.user?.role!=="Member";
+}
+function savingsSplitFromText(text){
+  const raw=String(text||"");
+  const amount=rawValue=>Number(String(rawValue||"").replace(/,/g,""));
+  const savings=raw.match(/savings\s*(?:=|ugx\s*)([\d,]+(?:\.\d+)?)/i)||raw.match(/ugx\s*([\d,]+(?:\.\d+)?)\s*savings/i);
+  const received=raw.match(/received\s*(?:=|ugx\s*)([\d,]+(?:\.\d+)?)/i)||raw.match(/recorded ugx\s*([\d,]+)/i);
+  const welfare=raw.match(/welfare\s*(?:=|ugx\s*)([\d,]+(?:\.\d+)?)/i)||raw.match(/welfare[^0-9]{0,24}([\d,]+)/i);
+  return {savings:amount(savings?.[1]),received:amount(received?.[1]),welfare:amount(welfare?.[1])};
+}
+function savingsRequestAmount(row){
+  const split=savingsSplitFromText(row.notes||row.description||"");
+  const stored=Number(row.savingsAmount||row.amount||0);
+  const received=split.received||Number(row.amount||0);
+  if(split.welfare>0&&stored>=received-0.5){
+    const savings=Math.max(0,received-split.welfare);
+    return `${money(savings)}<small class="table-sub">Savings · received ${money(received)} · welfare ${money(split.welfare)}</small>`;
+  }
+  if(split.welfare>0&&stored>0&&stored<received-0.5){
+    return `${money(stored)}<small class="table-sub">Savings · received ${money(received)} · welfare ${money(split.welfare)}</small>`;
+  }
+  return money(row.amount);
+}
+function financeIncomeAmountCell(row){
+  if(!/member\s*savings|savings deposit/i.test(String(row.category||"")))return money(row.amount);
+  const split=savingsSplitFromText(row.description||"");
+  const received=Number(row.amount||0);
+  const savings=Number(row.savingsAmount)>0&&Number(row.savingsAmount)<received-0.5
+    ?Number(row.savingsAmount)
+    :(split.savings>0&&split.savings<received-0.5?split.savings:(split.welfare>0?Math.max(0,received-split.welfare):received));
+  if(savings<received-0.5)return `${money(savings)}<small class="table-sub">Savings · received ${money(received)}${split.welfare?` · welfare ${money(split.welfare)}`:""}</small>`;
+  return `${money(received)}<small class="table-sub">To Centenary</small>`;
+}
 function financeSavingsApprovalQueue(f){
-  const rows=f.pendingSavings||[];
+  const rows=(f.savingsRequests||f.pendingSavings||[]).filter(x=>x.status!=="voided");
   if(!rows.length)return "";
   const canApprove=financeCanApproveSavings(f);
-  return `<section class="finance-panel finance-entry-review"><div class="finance-panel-head"><div><h3>Member savings awaiting approval</h3><p>Submitted savings wait here. Approve to post the full receipt to Centenary. The first deposit in a month sends UGX 25,000 to welfare.</p></div><strong>${rows.length} waiting</strong></div>
-    <div class="finance-voucher-list">${rows.map(x=>`<article><div class="finance-voucher-main"><span>${escapeHtml(x.reference)} · Member savings</span><h3>${escapeHtml(x.member||"Member")}</h3><p>${escapeHtml(x.memberNumber||"")} · ${escapeHtml(x.method||"")} · ${escapeHtml(x.paymentReference||"No payment reference")}</p><small>${x.createdAt?new Date(x.createdAt).toLocaleString():""} · ${escapeHtml(x.submittedBy||"Member submission")}</small></div><div class="finance-voucher-value"><strong>${money(x.amount)}</strong>${status("pending_finance_review")}</div><div class="finance-voucher-actions">${x.hasEvidence?`<a class="button small secondary" href="/api/transactions/${x.id}/evidence" target="_blank">Receipt</a>`:""}${canApprove?`<button class="approve" data-finance-savings-review="${x.id}" data-decision="approve">Approve</button><button class="reject" data-finance-savings-review="${x.id}" data-decision="reject">Reject</button>`:`<span class="maker-checker-note">Auditors cannot approve savings</span>`}</div></article>`).join("")}</div></section>`;
+  const canDelete=financeCanDeleteSavings(f);
+  const waiting=rows.filter(x=>["pending","pending_finance_review"].includes(x.status)).length;
+  return `<section class="finance-panel finance-entry-review"><div class="finance-panel-head"><div><h3>Member savings requests</h3><p>Approve to post the full receipt to Centenary. The first deposit in a month sends UGX 25,000 to welfare and records the rest as savings. Approved requests stay here as a record. Delete removes the request from Finance and from the member's requests.</p></div><strong>${waiting} waiting</strong></div>
+    <div class="finance-voucher-list">${rows.map(x=>{
+      const open=["pending","pending_finance_review"].includes(x.status);
+      const label=["completed","verified","approved"].includes(x.status)?"approved":x.status;
+      return `<article><div class="finance-voucher-main"><span>${escapeHtml(x.reference)} · Member savings</span><h3>${escapeHtml(x.member||"Member")}</h3><p>${escapeHtml(x.memberNumber||"")} · ${escapeHtml(x.method||"")} · ${escapeHtml(x.paymentReference||"No payment reference")}</p><small>${x.createdAt?new Date(x.createdAt).toLocaleString():""} · ${escapeHtml(x.submittedBy||"Member submission")}</small></div><div class="finance-voucher-value"><strong>${savingsRequestAmount(x)}</strong>${status(label)}</div><div class="finance-voucher-actions">${x.hasEvidence?`<a class="button small secondary" href="/api/transactions/${x.id}/evidence" target="_blank">Receipt</a>`:""}${open&&canApprove?`<button type="button" class="approve" data-finance-savings-review="${x.id}" data-decision="approve">Approve</button><button type="button" class="reject" data-finance-savings-review="${x.id}" data-decision="reject">Reject</button>`:""}${canDelete?`<button type="button" class="reject" data-finance-savings-delete="${x.id}">Delete</button>`:""}</div></article>`;
+    }).join("")}</div></section>`;
 }
 function financePendingEntriesWidget(f) {
   const rows=(f.pendingEntries||f.entries||[]).filter(x=>x.status==="pending_finance_review");
@@ -1470,8 +1514,9 @@ async function reviewFinanceSavings(id,decision){
   let comment="";
   if(decision==="reject"){
     comment=await promptDialog("Reason for rejecting this savings submission:","");
-    if(comment===null||!String(comment).trim())return;
-  }else if(!await confirmDialog("Approve this savings submission? The full amount will be posted to the Centenary account. The first deposit in the month sends UGX 25,000 to welfare."))return;
+    if(comment===null)return;
+    comment=String(comment).trim()||"Rejected";
+  }else if(!await confirmDialog("Approve this savings submission? The full amount posts to Centenary. The first deposit in the month sends UGX 25,000 to welfare and records the rest as savings."))return;
   try{
     const result=await api(`/api/finance/savings/${id}/review`,{method:"POST",body:JSON.stringify({decision,comment})});
     closeModal();
@@ -1479,7 +1524,19 @@ async function reviewFinanceSavings(id,decision){
     else state.finance=await api("/api/finance/command-center");
     render();
     toast(result.message||(decision==="approve"?"Savings approved and posted to Centenary.":"Savings submission rejected."));
-  }catch(error){toast(error.message);}
+  }catch(error){toast(error.message||"Could not update this savings request.");}
+}
+async function deleteFinanceSavings(id){
+  if(!financeCanDeleteSavings())return toast("You cannot delete this request.");
+  if(!await confirmDialog("Delete this request? It will be removed from Finance approvals and from the member's requests. If it was already approved, the Centenary receipt, savings and any welfare taken from that receipt will be reversed."))return;
+  try{
+    const result=await api(`/api/finance/savings/${id}`,{method:"DELETE"});
+    closeModal();
+    if(state.page?.startsWith("credits"))await refreshCredits();
+    if(state.finance)state.finance=await api("/api/finance/command-center");
+    render();
+    toast(result.message||"Request deleted.");
+  }catch(error){toast(error.message||"Could not delete this request.");}
 }
 async function reviewFinanceEntry(id,decision){
   if(!state.finance?.access?.canApprove)return toast("Finance approval authority is required.");
@@ -1578,8 +1635,8 @@ function financeIncomeView() {
   const topSource=[...(f.incomeBySource||[])].sort((a,b)=>b.amount-a.amount)[0];
   const canDelete=f.access?.canDeleteIncome!==false&&state.role!=="Auditor"&&state.user?.role!=="Auditor";
   return `<div class="exec-module-metrics">${executiveModuleMetric("Today",money(f.stats.incomeToday),"green")}${executiveModuleMetric("This month",money(f.stats.monthlyIncome),"blue")}${executiveModuleMetric("Receipts",rows.length,"violet")}${executiveModuleMetric("Top source",topSource?topSource.label:"—","orange")}</div>
-    <p class="exec-report-preview-note">Member savings post immediately to the Centenary account. The first deposit in a month sends UGX 25,000 to welfare; later deposits that month stay fully on savings. Deleting a receipt takes that amount back off the account that received it.</p>
-    ${financeIncomeWidget(f)}${financeDataTable("Income ledger",["Receipt","Date","Payer / Organization","Category","Method","Amount","Status",...(canDelete?["Actions"]:[])],rows.map(x=>[x.receiptNumber||x.reference,new Date(x.transactionDate).toLocaleDateString(),x.counterparty||"?",x.category,x.paymentMethod||"?",money(x.amount),status(x.status),...(canDelete?[`<button class="danger-action" data-finance-income-delete="${x.id}">Delete</button>`]:[])]))}`;
+    <p class="exec-report-preview-note">The full receipt still posts to Centenary. The first deposit in a month sends UGX 25,000 to welfare and records the rest as savings — a 425,000 payment is 400,000 savings. Later deposits that month stay fully on savings. Deleting a receipt takes that amount back off the account that received it.</p>
+    ${financeIncomeWidget(f)}${financeDataTable("Income ledger",["Receipt","Date","Payer / Organization","Category","Method","Amount","Status",...(canDelete?["Actions"]:[])],rows.map(x=>[x.receiptNumber||x.reference,new Date(x.transactionDate).toLocaleDateString(),x.counterparty||"?",x.category,x.paymentMethod||"?",financeIncomeAmountCell(x),status(x.status),...(canDelete?[`<button type="button" class="danger-action" data-finance-income-delete="${x.id}">Delete</button>`]:[])]))}`;
 }
 function financeExpensesView() {
   const f=state.finance,rows=f.entries.filter(x=>x.entryType==="expense"&&!/management accounts import/i.test(x.paymentMethod||""));
@@ -2492,12 +2549,12 @@ function creditsMembersView() {
       const savingsPending=t.type==="Savings deposit"&&["pending","pending_finance_review"].includes(t.status);
       const other=t.status==="pending"&&["Share purchase","Annual subscription fee"].includes(t.type);
       const actions=savingsPending&&canApproveSavings
-        ?`<div class="credits-verify-actions"><button class="button small primary" data-finance-savings-review="${t.id}" data-decision="approve">Approve</button><button class="button small danger" data-finance-savings-review="${t.id}" data-decision="reject">Reject</button><button class="button small secondary" data-credits-transaction="${t.id}">Details</button></div>`
+        ?`<div class="credits-verify-actions"><button type="button" class="button small primary" data-finance-savings-review="${t.id}" data-decision="approve">Approve</button><button type="button" class="button small danger" data-finance-savings-review="${t.id}" data-decision="reject">Reject</button><button type="button" class="button small danger" data-finance-savings-delete="${t.id}">Delete</button><button type="button" class="button small secondary" data-credits-transaction="${t.id}">Details</button></div>`
         :other&&canVerify
-        ?`<div class="credits-verify-actions"><button class="button small primary" data-deposit-decision-row="${t.id}" data-decision="approve">Approve</button><button class="button small danger" data-deposit-decision-row="${t.id}" data-decision="reject">No</button><button class="button small secondary" data-credits-transaction="${t.id}">Details</button></div>`
-        :`<button class="button small ${savingsPending||other?"primary":"secondary"}" data-credits-transaction="${t.id}">${savingsPending||other?"Review":"Details"}</button>`;
+        ?`<div class="credits-verify-actions"><button type="button" class="button small primary" data-deposit-decision-row="${t.id}" data-decision="approve">Approve</button><button type="button" class="button small danger" data-deposit-decision-row="${t.id}" data-decision="reject">No</button><button type="button" class="button small secondary" data-credits-transaction="${t.id}">Details</button></div>`
+        :`<button type="button" class="button small ${savingsPending||other?"primary":"secondary"}" data-credits-transaction="${t.id}">${savingsPending||other?"Review":"Details"}</button>`;
       return [
-      t.receiptNumber||(savingsPending||other?`<span class="pending-receipt">Awaiting approval</span>`:"—"),new Date(t.createdAt).toLocaleString(),`${t.member}<small class="table-sub">${t.memberNumber}</small>`,t.method,t.externalReference||"—",`${t.officer}<small class="table-sub">${t.submissionSource==="member"?"Member submission":"Credits entry"}</small>`,money(t.amount),t.hasEvidence?`<a class="mini-btn" href="/api/transactions/${t.id}/evidence" target="_blank" title="View receipt evidence">${icons.eye}</a>`:"—",savingsPending?status("pending_finance_review"):status(t.status),actions
+      t.receiptNumber||(savingsPending||other?`<span class="pending-receipt">Awaiting approval</span>`:"—"),new Date(t.createdAt).toLocaleString(),`${t.member}<small class="table-sub">${t.memberNumber}</small>`,t.method,t.externalReference||"—",`${t.officer}<small class="table-sub">${t.submissionSource==="member"?"Member submission":"Credits entry"}</small>`,savingsRequestAmount(t),t.hasEvidence?`<a class="mini-btn" href="/api/transactions/${t.id}/evidence" target="_blank" title="View receipt evidence">${icons.eye}</a>`:"—",["completed","verified","approved"].includes(t.status)&&t.type==="Savings deposit"?status("approved"):(savingsPending?status("pending_finance_review"):status(t.status)),actions
     ];}))}`;
 }
 
@@ -2510,14 +2567,15 @@ function creditsTransactionDetails(id) {
   const canApproveSavings=state.role!=="Auditor"&&state.user?.role!=="Auditor";
   const proof=t.hasEvidence?(String(t.evidenceName||"").toLowerCase().endsWith(".pdf")?`<a class="button secondary" href="/api/transactions/${t.id}/evidence" target="_blank">${icons.eye} Open receipt PDF</a>`:`<a class="deposit-proof" href="/api/transactions/${t.id}/evidence" target="_blank"><img src="/api/transactions/${t.id}/evidence" alt="Uploaded payment receipt for ${escapeHtml(t.member)}"></a>`):`<div class="exec-empty">No payment evidence was uploaded.</div>`;
   const actions=savingsPending&&canApproveSavings
-    ?`<button class="button danger" data-finance-savings-review="${t.id}" data-decision="reject">Reject</button><button class="button primary" data-finance-savings-review="${t.id}" data-decision="approve">Approve and post to Centenary</button>`
+    ?`<button type="button" class="button danger" data-finance-savings-review="${t.id}" data-decision="reject">Reject</button><button type="button" class="button danger" data-finance-savings-delete="${t.id}">Delete</button><button type="button" class="button primary" data-finance-savings-review="${t.id}" data-decision="approve">Approve and post to Centenary</button>`
     :pending&&canVerify
     ?`<button class="button danger" data-deposit-decision="reject">No / Reject</button><button class="button primary" data-deposit-decision="approve">${isLoanRepayment?"Confirm money received & update loan":"Approve / Confirm money received"}</button>`
     :`<button class="button secondary" data-close-footer>Close</button>`;
   document.body.insertAdjacentHTML("beforeend",`<div class="modal-backdrop" id="modal-backdrop"><div class="modal loan-detail-modal"><div class="modal-head"><div><h2>${isLoanRepayment?"Loan repayment verification":savingsPending?"Savings awaiting Finance approval":"Contribution verification"}</h2><p>${escapeHtml(t.member)} - ${escapeHtml(t.memberNumber||"")}</p></div><button class="modal-close" data-close>${icons.x}</button></div><div class="form"><div class="transaction-detail-grid"><div><span>Amount claimed</span><strong>${money(t.amount)}</strong></div><div><span>Payment method</span><strong>${escapeHtml(t.method||"—")}</strong></div><div><span>Payment reference</span><strong>${escapeHtml(t.externalReference||"—")}</strong></div>${isLoanRepayment?`<div><span>Loan</span><strong>${escapeHtml(t.loanReference||"—")}</strong></div>`:""}<div><span>Submitted by</span><strong>${escapeHtml(t.officer||t.member)}</strong></div><div><span>Submitted</span><strong>${new Date(t.createdAt).toLocaleString()}</strong></div><div><span>Status</span><strong>${savingsPending?status("pending_finance_review"):status(t.status)}</strong></div><div><span>Official receipt</span><strong>${escapeHtml(t.receiptNumber||"Issued only after approval")}</strong></div><div><span>Verified</span><strong>${t.verifiedAt?new Date(t.verifiedAt).toLocaleString():"Not yet verified"}</strong></div><div class="full"><span>Member notes</span><strong>${escapeHtml(t.notes||"No notes provided")}</strong></div>${t.verificationComment?`<div class="full"><span>Decision</span><strong>${escapeHtml(t.verificationComment)}</strong></div>`:""}</div><h3 class="loan-section-title">Payment evidence</h3>${proof}<div class="modal-actions">${actions}</div></div></div></div>`);
   document.querySelector("[data-close]").onclick=closeModal;const footer=document.querySelector("[data-close-footer]");if(footer)footer.onclick=closeModal;
   document.querySelectorAll("[data-deposit-decision]").forEach(button=>button.onclick=()=>decideCreditsDeposit(t.id,button.dataset.depositDecision,isLoanRepayment));
-  document.querySelectorAll("[data-finance-savings-review]").forEach(button=>button.onclick=()=>reviewFinanceSavings(t.id,button.dataset.decision));
+  document.querySelectorAll("[data-finance-savings-review]").forEach(button=>button.onclick=event=>{event.preventDefault();reviewFinanceSavings(t.id,button.dataset.decision);});
+  document.querySelectorAll("[data-finance-savings-delete]").forEach(button=>button.onclick=event=>{event.preventDefault();deleteFinanceSavings(t.id);});
 }
 
 async function decideCreditsDeposit(id,decision,isLoanRepayment=false) {
@@ -3692,7 +3750,14 @@ function bind() {
   document.querySelectorAll("[data-finance-modal]").forEach(el=>el.addEventListener("click",()=>openFinanceModal(el.dataset.financeModal)));
   document.querySelectorAll("[data-finance-voucher]").forEach(el=>el.addEventListener("click",()=>financeVoucherDecision(el.dataset.financeVoucher,el.dataset.decision)));
   document.querySelectorAll("[data-finance-entry-review]").forEach(el=>el.addEventListener("click",()=>reviewFinanceEntry(el.dataset.financeEntryReview,el.dataset.decision)));
-  document.querySelectorAll("[data-finance-savings-review]").forEach(el=>el.addEventListener("click",()=>reviewFinanceSavings(el.dataset.financeSavingsReview,el.dataset.decision)));
+  document.querySelectorAll("[data-finance-savings-review]").forEach(el=>el.addEventListener("click",event=>{
+    event.preventDefault();
+    reviewFinanceSavings(el.dataset.financeSavingsReview,el.dataset.decision);
+  }));
+  document.querySelectorAll("[data-finance-savings-delete]").forEach(el=>el.addEventListener("click",event=>{
+    event.preventDefault();
+    deleteFinanceSavings(el.dataset.financeSavingsDelete);
+  }));
   document.querySelectorAll("[data-finance-investment]").forEach(el=>el.addEventListener("click",()=>financeInvestmentDecision(el.dataset.financeInvestment,el.dataset.decision)));
   document.querySelectorAll("[data-finance-process]").forEach(el=>el.addEventListener("click",()=>processFinanceVoucher(el.dataset.financeProcess)));
   document.querySelectorAll("[data-finance-voucher-detail]").forEach(el=>el.addEventListener("click",()=>financeVoucherDetails(el.dataset.financeVoucherDetail)));

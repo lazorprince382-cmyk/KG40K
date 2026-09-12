@@ -91,6 +91,69 @@ function welfareTakenFrom(text){
   const amount=Number(String((after||before)?.[1]||"").replace(/,/g,""));
   return Number.isFinite(amount)&&amount>0?amount:0;
 }
+async function notifyQuietly(client,sql,params){
+  await client.query("SAVEPOINT notify_quietly");
+  try{
+    await client.query(sql,params);
+    await client.query("RELEASE SAVEPOINT notify_quietly");
+  }catch{
+    await client.query("ROLLBACK TO SAVEPOINT notify_quietly");
+  }
+}
+async function removeTransactionRow(client,id){
+  await client.query("SAVEPOINT remove_transaction");
+  try{
+    await client.query("DELETE FROM transactions WHERE id=$1",[id]);
+    await client.query("RELEASE SAVEPOINT remove_transaction");
+    return "deleted";
+  }catch(error){
+    await client.query("ROLLBACK TO SAVEPOINT remove_transaction");
+    if(error.code!=="23503")throw error;
+    await client.query("UPDATE transactions SET status='voided',finance_entry_id=NULL,notes=TRIM(BOTH FROM COALESCE(notes,'')||' | Deleted from requests') WHERE id=$1",[id]);
+    return "voided";
+  }
+}
+async function deleteMemberRequest(client,id){
+  const locked=(await client.query("SELECT * FROM transactions WHERE id=$1 FOR UPDATE",[id])).rows[0];
+  if(!locked){const error=new Error("Request not found");error.status=404;throw error;}
+  if(locked.status==="voided"){const error=new Error("This request is already deleted");error.status=409;throw error;}
+  const requestTypes=["Savings deposit","Share purchase","Annual subscription fee","Withdrawal"];
+  const open=["pending","pending_finance_review","rejected"].includes(locked.status);
+  if(!open&&!requestTypes.includes(locked.type)){const error=new Error("This record cannot be deleted from requests");error.status=409;throw error;}
+  if(open){
+    if(locked.finance_entry_id){
+      await client.query(`DELETE FROM organization_finance_entries WHERE id=$1 AND status IN ('pending','pending_finance_review','rejected','voided')`,[locked.finance_entry_id]);
+    }
+    await removeTransactionRow(client,locked.id);
+    return {locked,reversed:false,message:`${locked.reference} deleted. It is no longer in Finance approvals or My requests.`};
+  }
+  if(locked.type==="Savings deposit"){
+    let effects={accountName:null,accountDeducted:0,savingsReversed:0,welfareReversed:0};
+    if(locked.finance_entry_id){
+      const entry=(await client.query("SELECT * FROM organization_finance_entries WHERE id=$1 FOR UPDATE",[locked.finance_entry_id])).rows[0];
+      if(entry&&entry.status!=="voided"){
+        effects=await reverseIncomeReceipt(client,entry);
+        await client.query("DELETE FROM organization_finance_entries WHERE id=$1",[entry.id]);
+      }
+    }
+    const stillThere=(await client.query("SELECT id,amount FROM transactions WHERE id=$1",[locked.id])).rows[0];
+    if(stillThere){
+      await client.query("UPDATE members SET savings_balance=GREATEST(0,savings_balance-$1) WHERE id=$2",[stillThere.amount,locked.member_id]);
+      effects.savingsReversed+=Number(stillThere.amount);
+      await removeTransactionRow(client,locked.id);
+    }
+    let message=`${locked.reference} deleted.`;
+    if(effects.accountDeducted>0)message+=` UGX ${Number(effects.accountDeducted).toLocaleString()} deducted from ${effects.accountName||"the receiving account"}.`;
+    if(effects.savingsReversed>0)message+=` Member savings reduced by UGX ${Number(effects.savingsReversed).toLocaleString()}.`;
+    if(effects.welfareReversed>0)message+=` Welfare reduced by UGX ${Number(effects.welfareReversed).toLocaleString()}.`;
+    return {locked,reversed:true,effects,message};
+  }
+  if(locked.type==="Share purchase"){
+    await client.query("UPDATE members SET share_capital=GREATEST(0,share_capital-$1) WHERE id=$2",[locked.amount,locked.member_id]);
+  }
+  await removeTransactionRow(client,locked.id);
+  return {locked,reversed:true,message:`${locked.reference} deleted from requests.`};
+}
 async function reverseIncomeReceipt(client,entry){
   const effects={accountName:null,accountDeducted:0,savingsReversed:0,welfareReversed:0,savingsMatched:true};
   if(["completed","approved"].includes(entry.status)&&entry.finance_account_id){
@@ -1230,7 +1293,9 @@ app.get("/api/finance/command-center",auth,requireFinance("view"),asyncRoute(asy
       f.amount::float,f.status,f.receipt_number AS "receiptNumber",f.voucher_number AS "voucherNumber",f.budget_line AS "budgetLine",
       f.supporting_document AS "supportingDocument",f.transaction_date AS "transactionDate",f.created_at AS "createdAt",
       f.finance_account_id AS "accountId",a.account_name AS "accountName",
-      recorder.full_name AS "recordedBy" FROM organization_finance_entries f JOIN users recorder ON recorder.id=f.recorded_by
+      recorder.full_name AS "recordedBy",
+      (SELECT t.amount::float FROM transactions t WHERE t.finance_entry_id=f.id AND t.type='Savings deposit' AND t.status IN ('completed','verified','approved') ORDER BY t.id DESC LIMIT 1) AS "savingsAmount"
+      FROM organization_finance_entries f JOIN users recorder ON recorder.id=f.recorded_by
       LEFT JOIN finance_accounts a ON a.id=f.finance_account_id
       ORDER BY f.transaction_date DESC,f.id DESC LIMIT 100`),
     query(`SELECT id,invoice_number AS "invoiceNumber",supplier,description,amount::float,invoice_date AS "invoiceDate",
@@ -1400,6 +1465,21 @@ app.get("/api/finance/command-center",auth,requireFinance("view"),asyncRoute(asy
       LEFT JOIN users recorder ON recorder.id=t.recorded_by
       WHERE t.type='Savings deposit' AND t.status IN ('pending','pending_finance_review')
       ORDER BY t.id DESC LIMIT 80`)).rows,
+    savingsRequests:(await query(`SELECT t.id,t.reference,t.amount::float,t.method,t.status,t.notes,t.external_reference AS "paymentReference",
+      t.created_at AS "createdAt",(t.evidence_stored_name IS NOT NULL) AS "hasEvidence",t.submission_source AS "submissionSource",
+      m.full_name AS member,m.member_number AS "memberNumber",recorder.full_name AS "submittedBy"
+      FROM transactions t JOIN members m ON m.id=t.member_id
+      LEFT JOIN users recorder ON recorder.id=t.recorded_by
+      WHERE t.type='Savings deposit'
+        AND t.status IN ('pending','pending_finance_review','completed','verified','approved','rejected')
+        AND COALESCE(t.submission_source,'staff')<>'finance'
+        AND (
+          t.status IN ('pending','pending_finance_review','rejected')
+          OR t.submission_source='member'
+          OR COALESCE(t.verification_comment,'') ILIKE '%Approved by Finance%'
+          OR COALESCE(t.notes,'') ILIKE '%received=%'
+        )
+      ORDER BY CASE WHEN t.status IN ('pending','pending_finance_review') THEN 0 ELSE 1 END, t.id DESC LIMIT 80`)).rows,
     organizationStanding:{uapBalance,bankBalance:companyBankBalance,loansOutstanding,companyFunds},
     notifications:[
       ...pendingFinanceEntries.slice(0,4).map(x=>({level:"warning",title:`${x.reference} awaits Finance verification`,createdAt:x.createdAt||x.transactionDate})),
@@ -1410,7 +1490,8 @@ app.get("/api/finance/command-center",auth,requireFinance("view"),asyncRoute(asy
     access:{authorityLevel:req.financeAccess.authority_level,canCreate:Boolean(req.financeAccess.can_create),
       canEdit:Boolean(req.financeAccess.can_edit),canApprove:Boolean(req.financeAccess.can_approve),
       canDeleteIncome:req.user.role!=="Auditor",
-      canApproveSavings:req.user.role!=="Auditor"}
+      canApproveSavings:req.user.role!=="Auditor",
+      canDeleteSavings:req.user.role!=="Auditor"&&req.user.role!=="Member"}
   });
 }));
 app.post("/api/finance/income",auth,asyncRoute(async(req,res,next)=>{
@@ -1459,7 +1540,7 @@ app.post("/api/finance/income",auth,asyncRoute(async(req,res,next)=>{
           VALUES ($1,$2,'Savings deposit',$3,$4,'completed',$5,$6,$7,$7,NOW(),COALESCE($8::timestamptz,NOW()),$9,$10,'finance')
           RETURNING id`,
           [reference("TRX"),member.id,paymentMethod,split.savingsAmount,String(b.supportingDocument||"").trim()||null,
-            `Finance recorded UGX ${amount.toLocaleString()} on Centenary. Welfare UGX ${split.welfareAmount.toLocaleString()}${split.welfareAlreadyPaid?" (already paid this month)":""}. Savings UGX ${split.savingsAmount.toLocaleString()}.`,
+            `Finance recorded UGX ${amount.toLocaleString()} on Centenary. received=${amount.toFixed(2)}, welfare=${split.welfareAmount.toFixed(2)}, savings=${split.savingsAmount.toFixed(2)}${split.welfareAlreadyPaid?" | welfare already taken this month":""}. Savings UGX ${split.savingsAmount.toLocaleString()}.`,
             req.user.id,paidOn,receiptReference("RCPT"),yearRow?.year||null])).rows[0].id;
       }
     }
@@ -1522,7 +1603,7 @@ app.post("/api/finance/savings/:id/review",auth,asyncRoute(async(req,res,next)=>
   const decision=String(req.body.decision||"").toLowerCase();
   const comment=String(req.body.comment||"").trim();
   if(!["approve","reject"].includes(decision))return res.status(400).json({error:"Choose approve or reject"});
-  if(decision==="reject"&&comment.length<3)return res.status(400).json({error:"Enter a reason for rejecting this savings submission"});
+  if(decision==="reject"&&!comment)comment="Rejected";
   const result=await transaction(async client=>{
     const locked=(await client.query(`SELECT t.*,m.full_name,m.member_number FROM transactions t
       JOIN members m ON m.id=t.member_id WHERE t.id=$1 FOR UPDATE`,[req.params.id])).rows[0];
@@ -1530,11 +1611,11 @@ app.post("/api/finance/savings/:id/review",auth,asyncRoute(async(req,res,next)=>
     if(!["pending","pending_finance_review"].includes(locked.status)){const error=new Error("This savings submission has already been reviewed");error.status=409;throw error;}
     if(decision==="reject"){
       await client.query(`UPDATE transactions SET status='rejected',verified_by=$1,verified_at=NOW(),verification_comment=$2 WHERE id=$3`,
-        [req.user.id,comment,locked.id]);
+        [req.user.id,comment||"Rejected",locked.id]);
       if(locked.finance_entry_id)await client.query(`UPDATE organization_finance_entries SET status='rejected',approved_by=$1,approved_at=NOW()
-        WHERE id=$2 AND status='pending_finance_review'`,[req.user.id,locked.finance_entry_id]);
-      await client.query("INSERT INTO notifications (member_id,title,message) VALUES ($1,'Savings deposit rejected',$2)",
-        [locked.member_id,`${locked.reference} was rejected by Finance. ${comment}`]);
+        WHERE id=$2 AND status IN ('pending','pending_finance_review')`,[req.user.id,locked.finance_entry_id]);
+      await notifyQuietly(client,"INSERT INTO notifications (member_id,title,message) VALUES ($1,'Savings deposit rejected',$2)",
+        [locked.member_id,`${locked.reference} was rejected. ${comment||"No reason given."}`]);
       return {locked,decision};
     }
     const split=await applyMonthlySavingsSplit(client,{
@@ -1556,7 +1637,7 @@ app.post("/api/finance/savings/:id/review",auth,asyncRoute(async(req,res,next)=>
       notes=TRIM(BOTH FROM COALESCE(notes,'')||' | '||$6) WHERE id=$7`,
       [split.savingsAmount,req.user.id,comment||"Approved by Finance and posted to Centenary",posted.id,posted.receiptNumber,note,locked.id]);
     if(split.welfareId)await client.query("UPDATE welfare_contributions SET finance_entry_id=$1 WHERE id=$2",[posted.id,split.welfareId]);
-    await client.query("INSERT INTO notifications (member_id,title,message) VALUES ($1,'Savings deposit approved',$2)",
+    await notifyQuietly(client,"INSERT INTO notifications (member_id,title,message) VALUES ($1,'Savings deposit approved',$2)",
       [locked.member_id,`${locked.reference} was approved. UGX ${Number(locked.amount).toLocaleString()} is on the Centenary account. Welfare UGX ${split.welfareAmount.toLocaleString()}. Savings UGX ${split.savingsAmount.toLocaleString()}. Receipt ${posted.receiptNumber}.`]);
     return {locked,decision,split,posted};
   });
@@ -1566,6 +1647,32 @@ app.post("/api/finance/savings/:id/review",auth,asyncRoute(async(req,res,next)=>
     ?`Savings approved. UGX ${Number(result.locked.amount).toLocaleString()} posted to Centenary${result.split?.welfareAmount?`; UGX ${result.split.welfareAmount.toLocaleString()} welfare, UGX ${result.split.savingsAmount.toLocaleString()} savings`:""}.`
     :"Savings submission rejected.";
   res.json({ok:true,message});
+}));
+async function canManageSavingsRequest(user){
+  if(!user||user.role==="Auditor"||user.role==="Member")return false;
+  if(user.role==="System Admin")return true;
+  return Boolean(await departmentPermission(user,"finance","view")||await departmentPermission(user,"credits","view"));
+}
+app.delete("/api/finance/savings/:id",auth,asyncRoute(async(req,res)=>{
+  if(!await canManageSavingsRequest(req.user))return res.status(403).json({error:"Sign in with Finance or Credits access to delete this request"});
+  const result=await transaction(async client=>deleteMemberRequest(client,req.params.id));
+  const stored=result.locked.evidence_stored_name;
+  if(stored)fs.unlink(path.join(uploadsDir,path.basename(stored)),()=>{});
+  await audit({userId:req.user.id,action:"SAVINGS_REQUEST_DELETED",entityType:"transaction",entityId:String(result.locked.id),
+    details:result.message,...metadata(req)});
+  res.json({ok:true,message:result.message});
+}));
+app.delete("/api/member/transactions/:id",auth,asyncRoute(async(req,res)=>{
+  const row=await one("SELECT id,member_id,type,status FROM transactions WHERE id=$1",[req.params.id]);
+  if(!row)return res.status(404).json({error:"Request not found"});
+  const owns=Number(req.user.member_id)===Number(row.member_id);
+  if(!owns&&!await canManageSavingsRequest(req.user))return res.status(403).json({error:"You can only delete your own requests"});
+  const result=await transaction(async client=>deleteMemberRequest(client,req.params.id));
+  const stored=result.locked.evidence_stored_name;
+  if(stored)fs.unlink(path.join(uploadsDir,path.basename(stored)),()=>{});
+  await audit({userId:req.user.id,action:"MEMBER_REQUEST_DELETED",entityType:"transaction",entityId:String(result.locked.id),
+    details:result.message,...metadata(req)});
+  res.json({ok:true,message:result.message});
 }));
 app.post("/api/finance/accounts",auth,requireFinance("create"),asyncRoute(async(req,res)=>{
   const b=req.body,type=String(b.accountType||"").toLowerCase(),openingBalance=Number(b.openingBalance||0),
