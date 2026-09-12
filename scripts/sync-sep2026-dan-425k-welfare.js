@@ -7,6 +7,8 @@
  * Member dashboards keep one 425k monthly savings target (not split).
  * Welfare + Finance dashboards track the 25k welfare portion with progress bars.
  * Centenary Co. balance is reconciled to the SMS figure UGX 8,351,473.
+ * Dan's member savings is then pinned to UGX 8,900,000 without adding a further
+ * credit to the finance account current balance.
  *
  * Usage:
  *   DATABASE_URL=... node scripts/sync-sep2026-dan-425k-welfare.js
@@ -47,6 +49,7 @@ const FINAL_BALANCE = 8351473;
 const DEPOSIT_TOTAL = 425000;
 const WELFARE_SHARE = 25000;
 const SAVINGS_SHARE = DEPOSIT_TOTAL; // member ledger shows full 425k as savings progress
+const PIN_SAVINGS = 8900000; // official current savings; not posted to finance_accounts
 const TX_AT = "2026-09-01T18:20:00+03:00";
 const BANK_REF = "394886009";
 const BANK_NOTE = "AGNTBANK DEP DAN/Financia";
@@ -189,14 +192,15 @@ async function main() {
             `RCPT-${BANK_REF}`,
           ]
         );
-        await client.query(`UPDATE members SET savings_balance = savings_balance + $1 WHERE id=$2`, [
-          SAVINGS_SHARE,
-          member.id,
-        ]);
-        console.log(`  Savings +${SAVINGS_SHARE.toLocaleString()} → ${txRef}`);
+        console.log(`  Savings receipt ${txRef} recorded (member ledger pinned below; bank already in SMS figure)`);
       } else {
         console.log(`  SKIP savings tx — ${txRef} exists`);
       }
+
+      // Official current savings. Do not add the 425k on top of the pin, and do not
+      // post a further credit to finance_accounts (Centenary current balance stays as set above).
+      await client.query(`UPDATE members SET savings_balance=$1 WHERE id=$2`, [PIN_SAVINGS, member.id]);
+      console.log(`  Member savings pinned to UGX ${PIN_SAVINGS.toLocaleString()} (finance account current balance unchanged by this pin)`);
 
       if (!existingWel) {
         await client.query(

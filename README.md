@@ -66,7 +66,7 @@ If the dump is already imported and you only need the September Centenary deposi
 npm run db:sync-sep2026-dan
 ```
 
-That sync records Dan Rwebingira Ssalongo’s UGX 425,000 Centenary deposit (01-Sep-2026), reconciles the Kwagalana Centenary balance to UGX 8,351,473, sets the monthly member savings target to UGX 425,000 (shown as one figure on member dashboards), and tracks UGX 25,000 of each deposit as welfare for Finance/Welfare progress bars.
+That sync records Dan Rwebingira Ssalongo’s UGX 425,000 Centenary deposit (01-Sep-2026), reconciles the Kwagalana Centenary balance to UGX 8,351,473, sets the monthly member savings target to UGX 425,000 (shown as one figure on member dashboards), and tracks UGX 25,000 of each deposit as welfare for Finance/Welfare progress bars. Dan’s member savings ledger is then pinned to exactly UGX 8,900,000 without changing the current balance on any finance account.
 
 That import uses `pg_restore --clean --if-exists` and **replaces** matching objects in the target database. Point `DATABASE_URL` at the intended destination only.
 

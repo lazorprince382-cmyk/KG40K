@@ -77,6 +77,10 @@ if (!skipSync) {
     "scripts/sync-welfare-member-balances.js",
     ...dry,
   ]);
+  run("Pin Dan savings to UGX 8,900,000 (finance accounts unchanged)", "node", [
+    "scripts/sync-dan-savings-8900000.js",
+    ...dry,
+  ]);
 } else {
   console.log("\n== Sync ==\nSkipped (--skip-sync)");
 }
@@ -92,6 +96,7 @@ console.log("  npm run system:auto-update");
 console.log("  npm run system:auto-update -- --pull");
 console.log("\nIndividual refresh commands:");
 console.log("  npm run db:sync-sep2026-dan");
+console.log("  npm run db:sync-dan-savings");
 console.log("  npm run db:sync-uap-flow");
 console.log("  npm run db:clarify-uap-flow");
 console.log("  npm run db:sync-sep2026-live");
