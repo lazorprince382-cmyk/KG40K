@@ -1334,7 +1334,7 @@ function financeDashboardView() {
     ["Total assets",money(s.totalAssets),"building","finance-assets","Statement assets"],
     ["Total liabilities",money(s.totalLiabilities),"file","finance-invoices","Statement liabilities"]
   ]:[
-    ["Income this month",money(s.monthlyIncome),"arrowDown","finance-income","Organization receipts (excl. member savings)"],
+    ["Income this month",money(s.monthlyIncome),"arrowDown","finance-income","Includes member savings on Centenary"],
     ["Expenses this month",money(s.monthlyExpenses),"arrowUp","finance-expenses","Live organization payments"],
     ["Pending payment requests",String(s.pendingPaymentRequests||0),"approvals","finance-approvals","Awaiting Finance / Executive"],
     ["Centenary bank account",money(s.currentBankBalance),"wallet","finance-bank","Company bank live balance"]
@@ -1547,12 +1547,11 @@ function financeQuickPanel() {
 }
 function financeIncomeView() {
   const f=state.finance;
-  const isMemberSavings=cat=>/member\s*savings|savings\s*deposit/i.test(String(cat||""));
-  const rows=f.entries.filter(x=>x.entryType==="income"&&!/management accounts import/i.test(x.paymentMethod||"")&&!isMemberSavings(x.category));
+  const rows=f.entries.filter(x=>x.entryType==="income"&&!/management accounts import/i.test(x.paymentMethod||""));
   const topSource=[...(f.incomeBySource||[])].sort((a,b)=>b.amount-a.amount)[0];
-  return `<div class="exec-module-metrics">${executiveModuleMetric("Today",money(f.stats.incomeToday),"green")}${executiveModuleMetric("This month",money(f.stats.monthlyIncome),"blue")}${executiveModuleMetric("Org receipts",rows.length,"violet")}${executiveModuleMetric("Top source",topSource?topSource.label:"—","orange")}</div>
-    <p class="exec-report-preview-note">Organization income excludes member savings deposits (those stay on the Credits / member ledger).</p>
-    ${financeIncomeWidget(f)}${financeDataTable("Organization income ledger",["Receipt","Date","Payer / Organization","Category","Method","Amount","Status"],rows.map(x=>[x.receiptNumber||x.reference,new Date(x.transactionDate).toLocaleDateString(),x.counterparty||"?",x.category,x.paymentMethod||"?",money(x.amount),status(x.status)]))}`;
+  return `<div class="exec-module-metrics">${executiveModuleMetric("Today",money(f.stats.incomeToday),"green")}${executiveModuleMetric("This month",money(f.stats.monthlyIncome),"blue")}${executiveModuleMetric("Receipts",rows.length,"violet")}${executiveModuleMetric("Top source",topSource?topSource.label:"—","orange")}</div>
+    <p class="exec-report-preview-note">Member savings post immediately to the Centenary account. The first deposit in a month sends UGX 25,000 to welfare; later deposits that month stay fully on savings.</p>
+    ${financeIncomeWidget(f)}${financeDataTable("Income ledger",["Receipt","Date","Payer / Organization","Category","Method","Amount","Status"],rows.map(x=>[x.receiptNumber||x.reference,new Date(x.transactionDate).toLocaleDateString(),x.counterparty||"?",x.category,x.paymentMethod||"?",money(x.amount),status(x.status)]))}`;
 }
 function financeExpensesView() {
   const f=state.finance,rows=f.entries.filter(x=>x.entryType==="expense"&&!/management accounts import/i.test(x.paymentMethod||""));
@@ -1688,14 +1687,14 @@ function financeDataTable(title,headers,rows) {
   return `<section class="finance-panel finance-data-panel"><div class="finance-panel-head"><div><h3>${title}</h3><p>${rows.length} verified record${rows.length===1?"":"s"}</p></div></div><div class="table-scroll"><table><thead><tr>${headers.map(h=>`<th>${h}</th>`).join("")}</tr></thead><tbody>${rows.length?rows.map(row=>`<tr>${row.map(value=>`<td>${value}</td>`).join("")}</tr>`).join(""):`<tr><td colspan="${headers.length}">No records found.</td></tr>`}</tbody></table></div></section>`;
 }
 function financeAccountOptions() {
-  return state.finance.accounts.map(a=>`<option value="${a.id}" data-account-type="${a.accountType}">${escapeHtml(a.accountName)} - ${money(a.balance)}</option>`).join("");
+  return state.finance.accounts.map(a=>`<option value="${a.id}" data-account-type="${a.accountType}" data-account-code="${escapeHtml(a.accountCode||"")}">${escapeHtml(a.accountName)} - ${money(a.balance)}</option>`).join("");
 }
 function financeDepartmentOptions() {
   return (state.finance.departments||[]).map(department=>`<option value="${department.id}">${escapeHtml(department.name)}</option>`).join("");
 }
 function openFinanceModal(type) {
   const forms={
-    income:["Record organization income","A receipt will be issued and the selected account balance updated",`<form class="form" data-finance-form="income"><div class="form-grid"><div class="field"><label>Income category</label><select name="category"><option>Membership Fees</option><option>Registration Fees</option><option>Donations</option><option>Grants</option><option>Investment Income</option><option>Rental Income</option><option>Welfare Contributions</option><option>Miscellaneous Income</option></select></div><div class="field"><label>Amount (UGX)</label><input name="amount" type="number" min="1" required></div><div class="field full"><label>Member / Organization paying</label><input name="counterparty" required></div><div class="field"><label>Payment method</label><select name="paymentMethod"><option>Bank transfer</option><option>Cash</option><option>Mobile Money</option><option>Cheque</option></select></div><div class="field"><label>Receiving account</label><select name="accountId" required>${financeAccountOptions()}</select><small data-account-help>Select where the money was received.</small></div><div class="field"><label>Date</label><input name="date" type="date" value="${new Date().toISOString().slice(0,10)}" required></div><div class="field full"><label>Description</label><textarea name="description" required></textarea></div><div class="field full"><label>Supporting document</label><input name="supportingDocument"></div></div>${formActions("Record income and issue receipt")}</form>`],
+    income:["Record income","Posted immediately. Member savings always go to the Centenary bank account.",`<form class="form" data-finance-form="income"><div class="form-grid"><div class="field"><label>Income category</label><select name="category"><option>Member savings</option><option>Membership Fees</option><option>Registration Fees</option><option>Donations</option><option>Grants</option><option>Investment Income</option><option>Rental Income</option><option>Welfare Contributions</option><option>Miscellaneous Income</option></select></div><div class="field" data-savings-member><label>Member</label><select name="memberId">${(state.finance.savingsMembers||[]).map(m=>`<option value="${m.id}">${escapeHtml(m.memberNumber)} — ${escapeHtml(m.name)}</option>`).join("")}</select></div><div class="field"><label>Amount (UGX)</label><input name="amount" type="number" min="1" required></div><div class="field full"><label>Member / Organization paying</label><input name="counterparty" required></div><div class="field"><label>Payment method</label><select name="paymentMethod"><option>Bank transfer</option><option>Cash</option><option>Mobile Money</option><option>Cheque</option></select></div><div class="field"><label>Receiving account</label><select name="accountId" required>${financeAccountOptions()}</select><small data-account-help>Select where the money was received.</small></div><div class="field"><label>Date</label><input name="date" type="date" value="${new Date().toISOString().slice(0,10)}" required></div><div class="field full"><label>Description</label><textarea name="description" required></textarea></div><div class="field full"><label>Supporting document</label><input name="supportingDocument"></div></div>${formActions("Record income")}</form>`],
     account:["Add finance cash account","Register a bank, cash, petty cash, mobile money or restricted-fund account",`<form class="form" data-finance-form="account"><div class="form-grid"><div class="field"><label>Account type</label><select name="accountType"><option value="bank">Bank account</option><option value="cash">Cash account</option><option value="petty_cash">Petty cash</option><option value="mobile_money">Mobile money</option><option value="restricted">Restricted funds</option></select></div><div class="field"><label>Account code (optional)</label><input name="accountCode" placeholder="Generated if empty"></div><div class="field full"><label>Account name</label><input name="accountName" required placeholder="e.g. Stanbic Operating Account"></div><div class="field"><label>Bank / provider name</label><input name="bankName"></div><div class="field"><label>Account / wallet number</label><input name="accountNumber"></div><div class="field"><label>Opening balance (UGX)</label><input name="openingBalance" type="number" min="0" value="0" required></div><div class="field"><label>Opening balance date</label><input name="openingBalanceDate" type="date" max="${new Date().toISOString().slice(0,10)}" value="${new Date().toISOString().slice(0,10)}" required></div><div class="field"><label class="check-field"><input name="restricted" type="checkbox"> Restricted funds</label></div><div class="field full"><label>Notes / balance description</label><textarea name="notes" placeholder="Explain the source and date of the starting balance"></textarea></div><div class="field full"><label>Opening statement or supporting document</label><input name="supportingDocument"><small>Required when the opening balance is greater than zero.</small></div></div>${formActions("Add account")}</form>`],
     expense:["Create expense request","This creates a controlled payment voucher?not a completed expense",`<form class="form" data-finance-form="expense"><div class="form-grid"><div class="field full"><label>Supplier / Payee</label><input name="supplier" required></div><div class="field"><label>Department</label><select name="departmentId">${financeDepartmentOptions()}</select></div><div class="field"><label>Category</label><select name="category"><option>Utilities</option><option>Office Supplies</option><option>Fuel</option><option>Repairs</option><option>Internet</option><option>Salaries</option><option>Welfare Transfer</option><option>Purchase</option><option>Transport</option><option>Maintenance</option></select></div><div class="field"><label>Budget line</label><input name="budgetLine" required></div><div class="field"><label>Amount (UGX)</label><input name="amount" type="number" min="1" required></div><div class="field"><label>Payment method</label><select name="paymentMethod"><option>Bank transfer</option><option>Cash</option><option>Mobile Money</option><option>Cheque</option></select></div><div class="field full"><label>Description</label><textarea name="description" required></textarea></div><div class="field full"><label>Attachment reference</label><input name="supportingDocument"></div></div>${formActions("Create payment voucher")}</form>`],
     invoice:["Record supplier invoice","Track an obligation and its due date",`<form class="form" data-finance-form="invoice"><div class="form-grid"><div class="field"><label>Invoice number</label><input name="invoiceNumber" required></div><div class="field"><label>Supplier</label><input name="supplier" required></div><div class="field full"><label>Description</label><input name="description" required></div><div class="field"><label>Amount (UGX)</label><input name="amount" type="number" min="1" required></div><div class="field"><label>Invoice date</label><input name="invoiceDate" type="date" required></div><div class="field"><label>Due date</label><input name="dueDate" type="date" required></div><div class="field full"><label>Supporting document</label><input name="supportingDocument"></div></div>${formActions("Record invoice")}</form>`],
@@ -1713,16 +1712,38 @@ function openFinanceModal(type) {
   financeForm.onsubmit=submitFinanceForm;
 }
 function configureFinanceIncomeAccounts(form) {
-  const method=form.elements.paymentMethod,account=form.elements.accountId;
+  const method=form.elements.paymentMethod,account=form.elements.accountId,category=form.elements.category;
   const map={"Bank transfer":["bank"],Cheque:["bank"],Cash:["cash","petty_cash"],"Mobile Money":["mobile_money"]};
   const refresh=()=>{
+    const savings=/member savings/i.test(category?.value||"");
+    const memberField=form.querySelector("[data-savings-member]");
+    const payerField=form.elements.counterparty?.closest(".field");
+    if(memberField)memberField.hidden=!savings;
+    if(form.elements.memberId)form.elements.memberId.required=savings;
+    if(payerField)payerField.hidden=savings;
+    if(form.elements.counterparty)form.elements.counterparty.required=!savings;
+    if(savings){
+      const selected=form.elements.memberId?.selectedOptions?.[0];
+      if(form.elements.counterparty&&selected)form.elements.counterparty.value=selected.textContent.trim();
+      const centenary=[...account.options].find(option=>option.dataset.accountCode==="GL-4104");
+      [...account.options].forEach(option=>{option.hidden=Boolean(centenary)&&option!==centenary;option.disabled=option.hidden;});
+      if(centenary)account.value=centenary.value;
+      form.querySelector("[data-account-help]").textContent="Always the Centenary bank account. The first deposit this month sends UGX 25,000 to welfare; later deposits this month are not deducted. Recorded immediately — no approval.";
+      return;
+    }
     const allowed=map[method.value]||[];
     [...account.options].forEach(option=>{option.hidden=!allowed.includes(option.dataset.accountType);option.disabled=option.hidden;});
     const first=[...account.options].find(option=>!option.disabled);
     if(![...account.options].some(option=>option.selected&&!option.disabled))account.value=first?.value||"";
     form.querySelector("[data-account-help]").textContent=first?`Showing registered ${method.value.toLowerCase()} accounts.`:`No compatible account exists. Add one from Bank Accounts first.`;
   };
-  method.addEventListener("change",refresh);refresh();
+  method.addEventListener("change",refresh);
+  category?.addEventListener("change",refresh);
+  form.elements.memberId?.addEventListener("change",()=>{
+    const selected=form.elements.memberId.selectedOptions?.[0];
+    if(form.elements.counterparty&&selected)form.elements.counterparty.value=selected.textContent.trim();
+  });
+  refresh();
 }
 async function submitFinanceForm(event) {
   event.preventDefault();const form=event.currentTarget,type=form.dataset.financeForm;
@@ -1748,7 +1769,7 @@ async function submitFinanceForm(event) {
     const accountId=form.dataset.accountId;
     const result=await api(accountId?`/api/finance/accounts/${accountId}`:endpoints[type],{method:accountId?"PATCH":"POST",body:JSON.stringify(data)});
     closeModal();state.finance=await api("/api/finance/command-center");render();
-    toast(type==="income"?`Income recorded. Receipt ${result.receiptNumber}.`:type==="expense"?`Payment voucher ${result.voucherNumber} created.`:`${type[0].toUpperCase()+type.slice(1)} record saved.`);
+    toast(type==="income"?(result.split?`Recorded on Centenary. Receipt ${result.receiptNumber}. Welfare ${money(result.split.welfareAmount)}, savings ${money(result.split.savingsAmount)}${result.split.welfareAlreadyPaid?" — welfare already taken this month.":"."}`:`Income recorded. Receipt ${result.receiptNumber}.`):type==="expense"?`Payment voucher ${result.voucherNumber} created.`:`${type[0].toUpperCase()+type.slice(1)} record saved.`);
   } catch(error){button.disabled=false;button.textContent="Try again";toast(error.message);}
 }
 async function financeVoucherDecision(id,decision) {
@@ -2412,7 +2433,7 @@ function creditsMembersView() {
   const c=state.credits,p=c.contributionPolicy;
   const rows=c.members.map(m=>{const variance=Number(m.savingsVariance||0),expected=Number(m.expectedSavingsToDate||0),rate=expected?Math.min(100,Math.round(Number(m.currentYearSavings||0)/expected*100)):0;return [`${m.name}<small class="table-sub">${m.memberNumber}</small>`,m.closingSavings==null?"Not imported":money(m.closingSavings),money(m.totalMemberFunds),`${money(m.currentYearSavings)}<small class="table-sub">${rate}% of amount due</small>`,money(expected),`<span class="${variance<0?"negative":"positive"}">${variance<0?`Short ${money(Math.abs(variance))}`:`Ahead ${money(variance)}`}</span>`,`${money(m.currentYearShares)}<small class="table-sub">of ${money(p?.annualShareTarget||0)}</small>`,`${money(m.currentYearSubscription)}<small class="table-sub">of ${money(p?.annualSubscriptionFee||0)}</small>`,status(m.status),`<button class="mini-btn" data-credits-member="${m.id}">${icons.eye}</button>`];});
   return `<div class="exec-module-metrics">${executiveModuleMetric("SACCO accounts",c.stats.totalMembers,"blue")}${executiveModuleMetric("Savings + capital",money(c.contributionProgress?.totalMemberFunds||0),"green")}${executiveModuleMetric("Savings for completed months",money(c.contributionProgress?.expectedSavingsToDate||0),"violet")}${executiveModuleMetric("Verified this year",money(c.contributionProgress?.verifiedSavings||0),"orange")}</div>
-    <div class="credits-policy-explainer"><strong>${p?.fiscalYear||"Current year"} rules</strong><span>Monthly savings ${money(p?.monthlySavingsTarget||0)}</span><span>Annual shares ${money(p?.annualShareTarget||0)}</span><span>Annual subscription ${money(p?.annualSubscriptionFee||0)}</span><small>The 30 June balance carries forward; only yearly targets restart on 1 July.</small></div>
+    <div class="credits-policy-explainer"><strong>${p?.fiscalYear||"Current year"} rules</strong><span>Monthly savings ${money(p?.monthlySavingsTarget||0)}</span><span>Welfare UGX 25,000 once a month from the first deposit</span><span>Annual shares ${money(p?.annualShareTarget||0)}</span><span>Annual subscription ${money(p?.annualSubscriptionFee||0)}</span><small>A 425,000 payment sends 25,000 to welfare and 400,000 to savings the first time that month. Later deposits in the same month stay fully on savings and on the Centenary account.</small></div>
     ${financeDataTable("Member savings and annual obligations",["Member","Savings at 30 Jun 2026","Current savings + capital","Savings paid this FY","Expected by today","Short / ahead","Shares this FY","Subscription this FY","Status","Profile"],rows)}`;
 }function creditsSavingsView() {
   const c=state.credits,rows=c.transactions.filter(t=>["Savings deposit","Withdrawal","Share purchase","Annual subscription fee"].includes(t.type));

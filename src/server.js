@@ -22,11 +22,64 @@ const {
 const { getRunningLoan, getSavingsTargetStatus, getGuarantorEligibility } = require("./loan-eligibility");
 const { loadWelfareStanding } = require("./welfare-standing");
 
-/** Member savings dual-posted into Finance must not count as organization income. */
 function isMemberSavingsFinanceCategory(category="") {
-  return /member\s*savings|savings\s*deposit/i.test(String(category || ""));
+  return /member\s*savings|^savings$|savings\s*deposit/i.test(String(category || "").trim());
 }
-const ORG_INCOME_NOT_MEMBER = `AND COALESCE(category,'') NOT ILIKE '%member savings%' AND COALESCE(category,'') NOT ILIKE '%savings deposit%'`;
+async function monthlyWelfareAmount(client=null){
+  const runner=client||{query:(sql,params)=>query(sql,params).then(r=>({rows:r.rows}))};
+  const row=(await runner.query(`SELECT value FROM settings WHERE key='monthlyWelfareContribution'`)).rows[0];
+  const amount=Number(row?.value||25000);
+  return Number.isFinite(amount)&&amount>0?amount:25000;
+}
+async function applyMonthlySavingsSplit(client,{memberId,grossAmount,onDate,userId,method,paymentReference,sourceRef}){
+  const gross=Number(grossAmount);
+  if(!Number.isFinite(gross)||gross<=0){const error=new Error("Enter a positive savings amount");error.status=400;throw error;}
+  const welfareDue=await monthlyWelfareAmount(client);
+  const paidOn=onDate||new Date();
+  const already=(await client.query(`SELECT id FROM welfare_contributions
+    WHERE member_id=$1 AND status IN ('verified','completed','recorded')
+      AND amount>0
+      AND (
+        period=to_char($2::date,'YYYY-MM')
+        OR (contribution_date>=date_trunc('month',$2::date) AND contribution_date<date_trunc('month',$2::date)+INTERVAL '1 month')
+      )
+    LIMIT 1`,[memberId,paidOn])).rows[0];
+  const welfareAmount=already?0:Math.min(welfareDue,gross);
+  const savingsAmount=Math.max(0,Math.round((gross-welfareAmount)*100)/100);
+  if(savingsAmount>0){
+    await client.query("UPDATE members SET savings_balance=savings_balance+$1 WHERE id=$2",[savingsAmount,memberId]);
+  }
+  let welfareReference=null;
+  if(welfareAmount>0){
+    const receipt=receiptReference("WRCPT");
+    welfareReference=reference("WCON");
+    await client.query(`INSERT INTO welfare_contributions
+      (reference,member_id,contribution_type,period,expected_amount,amount,payment_method,receipt_number,status,
+       contribution_date,recorded_by,verified_by,verified_at,verification_comment,payment_reference)
+      VALUES ($1,$2,'Monthly Welfare Contribution',to_char($3::date,'YYYY-MM'),$4,$4,$5,$6,'verified',$3::date,$7,$7,NOW(),$8,$9)`,
+      [welfareReference,memberId,paidOn,welfareAmount,method||"Bank transfer",receipt,userId,
+        `Taken once this month from ${sourceRef||"member savings receipt"}`,paymentReference||null]);
+    await client.query(`INSERT INTO settings (key,value) VALUES ('welfareFundBalance',$1)
+      ON CONFLICT (key) DO UPDATE SET value=(COALESCE(NULLIF(settings.value,''),'0')::numeric+$2)::text, updated_at=NOW()`,
+      [String(welfareAmount),welfareAmount]);
+  }
+  return {welfareAmount,savingsAmount,welfareAlreadyPaid:Boolean(already),welfareReference};
+}
+async function postReceiptToCentenary(client,{grossAmount,memberName,method,description,onDate,userId,category}){
+  const account=(await client.query(`SELECT id,account_name FROM finance_accounts
+    WHERE active=true AND account_code='GL-4104' ORDER BY id LIMIT 1 FOR UPDATE`)).rows[0];
+  if(!account){const error=new Error("Centenary bank account (GL-4104) is not set up");error.status=400;throw error;}
+  const department=(await client.query("SELECT id FROM departments WHERE code='finance'")).rows[0];
+  const ref=reference("FIN-INC"),receipt=receiptReference("RCPT");
+  const inserted=(await client.query(`INSERT INTO organization_finance_entries
+    (department_id,reference,entry_type,category,description,counterparty,payment_method,amount,status,receipt_number,
+      transaction_date,recorded_by,approved_by,approved_at,finance_account_id)
+    VALUES ($1,$2,'income',$3,$4,$5,$6,$7,'completed',$8,$9::date,$10,$10,NOW(),$11)
+    RETURNING id,reference,receipt_number AS "receiptNumber"`,
+    [department.id,ref,category||"Member savings",description,memberName,method||"Bank transfer",grossAmount,receipt,onDate||new Date(),userId,account.id])).rows[0];
+  await client.query("UPDATE finance_accounts SET balance=balance+$1,updated_at=NOW() WHERE id=$2",[grossAmount,account.id]);
+  return {...inserted,accountName:account.account_name,accountId:account.id};
+}
 
 let loanApprovals = null;
 const getLoanApprovals = async () => {
@@ -512,12 +565,10 @@ app.get("/api/executive/command-center",auth,requireExecutive("view"),asyncRoute
       JOIN users creator ON creator.id=a.created_by LEFT JOIN users assignee ON assignee.id=a.assigned_to
       WHERE a.status IN ('pending_executive','in_review') AND a.visibility_level<=$1
       ORDER BY CASE WHEN a.status='pending_executive' THEN 0 ELSE 1 END,a.id DESC LIMIT 30`,[level]),
-    query(`SELECT COALESCE(SUM(amount) FILTER (WHERE entry_type='income' AND status IN ('approved','completed')
-        AND COALESCE(payment_method,'') NOT ILIKE 'Management accounts import'
-        ${ORG_INCOME_NOT_MEMBER}),0)::float AS income,
+    query(`SELECT       COALESCE(SUM(amount) FILTER (WHERE entry_type='income' AND status IN ('approved','completed')
+        AND COALESCE(payment_method,'') NOT ILIKE 'Management accounts import'),0)::float AS income,
       COALESCE(SUM(amount) FILTER (WHERE entry_type='income' AND status IN ('approved','completed')
         AND COALESCE(payment_method,'') NOT ILIKE 'Management accounts import'
-        ${ORG_INCOME_NOT_MEMBER}
         AND transaction_date>=date_trunc('month',CURRENT_DATE)::date),0)::float AS income_month,
       COALESCE(SUM(amount) FILTER (WHERE entry_type='expense' AND status IN ('approved','completed')
         AND COALESCE(payment_method,'') NOT ILIKE 'Management accounts import'),0)::float AS expenditure,
@@ -681,7 +732,6 @@ app.get("/api/executive/command-center",auth,requireExecutive("view"),asyncRoute
       SELECT to_char(month,'Mon') AS month,
       COALESCE((SELECT SUM(amount)/1000000 FROM organization_finance_entries f WHERE f.entry_type='income' AND f.status IN ('approved','completed')
         AND COALESCE(f.payment_method,'') NOT ILIKE 'Management accounts import'
-        AND COALESCE(f.category,'') NOT ILIKE '%member savings%' AND COALESCE(f.category,'') NOT ILIKE '%savings deposit%'
         AND date_trunc('month',f.transaction_date)=months.month),0)::float AS income,
       COALESCE((SELECT SUM(amount)/1000000 FROM organization_finance_entries f WHERE f.entry_type='expense' AND f.status IN ('approved','completed') AND date_trunc('month',f.transaction_date)=months.month),0)::float AS expenses,
       COALESCE((SELECT SUM(amount)/1000000 FROM transactions tx WHERE tx.type='Savings deposit' AND tx.status='completed' AND date_trunc('month',tx.created_at)=months.month),0)::float AS savings,
@@ -1055,13 +1105,11 @@ app.get("/api/finance/command-center",auth,requireFinance("view"),asyncRoute(asy
       FROM finance_accounts WHERE active=true ORDER BY id`),
     query(`SELECT
       COALESCE(SUM(amount) FILTER (WHERE entry_type='income' AND status IN ('completed','approved') AND transaction_date=CURRENT_DATE
-        AND COALESCE(payment_method,'') NOT ILIKE 'Management accounts import'
-        AND COALESCE(category,'') NOT ILIKE '%member savings%' AND COALESCE(category,'') NOT ILIKE '%savings deposit%'),0)::float AS income_today,
+        AND COALESCE(payment_method,'') NOT ILIKE 'Management accounts import'),0)::float AS income_today,
       COALESCE(SUM(amount) FILTER (WHERE entry_type='expense' AND status IN ('completed','approved') AND transaction_date=CURRENT_DATE
         AND COALESCE(payment_method,'') NOT ILIKE 'Management accounts import'),0)::float AS expense_today,
       COALESCE(SUM(amount) FILTER (WHERE entry_type='income' AND status IN ('completed','approved') AND transaction_date>=date_trunc('month',CURRENT_DATE)::date
-        AND COALESCE(payment_method,'') NOT ILIKE 'Management accounts import'
-        AND COALESCE(category,'') NOT ILIKE '%member savings%' AND COALESCE(category,'') NOT ILIKE '%savings deposit%'),0)::float AS income_month,
+        AND COALESCE(payment_method,'') NOT ILIKE 'Management accounts import'),0)::float AS income_month,
       COALESCE(SUM(amount) FILTER (WHERE entry_type='expense' AND status IN ('completed','approved') AND transaction_date>=date_trunc('month',CURRENT_DATE)::date
         AND COALESCE(payment_method,'') NOT ILIKE 'Management accounts import'),0)::float AS expense_month
       FROM organization_finance_entries`),
@@ -1129,7 +1177,7 @@ app.get("/api/finance/command-center",auth,requireFinance("view"),asyncRoute(asy
   const budgetRows=[...budgets.rows]
     .map(row=>({...row,utilization:row.allocated?Math.round(row.used/row.allocated*100):0}))
     .sort((a,b)=>(budgetOrder[a.departmentCode]||99)-(budgetOrder[b.departmentCode]||99));
-  const incomeBySource=Object.entries(entries.rows.filter(x=>x.entryType==="income"&&["completed","approved"].includes(x.status)&&!/management accounts import/i.test(x.paymentMethod||"")&&!isMemberSavingsFinanceCategory(x.category))
+  const incomeBySource=Object.entries(entries.rows.filter(x=>x.entryType==="income"&&["completed","approved"].includes(x.status)&&!/management accounts import/i.test(x.paymentMethod||""))
     .reduce((totals,row)=>(totals[row.category]=(totals[row.category]||0)+row.amount,totals),{})).map(([label,amount])=>({label,amount}));
   const expensesByCategory=Object.entries(entries.rows.filter(x=>x.entryType==="expense"&&["completed","approved"].includes(x.status)&&!/management accounts import/i.test(x.paymentMethod||""))
     .reduce((totals,row)=>(totals[row.category]=(totals[row.category]||0)+row.amount,totals),{})).map(([label,amount])=>({label,amount}));
@@ -1139,7 +1187,6 @@ app.get("/api/finance/command-center",auth,requireFinance("view"),asyncRoute(asy
       to_char(month,'YYYY-MM') AS "monthKey",
       COALESCE((SELECT SUM(amount) FROM organization_finance_entries f WHERE f.entry_type='income' AND f.status IN ('approved','completed')
         AND COALESCE(f.payment_method,'') NOT ILIKE 'Management accounts import'
-        AND COALESCE(f.category,'') NOT ILIKE '%member savings%' AND COALESCE(f.category,'') NOT ILIKE '%savings deposit%'
         AND date_trunc('month',f.transaction_date)=months.month),0)::float AS income,
       COALESCE((SELECT SUM(amount) FROM organization_finance_entries f WHERE f.entry_type='expense' AND f.status IN ('approved','completed')
         AND COALESCE(f.payment_method,'') NOT ILIKE 'Management accounts import' AND date_trunc('month',f.transaction_date)=months.month),0)::float AS expenses
@@ -1240,6 +1287,8 @@ app.get("/api/finance/command-center",auth,requireFinance("view"),asyncRoute(asy
     pendingEntries:pendingFinanceEntries,invoices:invoices.rows,assets:assets.rows,
     procurements:procurements.rows,documents:documents.rows,investmentAnalyses:investmentAnalyses.rows,monthly,daily,
     incomeBySource,expensesByCategory,subscriptionProgress,welfareProgress,welfareStanding,
+    savingsMembers:(await query(`SELECT id, member_number AS "memberNumber", full_name AS name
+      FROM members WHERE deleted_at IS NULL AND status='active' ORDER BY full_name`)).rows,
     organizationStanding:{uapBalance,bankBalance:companyBankBalance,loansOutstanding,companyFunds},
     notifications:[
       ...pendingFinanceEntries.slice(0,4).map(x=>({level:"warning",title:`${x.reference} awaits Finance verification`,createdAt:x.createdAt||x.transactionDate})),
@@ -1253,28 +1302,61 @@ app.get("/api/finance/command-center",auth,requireFinance("view"),asyncRoute(asy
 }));
 app.post("/api/finance/income",auth,requireFinance("create"),asyncRoute(async(req,res)=>{
   const b=req.body,amount=Number(b.amount);
-  if(!b.category||!b.counterparty||!b.paymentMethod||!b.description||!Number.isFinite(amount)||amount<=0)
-    return res.status(400).json({error:"Category, payer, method, description and a positive amount are required"});
+  const category=String(b.category||"").trim();
+  const savings=isMemberSavingsFinanceCategory(category);
+  const memberId=Number(b.memberId);
+  if(!category||!b.paymentMethod||!b.description||!Number.isFinite(amount)||amount<=0)
+    return res.status(400).json({error:"Category, method, description and a positive amount are required"});
+  if(savings&&!Number.isInteger(memberId))return res.status(400).json({error:"Select the member whose savings you are recording"});
+  if(!savings&&!String(b.counterparty||"").trim())return res.status(400).json({error:"Enter who paid this income"});
   const paymentMethod=String(b.paymentMethod).trim();
   const compatibleTypes={"Bank transfer":["bank"],Cheque:["bank"],Cash:["cash","petty_cash"],"Mobile Money":["mobile_money"]}[paymentMethod]||[];
   const row=await transaction(async client=>{
     const department=(await client.query("SELECT id FROM departments WHERE code='finance'")).rows[0];
-    const account=(await client.query("SELECT * FROM finance_accounts WHERE id=$1 AND active=true FOR UPDATE",[Number(b.accountId)])).rows[0];
-    if(!account){const error=new Error("Choose the account that received this income");error.status=400;throw error;}
-    if(!compatibleTypes.includes(account.account_type)){const error=new Error(`${paymentMethod} income must be posted to a compatible registered account`);error.status=400;throw error;}
+    const member=savings?(await client.query("SELECT id,full_name,member_number FROM members WHERE id=$1 AND deleted_at IS NULL AND status='active'",[memberId])).rows[0]:null;
+    if(savings&&!member){const error=new Error("Choose an active member");error.status=400;throw error;}
+    const accountId=savings
+      ?(await client.query("SELECT id FROM finance_accounts WHERE active=true AND account_code='GL-4104' ORDER BY id LIMIT 1")).rows[0]?.id
+      :Number(b.accountId);
+    const account=(await client.query("SELECT * FROM finance_accounts WHERE id=$1 AND active=true FOR UPDATE",[accountId])).rows[0];
+    if(!account){const error=new Error(savings?"Centenary bank account is not set up":"Choose the account that received this income");error.status=400;throw error;}
+    if(!savings&&!compatibleTypes.includes(account.account_type)){const error=new Error(`${paymentMethod} income must be posted to a compatible registered account`);error.status=400;throw error;}
+    const payer=savings?member.full_name:String(b.counterparty).trim();
+    const paidOn=b.date||new Date();
+    let split=null;
+    if(savings){
+      split=await applyMonthlySavingsSplit(client,{
+        memberId:member.id,grossAmount:amount,onDate:paidOn,userId:req.user.id,method:paymentMethod,
+        paymentReference:String(b.supportingDocument||"").trim()||null,sourceRef:"Finance income"
+      });
+      if(split.savingsAmount>0){
+        const yearRow=(await client.query(`SELECT EXTRACT(YEAR FROM ends_on)::int AS year
+          FROM member_financial_year_policies WHERE status='active' AND $1::date BETWEEN starts_on AND ends_on
+          ORDER BY starts_on DESC LIMIT 1`,[paidOn])).rows[0];
+        await client.query(`INSERT INTO transactions
+          (reference,member_id,type,method,amount,status,external_reference,notes,recorded_by,verified_by,verified_at,created_at,receipt_number,target_fiscal_year,submission_source)
+          VALUES ($1,$2,'Savings deposit',$3,$4,'completed',$5,$6,$7,$7,NOW(),COALESCE($8::timestamptz,NOW()),$9,$10,'finance')`,
+          [reference("TRX"),member.id,paymentMethod,split.savingsAmount,String(b.supportingDocument||"").trim()||null,
+            `Finance recorded UGX ${amount.toLocaleString()} on Centenary. Welfare UGX ${split.welfareAmount.toLocaleString()}${split.welfareAlreadyPaid?" (already paid this month)":""}. Savings UGX ${split.savingsAmount.toLocaleString()}.`,
+            req.user.id,paidOn,receiptReference("RCPT"),yearRow?.year||null]);
+      }
+    }
     const ref=reference("FIN-INC"),receipt=receiptReference("RCPT");
+    const description=savings
+      ?`${String(b.description).trim()} | Received UGX ${amount.toLocaleString()} on Centenary. ${split.welfareAmount?`UGX ${split.welfareAmount.toLocaleString()} welfare (once this month). `:split.welfareAlreadyPaid?"Welfare already taken this month. ":""}UGX ${(split?.savingsAmount||0).toLocaleString()} savings.`
+      :String(b.description).trim();
     const inserted=(await client.query(`INSERT INTO organization_finance_entries
       (department_id,reference,entry_type,category,description,counterparty,payment_method,amount,status,receipt_number,
         supporting_document,transaction_date,recorded_by,approved_by,approved_at,finance_account_id)
-      VALUES ($1,$2,'income',$3,$4,$5,$6,$7,'completed',$8,$9,$10,$11,$11,NOW(),$12)
+      VALUES ($1,$2,'income',$3,$4,$5,$6,$7,'completed',$8,$9,$10::date,$11,$11,NOW(),$12)
       RETURNING id,reference,receipt_number AS "receiptNumber"`,
-    [department.id,ref,String(b.category),String(b.description).trim(),String(b.counterparty).trim(),paymentMethod,
-      amount,receipt,String(b.supportingDocument||"").trim()||null,b.date||new Date(),req.user.id,account.id])).rows[0];
+    [department.id,ref,savings?"Member savings":category,description,payer,paymentMethod,
+      amount,receipt,String(b.supportingDocument||"").trim()||null,paidOn,req.user.id,account.id])).rows[0];
     await client.query("UPDATE finance_accounts SET balance=balance+$1,updated_at=NOW() WHERE id=$2",[amount,account.id]);
-    return {...inserted,accountName:account.account_name};
+    return {...inserted,accountName:account.account_name,savings:Boolean(savings),split};
   });
   await audit({userId:req.user.id,action:"FINANCE_INCOME_RECORDED",entityType:"organization_finance",entityId:String(row.id),
-    details:`${row.receiptNumber} - ${b.category} - ${row.accountName} - UGX ${amount}`,...metadata(req)});
+    details:`${row.receiptNumber} - ${category} - ${row.accountName} - UGX ${amount}`,...metadata(req)});
   res.status(201).json(row);
 }));
 app.post("/api/finance/accounts",auth,requireFinance("create"),asyncRoute(async(req,res)=>{
@@ -3494,7 +3576,25 @@ app.post("/api/transactions/:id/verify",auth,asyncRoute(async(req,res,next)=>{
       receipt_number=$4,notes=CASE WHEN $5::text IS NOT NULL THEN TRIM(BOTH FROM COALESCE(notes,'')||' | '||$5) ELSE notes END WHERE id=$6 AND status='pending' RETURNING id`,
     [statusValue,req.user.id,comment||(decision==="approve"?"Funds received and evidence verified":null),receipt,allocationNotes,locked.id]);
     if(updated.rowCount!==1) { const error=new Error("Transaction has already been processed"); error.status=409; throw error; }
-    if(decision==="approve"&&locked.type==="Savings deposit") await client.query("UPDATE members SET savings_balance=savings_balance+$1 WHERE id=$2",[locked.amount,locked.member_id]);
+    if(decision==="approve"&&locked.type==="Savings deposit"){
+      const member=(await client.query("SELECT id,full_name FROM members WHERE id=$1",[locked.member_id])).rows[0];
+      const split=await applyMonthlySavingsSplit(client,{
+        memberId:locked.member_id,grossAmount:Number(locked.amount),onDate:locked.created_at||new Date(),
+        userId:req.user.id,method:locked.method,paymentReference:locked.external_reference,sourceRef:locked.reference
+      });
+      allocationNotes=`received=${Number(locked.amount).toFixed(2)}, welfare=${split.welfareAmount.toFixed(2)}, savings=${split.savingsAmount.toFixed(2)}${split.welfareAlreadyPaid?" | welfare already taken this month":""}`;
+      if(split.savingsAmount!==Number(locked.amount)||allocationNotes){
+        await client.query(`UPDATE transactions SET amount=$1, notes=TRIM(BOTH FROM COALESCE(notes,'')||' | '||$2) WHERE id=$3`,
+          [split.savingsAmount,allocationNotes,locked.id]);
+      }
+      if(member){
+        await postReceiptToCentenary(client,{
+          grossAmount:Number(locked.amount),memberName:member.full_name,method:locked.method,
+          description:`${locked.reference} | Centenary receipt UGX ${Number(locked.amount).toLocaleString()}. Welfare UGX ${split.welfareAmount.toLocaleString()}. Savings UGX ${split.savingsAmount.toLocaleString()}.`,
+          onDate:locked.created_at||new Date(),userId:req.user.id,category:"Member savings"
+        });
+      }
+    }
     if(decision==="approve"&&locked.type==="Share purchase") await client.query("UPDATE members SET share_capital=share_capital+$1 WHERE id=$2",[locked.amount,locked.member_id]);
     if(needsFinance){
       const creditsDepartment=(await client.query("SELECT id FROM departments WHERE code='credits'")).rows[0];
