@@ -253,16 +253,22 @@ async function main() {
         console.log(`Updated UAP account #${uap.id} → ${UAP_CURRENT.toLocaleString()}`);
       }
 
-      await client.query(
-        `UPDATE finance_accounts SET balance=$1, updated_at=NOW(),
-           notes=COALESCE(notes,'') || $2 WHERE id=$3`,
-        [
-          CENTENARY_BALANCE,
-          ` Synced Centenary SMS bal UGX ${CENTENARY_BALANCE.toLocaleString()} after Dan deposit; 10M transferred to UAP (${MARKER}).`,
-          centenary.id,
-        ]
-      );
-      console.log(`Centenary set to ${CENTENARY_BALANCE.toLocaleString()}`);
+      const liveCentenary = Number(centenary.balance);
+      if (liveCentenary > CENTENARY_BALANCE + 0.009) {
+        console.log(`SKIP Centenary balance — live UGX ${liveCentenary.toLocaleString()} is ahead of the 01 Sep SMS figure`);
+      } else {
+        await client.query(
+          `UPDATE finance_accounts SET balance=$1, updated_at=NOW(),
+             notes=COALESCE(notes,'') || $2 WHERE id=$3 AND balance <= $1`,
+          [
+            CENTENARY_BALANCE,
+            ` Synced Centenary SMS bal UGX ${CENTENARY_BALANCE.toLocaleString()} after Dan deposit; 10M transferred to UAP (${MARKER}).`,
+            centenary.id,
+          ]
+        );
+        console.log(`Centenary set to ${CENTENARY_BALANCE.toLocaleString()}`);
+      }
+      const bankSetting = liveCentenary > CENTENARY_BALANCE + 0.009 ? liveCentenary : CENTENARY_BALANCE;
 
       await client.query(
         `INSERT INTO settings (key, value) VALUES ('organizationUapBalance', $1)
@@ -272,7 +278,7 @@ async function main() {
       await client.query(
         `INSERT INTO settings (key, value) VALUES ('organizationBankBalance', $1)
          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at=NOW()`,
-        [String(CENTENARY_BALANCE)]
+        [String(bankSetting)]
       );
 
       // Persist Finance UI balances before ledger / fund / repay work (those must not wipe UAP).

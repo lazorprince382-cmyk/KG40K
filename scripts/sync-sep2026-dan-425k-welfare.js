@@ -6,7 +6,7 @@
  *
  * Member dashboards keep one 425k monthly savings target (not split).
  * Welfare + Finance dashboards track the 25k welfare portion with progress bars.
- * Centenary Co. balance is reconciled to the SMS figure UGX 8,351,473.
+ * The 01 Sep SMS figure UGX 8,351,473 is historical. A higher live Centenary balance is left as-is.
  * Dan's member savings is then pinned to UGX 8,900,000 without adding a further
  * credit to the finance account current balance.
  *
@@ -139,18 +139,22 @@ async function main() {
       );
       console.log(`  Policy: monthly savings target UGX ${SAVINGS_SHARE.toLocaleString()}; welfare UGX ${WELFARE_SHARE.toLocaleString()}; receipt UGX ${DEPOSIT_TOTAL.toLocaleString()}`);
 
-      // Reconcile bank to SMS closing balance (deposit already reflected in SMS figure).
-      await client.query(
-        `UPDATE finance_accounts SET balance=$1, updated_at=NOW(),
-           notes=COALESCE(notes,'') || $2
-         WHERE id=$3`,
-        [
-          FINAL_BALANCE,
-          ` Reconciled 2026-09-01 to Centenary SMS bal UGX ${FINAL_BALANCE.toLocaleString()} after ${BANK_NOTE}.`,
-          account.id,
-        ]
-      );
-      console.log(`  Centenary balance set to UGX ${FINAL_BALANCE.toLocaleString()}`);
+      // The 01 Sep SMS figure is historical. Do not overwrite later receipts with it.
+      if (Number(account.balance) > FINAL_BALANCE + 0.009) {
+        console.log(`  SKIP Centenary balance — live UGX ${Number(account.balance).toLocaleString()} is ahead of the 01 Sep SMS figure`);
+      } else {
+        await client.query(
+          `UPDATE finance_accounts SET balance=$1, updated_at=NOW(),
+             notes=COALESCE(notes,'') || $2
+           WHERE id=$3 AND balance <= $1`,
+          [
+            FINAL_BALANCE,
+            ` Reconciled 2026-09-01 to Centenary SMS bal UGX ${FINAL_BALANCE.toLocaleString()} after ${BANK_NOTE}.`,
+            account.id,
+          ]
+        );
+        console.log(`  Centenary balance set to UGX ${FINAL_BALANCE.toLocaleString()}`);
+      }
 
       if (!existingFin) {
         await client.query(

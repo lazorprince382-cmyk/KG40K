@@ -38,7 +38,7 @@ async function main() {
     await client.query("BEGIN");
     const centenary = (
       await client.query(
-        `SELECT id FROM finance_accounts WHERE account_code='GL-4104' OR account_number='3100111892' ORDER BY CASE WHEN account_code='GL-4104' THEN 0 ELSE 1 END LIMIT 1`
+        `SELECT id, balance::float AS balance FROM finance_accounts WHERE account_code='GL-4104' OR account_number='3100111892' ORDER BY CASE WHEN account_code='GL-4104' THEN 0 ELSE 1 END LIMIT 1`
       )
     ).rows[0];
     const uap = (await client.query(`SELECT id FROM finance_accounts WHERE account_code='GL-4500' LIMIT 1`)).rows[0];
@@ -122,8 +122,8 @@ async function main() {
     }
     console.log("Unit Trust 10M movement dated 2026-08-31");
 
-    // Keep Centenary live balance at SMS figure after Dan; document the trail in notes/opening.
-    if (!dryRun) {
+    // Opening trail stays historical. Do not pull a later live balance back to the 01 Sep SMS figure.
+    if (!dryRun && Number(centenary.balance) <= FINAL + 0.009) {
       await client.query(
         `UPDATE finance_accounts SET
            balance=$1,
@@ -131,7 +131,7 @@ async function main() {
            opening_balance_date='2026-08-31',
            notes=$3,
            updated_at=NOW()
-         WHERE id=$4`,
+         WHERE id=$4 AND balance <= $1`,
         [
           FINAL,
           PRE_XFER,
