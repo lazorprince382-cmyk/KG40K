@@ -43,7 +43,8 @@ FROM extras
 WHERE c.id = extras.id;
 
 CREATE UNIQUE INDEX IF NOT EXISTS welfare_one_monthly_charge
-  ON welfare_contributions (member_id, (date_trunc('month', contribution_date)::date))
+  ON welfare_contributions (member_id, period)
   WHERE status IN ('verified','completed','recorded')
     AND amount > 0
-    AND contribution_type = 'Monthly Welfare Contribution';
+    AND contribution_type = 'Monthly Welfare Contribution'
+    AND period IS NOT NULL;
