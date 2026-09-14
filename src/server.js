@@ -2064,13 +2064,18 @@ app.get("/api/finance/unit-trust",auth,requireFinance("view"),asyncRoute(async(r
   const viewMonth=monthStart?month:String(kampala||"").slice(0,7);
   const arrived=ordered.filter(row=>!kampala||String(row.date).slice(0,10)<=kampala);
   const monthInterest=arrived.filter(row=>String(row.date).slice(0,7)===viewMonth).reduce((sum,row)=>sum+Number(row.interest||0),0);
+  const liveBalance=arrived.length?Number(arrived.at(-1).balance):closing;
+  const forecast=viewMonth&&kampala&&viewMonth===kampala.slice(0,7)
+    ?forecastUnitTrustRemainder(liveBalance,arrived.at(-1)?.rate,kampala)
+    :{projectedProfit:0,projectedClosing:liveBalance};
   const months=(await query(`SELECT to_char(date_trunc('month',movement_date),'YYYY-MM') AS month
     FROM unit_trust_movements WHERE movement_date<=$1::date GROUP BY 1 ORDER BY 1 DESC`,[kampala])).rows.map(r=>r.month);
   res.json({
     account,month:monthStart?month:null,availableMonths:months,movements:arrived,
-    summary:{openingBalance:opening,closingBalance:arrived.length?Number(arrived.at(-1).balance):closing,interestEarned:monthInterest,deposits,withdrawals,
-      profitThisMonth:monthInterest,projectedProfit:0,profitByMonthEnd:monthInterest,
-      projectedClosing:arrived.length?Number(arrived.at(-1).balance):closing,
+    summary:{openingBalance:opening,closingBalance:liveBalance,interestEarned:monthInterest,deposits,withdrawals,
+      profitThisMonth:monthInterest,projectedProfit:forecast.projectedProfit,
+      profitByMonthEnd:Math.round((monthInterest+forecast.projectedProfit)*100)/100,
+      projectedClosing:forecast.projectedClosing,
       balanceIfNoWithdrawal:closing+withdrawals,currentBalance:Number(account?.balance||closing),
       accruesDaily:true,asOf:kampala}
   });
@@ -5265,6 +5270,22 @@ async function accrueUnitTrustInterest(client){
   await client.query(`INSERT INTO settings (key,value) VALUES ('organizationUapBalance',$1)
     ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()`,[String(live)]);
 }
+function forecastUnitTrustRemainder(balance,rate,asOf){
+  const day=String(asOf||"").slice(0,10);
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(day))return {projectedProfit:0,projectedClosing:Number(balance)||0};
+  const cursor=new Date(`${day}T00:00:00Z`);
+  const end=new Date(Date.UTC(cursor.getUTCFullYear(),cursor.getUTCMonth()+1,0));
+  let running=Number(balance)||0;
+  const used=Number(rate)>0?Number(rate):12.96;
+  let interest=0;
+  for(let step=0;step<40&&cursor<end;step+=1){
+    cursor.setUTCDate(cursor.getUTCDate()+1);
+    const dayInterest=Math.round(running*used/100/365*100)/100;
+    interest=Math.round((interest+dayInterest)*100)/100;
+    running=Math.round((running+dayInterest)*100)/100;
+  }
+  return {projectedProfit:interest,projectedClosing:running};
+}
 function isUnitTrustRecord(project){
   return /unit trust|old mutual|\buap\b|INV-FUND-OM/i.test(`${project?.reference||""} ${project?.name||""} ${project?.category||""}`);
 }
@@ -5283,12 +5304,15 @@ async function liveUnitTrustPosition(){
   const last=posted.at(-1)||await one(`SELECT movement_date::text AS date, balance_after::float AS balance, rate_percent::float AS rate
     FROM unit_trust_movements WHERE movement_date<=$1::date ORDER BY movement_date DESC,id DESC LIMIT 1`,[kampala||"2026-09-14"]);
   const balance=Number(last?.balance||account?.balance||0);
+  const rate=Number(last?.rate||12.96);
+  const forecast=forecastUnitTrustRemainder(balance,rate,kampala);
   const totalInterest=Number((await one(`SELECT COALESCE(SUM(interest_amount),0)::float AS total FROM unit_trust_movements WHERE movement_date<=$1::date`,[kampala||"2026-09-14"]))?.total||0);
   const capital=Math.max(0,Math.round((balance-totalInterest)*100)/100);
   return {
-    balance,capital,totalInterest,profitThisMonth:monthInterest,projectedProfit:0,
-    profitByMonthEnd:monthInterest,projectedClosing:balance,
-    rate:Number(last?.rate||12.96),asOf:kampala,accruesDaily:true
+    balance,capital,totalInterest,profitThisMonth:monthInterest,projectedProfit:forecast.projectedProfit,
+    profitByMonthEnd:Math.round((monthInterest+forecast.projectedProfit)*100)/100,
+    projectedClosing:forecast.projectedClosing,
+    rate,asOf:kampala,accruesDaily:true
   };
 }
 function withLiveUnitTrust(project,position){

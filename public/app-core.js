@@ -1122,8 +1122,8 @@ function executiveDashboardView() {
       ${executiveHealthCard("Investment","executive-investments","reports",[
         ["UAP account",money(e.investment.unitTrust?.balance??e.investment.current_value)],
         ["Profit so far",money(e.investment.unitTrust?.profitThisMonth||0)],
-        ["Rate",`${Number(e.investment.unitTrust?.rate||12.96).toFixed(2)}% a year`],
-        ["As of",e.investment.unitTrust?.asOf||"Today"]])}
+        ["Profit by month end",money(e.investment.unitTrust?.profitByMonthEnd||0)],
+        ["Still to accrue",money(e.investment.unitTrust?.projectedProfit||0)]])}
       ${executiveHealthCard("Welfare","executive-welfare","users",[
         ["Since June 2024",money(e.welfare.collectedSince||0)],
         ["Members contributing",e.welfare.membersContributing||0],["New members tracked",(e.welfare.newMembers||[]).length],
@@ -1308,7 +1308,7 @@ function executiveProjectsView() {
   const projects=e.investmentProjects||[];
   const u=e.investment.unitTrust;
   const others=projects.filter(p=>!(p.isUnitTrust||/unit trust|old mutual|INV-FUND-OM/i.test(`${p.reference||""} ${p.name||""}`)));
-  return `<div class="exec-module-metrics">${financeUnitTrustMetric("UAP account",money(u?.balance??e.investment.current_value),"Live balance through today","violet")}${financeUnitTrustMetric("Profit so far",money(u?.profitThisMonth||0),"Interest already earned this month","green")}${financeUnitTrustMetric("As of",escapeHtml(u?.asOf||"Today"),"A new day adds that day's interest","blue")}${financeUnitTrustMetric("Rate",`${Number(u?.rate||12.96).toFixed(2)}%`,"Applied when the day arrives","orange")}</div>
+  return `<div class="exec-module-metrics">${financeUnitTrustMetric("UAP account",money(u?.balance??e.investment.current_value),"Live balance through today","violet")}${financeUnitTrustMetric("Profit so far",money(u?.profitThisMonth||0),"Interest already earned this month","green")}${financeUnitTrustMetric("Profit by month end",money(u?.profitByMonthEnd||0),"Profit so far plus interest still to come","blue")}${financeUnitTrustMetric("Still to accrue",money(u?.projectedProfit||0),"Estimate only. Posted when each day arrives","orange")}</div>
     <section class="exec-panel executive-project-note"><div>${icons.shield}<div><strong>Same live Unit Trust as Finance</strong><span>Only days that have arrived are posted. Tomorrow's interest is not calculated until tomorrow.</span></div><button class="button secondary" data-executive-page="finance-unit-trust">Open movement</button></div></section>
     ${others.length?`<div class="exec-project-grid executive-governance-projects">${others.map(p=>`<article class="exec-project-card"><div><span>${escapeHtml(p.reference)} - ${escapeHtml(p.category||"Investment")}</span>${status(p.status)}</div><h3>${escapeHtml(p.name)}</h3><p>${escapeHtml(p.description)}</p><div class="exec-project-values"><span>Current value<strong>${money(p.currentValue)}</strong></span><span>Net position<strong>${money(p.profit||0)}</strong></span></div><button data-executive-project="${p.id}">${icons.eye} Open governance summary</button></article>`).join("")}</div>`:""}`;
 }
@@ -1754,8 +1754,8 @@ function financeUnitTrustView(){
     <div class="exec-module-metrics">
       ${financeUnitTrustMetric("UAP account",money(s.currentBalance||s.closingBalance),"Live balance. Today's interest posts when the day arrives","violet")}
       ${financeUnitTrustMetric("Profit so far",money(s.profitThisMonth??s.interestEarned),"Interest already earned this month","green")}
-      ${financeUnitTrustMetric("Deposits in",money(s.deposits),"Transfers from the company bank","blue")}
-      ${financeUnitTrustMetric("Withdrawals",money(s.withdrawals),"Taken out this period","orange")}
+      ${financeUnitTrustMetric("Profit by month end",money(s.profitByMonthEnd??s.interestEarned),"Profit so far plus interest still to come","blue")}
+      ${financeUnitTrustMetric("Still to accrue",money(s.projectedProfit||0),"Estimate only. Not posted until each day arrives","orange")}
     </div>
     <section class="finance-panel"><div class="finance-panel-head"><div><h3>UAP account · ${escapeHtml(report.account?.accountName||"Old Mutual Unit Trust")}</h3><p>${escapeHtml(report.account?.accountNumber||"99171-CKA1073440")} · ${escapeHtml(report.account?.bankName||"Old Mutual Investment Group")} · month ${escapeHtml(monthLabel)}</p></div><strong>${money(s.currentBalance||s.closingBalance)}</strong></div>
     <div class="table-scroll"><table><thead><tr><th>Date</th><th>Description</th><th>Deposit</th><th>Interest</th><th>Withdrawal</th><th>Rate</th><th>Balance</th>${canEdit?"<th>Actions</th>":""}</tr></thead>
@@ -2197,7 +2197,7 @@ function executiveReportPreviewContent(name) {
     columns=["Loan","Member","Product","Amount","Balance","Status"];
     rows=e.recentLoans.map(x=>[x.reference,x.member,x.product,money(x.amount),money(x.balance),x.status]);
   } else if(name==="Investment Report") {
-    metrics=[["UAP account",money(e.investment.unitTrust?.balance??e.investment.current_value)],["Profit so far",money(e.investment.unitTrust?.profitThisMonth||0)],["As of",e.investment.unitTrust?.asOf||"Today"],["Rate",`${Number(e.investment.unitTrust?.rate||12.96).toFixed(2)}%`]];
+    metrics=[["UAP account",money(e.investment.unitTrust?.balance??e.investment.current_value)],["Profit so far",money(e.investment.unitTrust?.profitThisMonth||0)],["Profit by month end",money(e.investment.unitTrust?.profitByMonthEnd||0)],["Still to accrue",money(e.investment.unitTrust?.projectedProfit||0)]];
     columns=["Project","Name","Status","Performance","Current value","Expected return"];
     rows=e.investmentProjects.map(x=>[x.reference,x.name,x.status,x.performanceStatus,money(x.currentValue),money(x.expectedReturn)]);
   } else if(name==="Welfare Report") {
@@ -2251,7 +2251,9 @@ function investmentDashboardView() {
   const s=i.stats,u=i.unitTrust;
   const cards=u?[
     ["UAP account",money(u.balance),"building","investment-projects","Live balance through today"],
-    ["Profit so far",money(u.profitThisMonth),"arrowUp","investment-projects","Interest already earned this month"]
+    ["Profit so far",money(u.profitThisMonth),"arrowUp","investment-projects","Interest already earned this month"],
+    ["Profit by month end",money(u.profitByMonthEnd),"clock","investment-projects","Profit so far plus interest still to come"],
+    ["Still to accrue",money(u.projectedProfit),"reports","investment-projects","Estimate only. Posted when each day arrives"]
   ]:[
     ["Total Portfolio",money(s.totalPortfolio),"building","investment-portfolio","Current portfolio value"],
     ["Active Projects",s.activeProjects,"reports","investment-projects","Income-generating projects"],
@@ -2277,7 +2279,7 @@ function investmentPortfolioWidget(i) {
   let cursor=0;const stops=i.categories.map((x,index)=>{const start=cursor;cursor+=x.value/total*100;return `${["#2372d8","#d89b00","#724bdc","#ed8e09","#ec3349","#0aa0a8"][index%6]} ${start}% ${cursor}%`}).join(",");
   return `<section class="finance-panel investment-portfolio-panel"><div class="finance-panel-head"><div><h3>Investment Portfolio Overview</h3><p>Capital allocation and current value</p></div><button data-investment-page="investment-portfolio">Open portfolio &gt;</button></div>
     <div class="investment-portfolio-layout"><div class="investment-donut" style="background:radial-gradient(circle,#fff 0 52%,transparent 53%),conic-gradient(${stops||"#ddd 0 100%"})"><strong>${money(i.portfolio.portfolioValue)}</strong><span>Total portfolio</span></div><div class="investment-allocation">${i.categories.map((x,index)=>`<div><i class="${colors[index%colors.length]}"></i><span>${x.category}</span><strong>${money(x.value)} - ${Math.round(x.value/total*100)}%</strong></div>`).join("")}</div></div>
-    <div class="investment-portfolio-metrics"><span>UAP account<strong>${money(i.unitTrust?.balance??i.portfolio.portfolioValue)}</strong></span><span>Profit so far<strong>${money(i.unitTrust?.profitThisMonth??i.portfolio.profit)}</strong></span><span>As of<strong>${escapeHtml(i.unitTrust?.asOf||"Today")}</strong></span></div></section>`;
+    <div class="investment-portfolio-metrics"><span>UAP account<strong>${money(i.unitTrust?.balance??i.portfolio.portfolioValue)}</strong></span><span>Profit so far<strong>${money(i.unitTrust?.profitThisMonth??i.portfolio.profit)}</strong></span><span>Still to accrue<strong>${money(i.unitTrust?.projectedProfit??0)}</strong></span></div></section>`;
 }
 function investmentActiveProjectsWidget(i) {
   return `<section class="finance-panel"><div class="finance-panel-head"><div><h3>Active Projects</h3><p>Live unit trust first, then other projects</p></div><button data-investment-page="investment-projects">View all ></button></div><div class="investment-project-mini">${i.projects.slice(0,4).map(p=>{
