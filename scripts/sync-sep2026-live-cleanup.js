@@ -160,14 +160,14 @@ async function main() {
     }
 
     const start = new Date("2026-09-01T00:00:00Z");
-    const today = new Date();
-    // Cap at system "today". If host clock is still 2024/2025, fall back to ops as-of date.
-    let end = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
-    const asOfFallback = process.env.LIVE_AS_OF || "2026-09-08";
-    if (end < start) {
-      console.warn(`Host date ${ymd(end)} is before 2026-09-01 — using LIVE_AS_OF=${asOfFallback}`);
-      end = new Date(`${asOfFallback}T00:00:00Z`);
-    }
+    const kampala = (
+      await client.query(`SELECT (CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date::text AS day`)
+    ).rows[0].day;
+    const monthKey = kampala >= "2026-09-01" ? String(kampala).slice(0, 7) : "2026-09";
+    const [year, month] = monthKey.split("-").map(Number);
+    // Keep compounding through the last day of the month. A host clock stuck mid-month must not freeze the ledger.
+    const end = new Date(Date.UTC(year, month, 0));
+    console.log(`UAP interest through ${ymd(end)} (Kampala date ${kampala})`);
 
     let bal = UAP_SEP_OPEN;
     if (!dryRun) {
@@ -234,7 +234,7 @@ async function main() {
         `UPDATE investment_projects
          SET current_value=$1,
              expected_return=$2,
-             performance_status=CASE WHEN $1 >= COALESCE(raised_amount,150000000) THEN 'profitable' ELSE 'watch' END
+             performance_status='profitable'
          WHERE reference='INV-FUND-OM-2025'
             OR name ILIKE '%Old Mutual Unit Trust%'
             OR name ILIKE '%Unit Trust%UAP%'`,

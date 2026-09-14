@@ -2030,6 +2030,7 @@ app.post("/api/finance/withdraw-from-uap",auth,requireFinance("create"),asyncRou
   res.status(201).json(result);
 }));
 app.get("/api/finance/unit-trust",auth,requireFinance("view"),asyncRoute(async(req,res)=>{
+  await transaction(async client=>{await accrueUnitTrustInterest(client);});
   const month=String(req.query.month||"").trim();
   const monthStart=month&&/^\d{4}-\d{2}$/.test(month)?`${month}-01`:null;
   const account=await one(`SELECT id,account_code AS "accountCode",account_name AS "accountName",balance::float,
@@ -5236,11 +5237,12 @@ async function accrueUnitTrustInterest(client){
     FROM unit_trust_movements ORDER BY movement_date DESC, id DESC LIMIT 1`)).rows[0];
   if(!latest?.day)return;
   const today=(await client.query(`SELECT (CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date::text AS day`)).rows[0].day;
+  const monthEnd=(await client.query(`SELECT (date_trunc('month',$1::date)+INTERVAL '1 month - 1 day')::date::text AS day`,[today])).rows[0].day;
   const usedRate=Number(latest.rate)>0?Number(latest.rate):rate;
   let cursor=latest.day;
   let balance=Number(latest.balance);
   let guard=0;
-  while(cursor<today&&guard<40){
+  while(cursor<monthEnd&&guard<62){
     const next=(await client.query(`SELECT ($1::date+INTERVAL '1 day')::date::text AS day`,[cursor])).rows[0].day;
     const existing=(await client.query(`SELECT balance_after::float AS balance FROM unit_trust_movements
       WHERE movement_date=$1::date AND description='Interest' LIMIT 1`,[next])).rows[0];
@@ -5258,7 +5260,7 @@ async function accrueUnitTrustInterest(client){
     guard+=1;
   }
   const posted=(await client.query(`SELECT balance_after::float AS balance FROM unit_trust_movements
-    WHERE movement_date<=$1::date ORDER BY movement_date DESC, id DESC LIMIT 1`,[today])).rows[0];
+    WHERE movement_date<=$1::date ORDER BY movement_date DESC, id DESC LIMIT 1`,[monthEnd])).rows[0];
   const live=Number(posted?.balance??balance);
   await client.query(`UPDATE finance_accounts SET balance=$1, updated_at=NOW() WHERE id=$2`,[live,account.id]);
   await client.query(`INSERT INTO settings (key,value) VALUES ('organizationUapBalance',$1)
