@@ -2062,20 +2062,15 @@ app.get("/api/finance/unit-trust",auth,requireFinance("view"),asyncRoute(async(r
   const withdrawals=ordered.reduce((s,r)=>s+Number(r.withdrawal||0),0);
   const kampala=(await one(`SELECT (CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date::text AS day`))?.day;
   const viewMonth=monthStart?month:String(kampala||"").slice(0,7);
-  const monthLast=monthStart
-    ?ordered.filter(row=>String(row.date).slice(0,10)<=String(kampala||"")).at(-1)
-    :ordered.at(-1);
-  const monthInterest=ordered.filter(row=>String(row.date).slice(0,7)===viewMonth).reduce((sum,row)=>sum+Number(row.interest||0),0);
-  const projected=projectUnitTrustMonth(monthLast?.date||kampala,monthLast?.balance??account?.balance,monthLast?.rate||12.96,viewMonth,kampala);
-  const projectedProfit=projected.reduce((sum,row)=>sum+Number(row.interest||0),0);
-  const displayRows=[...ordered,...projected];
+  const arrived=ordered.filter(row=>!kampala||String(row.date).slice(0,10)<=kampala);
+  const monthInterest=arrived.filter(row=>String(row.date).slice(0,7)===viewMonth).reduce((sum,row)=>sum+Number(row.interest||0),0);
   const months=(await query(`SELECT to_char(date_trunc('month',movement_date),'YYYY-MM') AS month
-    FROM unit_trust_movements GROUP BY 1 ORDER BY 1 DESC`)).rows.map(r=>r.month);
+    FROM unit_trust_movements WHERE movement_date<=$1::date GROUP BY 1 ORDER BY 1 DESC`,[kampala])).rows.map(r=>r.month);
   res.json({
-    account,month:monthStart?month:null,availableMonths:months,movements:displayRows,
-    summary:{openingBalance:opening,closingBalance:closing,interestEarned:interest,deposits,withdrawals,
-      profitThisMonth:monthInterest,projectedProfit,profitByMonthEnd:monthInterest+projectedProfit,
-      projectedClosing:projected.length?projected.at(-1).balance:closing,
+    account,month:monthStart?month:null,availableMonths:months,movements:arrived,
+    summary:{openingBalance:opening,closingBalance:arrived.length?Number(arrived.at(-1).balance):closing,interestEarned:monthInterest,deposits,withdrawals,
+      profitThisMonth:monthInterest,projectedProfit:0,profitByMonthEnd:monthInterest,
+      projectedClosing:arrived.length?Number(arrived.at(-1).balance):closing,
       balanceIfNoWithdrawal:closing+withdrawals,currentBalance:Number(account?.balance||closing),
       accruesDaily:true,asOf:kampala}
   });
@@ -2083,17 +2078,19 @@ app.get("/api/finance/unit-trust",auth,requireFinance("view"),asyncRoute(async(r
 app.get("/api/finance/unit-trust/export.csv",auth,requireFinance("view"),asyncRoute(async(req,res)=>{
   const month=String(req.query.month||"").trim();
   const monthStart=month&&/^\d{4}-\d{2}$/.test(month)?`${month}-01`:null;
+  const kampala=(await one(`SELECT (CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date::text AS day`))?.day;
   const movements=monthStart
     ?(await query(`SELECT movement_date AS date,description,deposit_amount::float AS deposit,
         interest_amount::float AS interest,withdrawal_amount::float AS withdrawal,rate_percent::float AS rate,
         balance_after::float AS balance,source_reference AS "sourceReference"
         FROM unit_trust_movements
         WHERE movement_date>=$1::date AND movement_date<($1::date+INTERVAL '1 month')
-        ORDER BY movement_date,id`,[monthStart])).rows
+          AND movement_date<=$2::date
+        ORDER BY movement_date,id`,[monthStart,kampala])).rows
     :(await query(`SELECT movement_date AS date,description,deposit_amount::float AS deposit,
         interest_amount::float AS interest,withdrawal_amount::float AS withdrawal,rate_percent::float AS rate,
         balance_after::float AS balance,source_reference AS "sourceReference"
-        FROM unit_trust_movements ORDER BY movement_date,id`)).rows;
+        FROM unit_trust_movements WHERE movement_date<=$1::date ORDER BY movement_date,id`,[kampala])).rows;
   const esc=v=>`"${String(v??"").replaceAll('"','""')}"`;
   const header=["Date","Description","Deposit","Interest","Withdrawal","Rate %","Balance","Source reference"];
   const lines=[header.map(esc).join(","),...movements.map(r=>[
@@ -5233,16 +5230,18 @@ async function accrueUnitTrustInterest(client){
   const rate=12.96;
   const account=(await client.query(`SELECT id FROM finance_accounts WHERE account_code='GL-4500' AND active=true LIMIT 1 FOR UPDATE`)).rows[0];
   if(!account)return;
-  const latest=(await client.query(`SELECT movement_date::text AS day, balance_after::float AS balance, rate_percent::float AS rate
-    FROM unit_trust_movements ORDER BY movement_date DESC, id DESC LIMIT 1`)).rows[0];
-  if(!latest?.day)return;
   const today=(await client.query(`SELECT (CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date::text AS day`)).rows[0].day;
-  const monthEnd=(await client.query(`SELECT (date_trunc('month',$1::date)+INTERVAL '1 month - 1 day')::date::text AS day`,[today])).rows[0].day;
+  await client.query(`DELETE FROM unit_trust_movements
+    WHERE movement_date>$1::date AND description='Interest'
+      AND (source_reference LIKE 'live-uap-interest-%' OR source_reference LIKE 'sync-sep2026-uap-interest-int-%')`,[today]);
+  const latest=(await client.query(`SELECT movement_date::text AS day, balance_after::float AS balance, rate_percent::float AS rate
+    FROM unit_trust_movements WHERE movement_date<=$1::date ORDER BY movement_date DESC, id DESC LIMIT 1`,[today])).rows[0];
+  if(!latest?.day)return;
   const usedRate=Number(latest.rate)>0?Number(latest.rate):rate;
   let cursor=latest.day;
   let balance=Number(latest.balance);
   let guard=0;
-  while(cursor<monthEnd&&guard<62){
+  while(cursor<today&&guard<40){
     const next=(await client.query(`SELECT ($1::date+INTERVAL '1 day')::date::text AS day`,[cursor])).rows[0].day;
     const existing=(await client.query(`SELECT balance_after::float AS balance FROM unit_trust_movements
       WHERE movement_date=$1::date AND description='Interest' LIMIT 1`,[next])).rows[0];
@@ -5260,7 +5259,7 @@ async function accrueUnitTrustInterest(client){
     guard+=1;
   }
   const posted=(await client.query(`SELECT balance_after::float AS balance FROM unit_trust_movements
-    WHERE movement_date<=$1::date ORDER BY movement_date DESC, id DESC LIMIT 1`,[monthEnd])).rows[0];
+    WHERE movement_date<=$1::date ORDER BY movement_date DESC, id DESC LIMIT 1`,[today])).rows[0];
   const live=Number(posted?.balance??balance);
   await client.query(`UPDATE finance_accounts SET balance=$1, updated_at=NOW() WHERE id=$2`,[live,account.id]);
   await client.query(`INSERT INTO settings (key,value) VALUES ('organizationUapBalance',$1)
@@ -5282,17 +5281,13 @@ async function liveUnitTrustPosition(){
   const posted=monthRows.filter(row=>String(row.date).slice(0,10)<=kampala);
   const monthInterest=posted.reduce((sum,row)=>sum+Number(row.interest||0),0);
   const last=posted.at(-1)||await one(`SELECT movement_date::text AS date, balance_after::float AS balance, rate_percent::float AS rate
-    FROM unit_trust_movements ORDER BY movement_date DESC,id DESC LIMIT 1`);
-  const balance=Number(account?.balance||last?.balance||0);
-  const projected=projectUnitTrustMonth(last?.date||kampala,last?.balance??balance,last?.rate||12.96,month,kampala);
-  const projectedProfit=projected.filter(row=>row.description!=="Interest (posting)").reduce((sum,row)=>sum+Number(row.interest||0),0);
-  const posting=projected.filter(row=>row.description==="Interest (posting)").reduce((sum,row)=>sum+Number(row.interest||0),0);
-  const totalInterest=Number((await one(`SELECT COALESCE(SUM(interest_amount),0)::float AS total FROM unit_trust_movements`))?.total||0);
+    FROM unit_trust_movements WHERE movement_date<=$1::date ORDER BY movement_date DESC,id DESC LIMIT 1`,[kampala||"2026-09-14"]);
+  const balance=Number(last?.balance||account?.balance||0);
+  const totalInterest=Number((await one(`SELECT COALESCE(SUM(interest_amount),0)::float AS total FROM unit_trust_movements WHERE movement_date<=$1::date`,[kampala||"2026-09-14"]))?.total||0);
   const capital=Math.max(0,Math.round((balance-totalInterest)*100)/100);
   return {
-    balance,capital,totalInterest,profitThisMonth:monthInterest,projectedProfit,
-    profitByMonthEnd:Math.round((monthInterest+posting+projectedProfit)*100)/100,
-    projectedClosing:projected.length?projected.at(-1).balance:balance,
+    balance,capital,totalInterest,profitThisMonth:monthInterest,projectedProfit:0,
+    profitByMonthEnd:monthInterest,projectedClosing:balance,
     rate:Number(last?.rate||12.96),asOf:kampala,accruesDaily:true
   };
 }
@@ -5304,30 +5299,6 @@ function withLiveUnitTrust(project,position){
     raisedAmount:capital,targetAmount:capital,capitalInvested:capital,budget:capital,
     revenue:position.profitThisMonth,expenses:0,profit:position.profitThisMonth,progress:100,
     performanceStatus:Number(position.profitThisMonth)>0?"profitable":"active",unitTrust:position};
-}
-function projectUnitTrustMonth(lastDate,lastBalance,rate,month,asOf){
-  if(!lastDate||!month)return [];
-  const start=new Date(`${month}-01T00:00:00Z`);
-  const end=new Date(Date.UTC(start.getUTCFullYear(),start.getUTCMonth()+1,0));
-  const cursor=new Date(`${String(lastDate).slice(0,10)}T00:00:00Z`);
-  if(Number.isNaN(cursor.getTime())||Number.isNaN(end.getTime())||cursor>=end)return [];
-  const rows=[];
-  let balance=Number(lastBalance)||0;
-  const used=Number(rate)>0?Number(rate):12.96;
-  const todayKey=String(asOf||"").slice(0,10);
-  for(let step=0;step<40;step+=1){
-    cursor.setUTCDate(cursor.getUTCDate()+1);
-    if(cursor>end)break;
-    const day=cursor.toISOString().slice(0,10);
-    const interest=Math.round(balance*used/100/365*100)/100;
-    balance=Math.round((balance+interest)*100)/100;
-    if(todayKey&&day<=todayKey){
-      rows.push({date:day,description:"Interest (posting)",deposit:0,interest,withdrawal:0,rate:used,balance,projected:true});
-      continue;
-    }
-    rows.push({date:day,description:"Interest (projected)",deposit:0,interest,withdrawal:0,rate:used,balance,projected:true});
-  }
-  return rows;
 }
 async function runScheduledMaintenance() {
   await transaction(async client=>{await accrueUnitTrustInterest(client);});

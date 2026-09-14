@@ -163,11 +163,9 @@ async function main() {
     const kampala = (
       await client.query(`SELECT (CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date::text AS day`)
     ).rows[0].day;
-    const monthKey = kampala >= "2026-09-01" ? String(kampala).slice(0, 7) : "2026-09";
-    const [year, month] = monthKey.split("-").map(Number);
-    // Keep compounding through the last day of the month. A host clock stuck mid-month must not freeze the ledger.
-    const end = new Date(Date.UTC(year, month, 0));
-    console.log(`UAP interest through ${ymd(end)} (Kampala date ${kampala})`);
+    const end = new Date(`${String(kampala).slice(0, 10)}T00:00:00Z`);
+    if (end < start) end.setTime(start.getTime());
+    console.log(`UAP interest through today only (${ymd(end)}). Future days are not posted.`);
 
     let bal = UAP_SEP_OPEN;
     if (!dryRun) {
@@ -203,6 +201,27 @@ async function main() {
         );
       }
       console.log(`  ${date} interest ${interest.toLocaleString()} → ${bal.toLocaleString()}`);
+    }
+
+    if (!dryRun) {
+      const removed = (
+        await client.query(
+          `DELETE FROM unit_trust_movements
+           WHERE movement_date>$1::date AND description='Interest'
+             AND (source_reference LIKE 'live-uap-interest-%' OR source_reference LIKE $2)
+           RETURNING movement_date::text AS day`,
+          [ymd(end), `${MARKER}-int-%`]
+        )
+      ).rows;
+      if (removed.length) console.log(`Removed ${removed.length} future interest row(s) after ${ymd(end)}`);
+      const live = (
+        await client.query(
+          `SELECT balance_after::float AS balance FROM unit_trust_movements
+           WHERE movement_date<=$1::date ORDER BY movement_date DESC, id DESC LIMIT 1`,
+          [ymd(end)]
+        )
+      ).rows[0];
+      if (live) bal = Number(live.balance);
     }
 
     if (!dryRun) {

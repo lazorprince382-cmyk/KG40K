@@ -1122,9 +1122,8 @@ function executiveDashboardView() {
       ${executiveHealthCard("Investment","executive-investments","reports",[
         ["UAP account",money(e.investment.unitTrust?.balance??e.investment.current_value)],
         ["Profit so far",money(e.investment.unitTrust?.profitThisMonth||0)],
-        ["Profit by month end",money(e.investment.unitTrust?.profitByMonthEnd||0)],
-        ["Still to accrue",money(e.investment.unitTrust?.projectedProfit||0)],
-        ["Daily rate",`${Number(e.investment.unitTrust?.rate||12.96).toFixed(2)}% a year`]])}
+        ["Rate",`${Number(e.investment.unitTrust?.rate||12.96).toFixed(2)}% a year`],
+        ["As of",e.investment.unitTrust?.asOf||"Today"]])}
       ${executiveHealthCard("Welfare","executive-welfare","users",[
         ["Since June 2024",money(e.welfare.collectedSince||0)],
         ["Members contributing",e.welfare.membersContributing||0],["New members tracked",(e.welfare.newMembers||[]).length],
@@ -1309,8 +1308,8 @@ function executiveProjectsView() {
   const projects=e.investmentProjects||[];
   const u=e.investment.unitTrust;
   const others=projects.filter(p=>!(p.isUnitTrust||/unit trust|old mutual|INV-FUND-OM/i.test(`${p.reference||""} ${p.name||""}`)));
-  return `<div class="exec-module-metrics">${financeUnitTrustMetric("UAP account",money(u?.balance??e.investment.current_value),"Live balance. Interest posts each day","violet")}${financeUnitTrustMetric("Profit so far",money(u?.profitThisMonth||0),"Interest earned this month","green")}${financeUnitTrustMetric("Profit by month end",money(u?.profitByMonthEnd||0),"Keeps accruing until the month ends","blue")}${financeUnitTrustMetric("Still to accrue",money(u?.projectedProfit||0),"Projected interest for the rest of this month","orange")}</div>
-    <section class="exec-panel executive-project-note"><div>${icons.shield}<div><strong>Same live Unit Trust as Finance</strong><span>This is the Old Mutual account, not a loss-making project. Profit already posted is in the balance. The rest of the month is still to accrue.</span></div><button class="button secondary" data-executive-page="finance-unit-trust">Open movement</button></div></section>
+  return `<div class="exec-module-metrics">${financeUnitTrustMetric("UAP account",money(u?.balance??e.investment.current_value),"Live balance through today","violet")}${financeUnitTrustMetric("Profit so far",money(u?.profitThisMonth||0),"Interest already earned this month","green")}${financeUnitTrustMetric("As of",escapeHtml(u?.asOf||"Today"),"A new day adds that day's interest","blue")}${financeUnitTrustMetric("Rate",`${Number(u?.rate||12.96).toFixed(2)}%`,"Applied when the day arrives","orange")}</div>
+    <section class="exec-panel executive-project-note"><div>${icons.shield}<div><strong>Same live Unit Trust as Finance</strong><span>Only days that have arrived are posted. Tomorrow's interest is not calculated until tomorrow.</span></div><button class="button secondary" data-executive-page="finance-unit-trust">Open movement</button></div></section>
     ${others.length?`<div class="exec-project-grid executive-governance-projects">${others.map(p=>`<article class="exec-project-card"><div><span>${escapeHtml(p.reference)} - ${escapeHtml(p.category||"Investment")}</span>${status(p.status)}</div><h3>${escapeHtml(p.name)}</h3><p>${escapeHtml(p.description)}</p><div class="exec-project-values"><span>Current value<strong>${money(p.currentValue)}</strong></span><span>Net position<strong>${money(p.profit||0)}</strong></span></div><button data-executive-project="${p.id}">${icons.eye} Open governance summary</button></article>`).join("")}</div>`:""}`;
 }
 async function openExecutiveProject(id) {
@@ -1318,7 +1317,7 @@ async function openExecutiveProject(id) {
     const data=await api(`/api/executive/projects/${id}`),p=data.project,profit=Number(p.profit||0);
     const isUt=Boolean(p.isUnitTrust)||/unit trust|old mutual|INV-FUND-OM/i.test(`${p.reference||""} ${p.name||""}`);
     closeModal();document.body.insertAdjacentHTML("beforeend",`<div class="modal-backdrop" id="modal-backdrop"><div class="modal executive-project-modal"><div class="modal-head"><div><h2>${escapeHtml(p.name)}</h2><p>${escapeHtml(p.reference)} - Executive governance summary${isUt?" · live Unit Trust":""}</p></div><button class="modal-close" data-close>${icons.x}</button></div><div class="executive-project-detail">
-      ${p.photoUrl?`<img class="executive-project-hero" src="${p.photoUrl}" alt="${escapeHtml(p.name)}">`:""}<div class="executive-project-kpis">${isUt?`<span>UAP account<strong>${money(p.unitTrust?.balance??p.currentValue)}</strong></span><span>Profit so far<strong class="positive">${money(p.unitTrust?.profitThisMonth??p.expectedReturn)}</strong></span><span>Profit by month end<strong>${money(p.unitTrust?.profitByMonthEnd||0)}</strong></span><span>Still to accrue<strong>${money(p.unitTrust?.projectedProfit||0)}</strong></span>`:`<span>Budget<strong>${money(p.budget)}</strong></span><span>Spent<strong>${money(p.expenses)}</strong></span><span>Revenue<strong>${money(p.revenue)}</strong></span><span>Net position<strong class="${profit>=0?"positive":"negative"}">${money(profit)}</strong></span><span>ROI<strong>${p.roi}%</strong></span><span>Progress<strong>${p.progress}%</strong></span>`}</div>
+      ${p.photoUrl?`<img class="executive-project-hero" src="${p.photoUrl}" alt="${escapeHtml(p.name)}">`:""}<div class="executive-project-kpis">${isUt?`<span>UAP account<strong>${money(p.unitTrust?.balance??p.currentValue)}</strong></span><span>Profit so far<strong class="positive">${money(p.unitTrust?.profitThisMonth??p.expectedReturn)}</strong></span><span>As of<strong>${escapeHtml(p.unitTrust?.asOf||"Today")}</strong></span><span>Rate<strong>${Number(p.unitTrust?.rate||12.96).toFixed(2)}%</strong></span>`:`<span>Budget<strong>${money(p.budget)}</strong></span><span>Spent<strong>${money(p.expenses)}</strong></span><span>Revenue<strong>${money(p.revenue)}</strong></span><span>Net position<strong class="${profit>=0?"positive":"negative"}">${money(profit)}</strong></span><span>ROI<strong>${p.roi}%</strong></span><span>Progress<strong>${p.progress}%</strong></span>`}</div>
       <div class="executive-project-columns"><section><h3>Project profile</h3><p>${escapeHtml(p.description)}</p><dl><dt>Status</dt><dd>${status(p.status)}</dd><dt>Manager</dt><dd>${escapeHtml(p.manager||"Not assigned")}</dd><dt>Location</dt><dd>${escapeHtml(p.location||"Not recorded")}</dd><dt>Period</dt><dd>${p.startsOn?new Date(p.startsOn).toLocaleDateString():"Not set"} - ${p.endsOn?new Date(p.endsOn).toLocaleDateString():"Not set"}</dd><dt>Funding</dt><dd>${escapeHtml(p.fundingSource||"Not recorded")}</dd><dt>${isUt?"Capital deployed":"Budget utilization"}</dt><dd>${p.budgetUtilization}%</dd></dl></section><section><h3>Approval and risk</h3><dl><dt>Proposal</dt><dd>${escapeHtml(p.proposalReference||"Legacy project")}</dd><dt>Approved by</dt><dd>${escapeHtml(p.proposalApprovedBy||"Historical record")}</dd><dt>Approved on</dt><dd>${p.proposalApprovedAt?new Date(p.proposalApprovedAt).toLocaleString():"Not recorded"}</dd><dt>Risk assessment</dt><dd>${escapeHtml(p.riskAssessment||"Not recorded")}</dd><dt>Finance analysis</dt><dd>${escapeHtml(p.financeAnalysis||"Not recorded")}</dd><dt>Finance recommendation</dt><dd>${escapeHtml(p.financeRecommendation||"Not recorded")}</dd></dl>${p.supportingDocument?`<a class="button secondary" href="${p.supportingDocument}" target="_blank">${icons.file} View supporting evidence</a>`:"<p>No project evidence uploaded.</p>"}</section></div>
       <section class="executive-project-related"><h3>Related records</h3><div><span>Transactions<strong>${data.transactions.length}</strong></span><span>Contracts<strong>${data.contracts.length}</strong></span><span>Assets<strong>${data.assets.length}</strong></span></div></section>
       <section><h3>Executive oversight history</h3><div class="executive-oversight-list">${data.oversight.map(o=>`<article><div>${status(o.actionType)}</div><strong>${escapeHtml(o.createdBy)}</strong><span>${new Date(o.createdAt).toLocaleString()}${o.targetDepartment?` - ${escapeHtml(o.targetDepartment)}`:""}</span><p>${escapeHtml(o.comment)}</p></article>`).join("")||`<div class="exec-empty">No Executive oversight actions recorded yet.</div>`}</div></section>
@@ -1743,7 +1742,7 @@ function financeUnitTrustView(){
   const canEdit=Boolean(state.finance?.access?.canEdit||state.finance?.access?.canCreate);
   const monthOptions=(report.availableMonths||[]).map(m=>`<option value="${m}" ${report.month===m?"selected":""}>${m}</option>`).join("");
   const monthLabel=report.month||"All months";
-  return `<div class="finance-title-strip"><div><p class="eyebrow">Unit Trust / Old Mutual</p><h2>UAP account movement</h2><p>Interest posts every day through the end of the month. Posted rows are in the live balance. Rows marked not posted yet are the profit still to come.</p></div>
+  return `<div class="finance-title-strip"><div><p class="eyebrow">Unit Trust / Old Mutual</p><h2>UAP account movement</h2><p>Each day that arrives, that day's interest is calculated and added. Future days are not shown.</p></div>
     <div class="dashboard-year-control"><label>Month</label><select data-unit-trust-month><option value="">All months</option>${monthOptions}</select></div></div>
     <div class="module-actions" style="margin-bottom:14px">
       <button class="button primary" data-finance-modal="transfer-uap">${icons.arrowUp||icons.plus}Transfer to UAP</button>
@@ -1753,10 +1752,10 @@ function financeUnitTrustView(){
       <button class="button secondary" data-finance-page="finance-bank">${icons.building}Open company bank</button>
     </div>
     <div class="exec-module-metrics">
-      ${financeUnitTrustMetric("UAP account",money(s.currentBalance||s.closingBalance),"Live balance. Interest posts each day","violet")}
-      ${financeUnitTrustMetric("Profit so far",money(s.profitThisMonth??s.interestEarned),"Interest earned this month","green")}
-      ${financeUnitTrustMetric("Profit by month end",money(s.profitByMonthEnd??s.interestEarned),"Keeps accruing until the month ends","blue")}
-      ${financeUnitTrustMetric("Still to accrue",money(s.projectedProfit||0),"Projected interest for the rest of this month","orange")}
+      ${financeUnitTrustMetric("UAP account",money(s.currentBalance||s.closingBalance),"Live balance. Today's interest posts when the day arrives","violet")}
+      ${financeUnitTrustMetric("Profit so far",money(s.profitThisMonth??s.interestEarned),"Interest already earned this month","green")}
+      ${financeUnitTrustMetric("Deposits in",money(s.deposits),"Transfers from the company bank","blue")}
+      ${financeUnitTrustMetric("Withdrawals",money(s.withdrawals),"Taken out this period","orange")}
     </div>
     <section class="finance-panel"><div class="finance-panel-head"><div><h3>UAP account · ${escapeHtml(report.account?.accountName||"Old Mutual Unit Trust")}</h3><p>${escapeHtml(report.account?.accountNumber||"99171-CKA1073440")} · ${escapeHtml(report.account?.bankName||"Old Mutual Investment Group")} · month ${escapeHtml(monthLabel)}</p></div><strong>${money(s.currentBalance||s.closingBalance)}</strong></div>
     <div class="table-scroll"><table><thead><tr><th>Date</th><th>Description</th><th>Deposit</th><th>Interest</th><th>Withdrawal</th><th>Rate</th><th>Balance</th>${canEdit?"<th>Actions</th>":""}</tr></thead>
@@ -2023,7 +2022,7 @@ function unitTrustStatementHtml(report){
         <tbody>${body}</tbody>
       </table>
     </div>
-    <p class="exec-report-preview-note">This is the live UAP ledger: everyday interest, bank transfers in, and withdrawals. Use Download for CSV, or print this view from the browser.</p>
+    <p class="exec-report-preview-note">Only days that have already arrived are shown. Tomorrow's interest is calculated when that day comes. Use Download for CSV, or print this view from the browser.</p>
   </div>`;
 }
 async function openUnitTrustReportView(month){
@@ -2198,7 +2197,7 @@ function executiveReportPreviewContent(name) {
     columns=["Loan","Member","Product","Amount","Balance","Status"];
     rows=e.recentLoans.map(x=>[x.reference,x.member,x.product,money(x.amount),money(x.balance),x.status]);
   } else if(name==="Investment Report") {
-    metrics=[["UAP account",money(e.investment.unitTrust?.balance??e.investment.current_value)],["Profit so far",money(e.investment.unitTrust?.profitThisMonth||0)],["Profit by month end",money(e.investment.unitTrust?.profitByMonthEnd||0)],["Still to accrue",money(e.investment.unitTrust?.projectedProfit||0)],["Rate",`${Number(e.investment.unitTrust?.rate||12.96).toFixed(2)}%`]];
+    metrics=[["UAP account",money(e.investment.unitTrust?.balance??e.investment.current_value)],["Profit so far",money(e.investment.unitTrust?.profitThisMonth||0)],["As of",e.investment.unitTrust?.asOf||"Today"],["Rate",`${Number(e.investment.unitTrust?.rate||12.96).toFixed(2)}%`]];
     columns=["Project","Name","Status","Performance","Current value","Expected return"];
     rows=e.investmentProjects.map(x=>[x.reference,x.name,x.status,x.performanceStatus,money(x.currentValue),money(x.expectedReturn)]);
   } else if(name==="Welfare Report") {
@@ -2251,17 +2250,15 @@ function investmentDashboardView() {
   const i=state.investment;if(!i)return `<div class="executive-loading">Loading Investment workspace?</div>`;
   const s=i.stats,u=i.unitTrust;
   const cards=u?[
-    ["UAP account",money(u.balance),"building","investment-projects","Live Old Mutual balance"],
-    ["Profit so far",money(u.profitThisMonth),"arrowUp","investment-projects","Interest posted this month"],
-    ["Profit by month end",money(u.profitByMonthEnd),"clock","investment-projects","Keeps accruing until the month ends"],
-    ["Still to accrue",money(u.projectedProfit),"reports","investment-projects","Projected interest for the rest of this month"]
+    ["UAP account",money(u.balance),"building","investment-projects","Live balance through today"],
+    ["Profit so far",money(u.profitThisMonth),"arrowUp","investment-projects","Interest already earned this month"]
   ]:[
     ["Total Portfolio",money(s.totalPortfolio),"building","investment-portfolio","Current portfolio value"],
     ["Active Projects",s.activeProjects,"reports","investment-projects","Income-generating projects"],
     ["Under Construction",s.underConstruction,"building","investment-projects","Implementation stage"],
     ["Completed Projects",s.completedProjects,"check","investment-projects","Closed implementation"]
   ];
-  return `<div class="finance-title-strip investment-title-strip"><div><p class="eyebrow">Investment Department</p><h2>${u?"Old Mutual unit trust":"Portfolio intelligence center"}</h2><p>${u?"Same live account Finance shows. Interest posts every day through the end of the month.":"Projects, capital, opportunities and returns. Operational accounting remains in Finance."}</p></div><time>${new Date().toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"})}</time></div>
+  return `<div class="finance-title-strip investment-title-strip"><div><p class="eyebrow">Investment Department</p><h2>${u?"Old Mutual unit trust":"Portfolio intelligence center"}</h2><p>${u?"Same live account Finance shows. Each new day adds that day's interest. Future days are not calculated.":"Projects, capital, opportunities and returns. Operational accounting remains in Finance."}</p></div><time>${new Date().toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"})}</time></div>
     <div class="exec-module-metrics" style="margin-bottom:14px">${cards.map((card,index)=>financeUnitTrustMetric(card[0],card[1],card[4],["violet","green","blue","orange"][index])).join("")}</div>
     ${u?"":`<div class="finance-stat-grid investment-stat-grid">${cards.map((card,index)=>investmentStatCard(...card,index)).join("")}</div>`}
     <div class="investment-dashboard-grid">
@@ -2280,7 +2277,7 @@ function investmentPortfolioWidget(i) {
   let cursor=0;const stops=i.categories.map((x,index)=>{const start=cursor;cursor+=x.value/total*100;return `${["#2372d8","#d89b00","#724bdc","#ed8e09","#ec3349","#0aa0a8"][index%6]} ${start}% ${cursor}%`}).join(",");
   return `<section class="finance-panel investment-portfolio-panel"><div class="finance-panel-head"><div><h3>Investment Portfolio Overview</h3><p>Capital allocation and current value</p></div><button data-investment-page="investment-portfolio">Open portfolio &gt;</button></div>
     <div class="investment-portfolio-layout"><div class="investment-donut" style="background:radial-gradient(circle,#fff 0 52%,transparent 53%),conic-gradient(${stops||"#ddd 0 100%"})"><strong>${money(i.portfolio.portfolioValue)}</strong><span>Total portfolio</span></div><div class="investment-allocation">${i.categories.map((x,index)=>`<div><i class="${colors[index%colors.length]}"></i><span>${x.category}</span><strong>${money(x.value)} - ${Math.round(x.value/total*100)}%</strong></div>`).join("")}</div></div>
-    <div class="investment-portfolio-metrics"><span>UAP account<strong>${money(i.unitTrust?.balance??i.portfolio.portfolioValue)}</strong></span><span>Profit so far<strong>${money(i.unitTrust?.profitThisMonth??i.portfolio.profit)}</strong></span><span>Profit by month end<strong>${money(i.unitTrust?.profitByMonthEnd??0)}</strong></span></div></section>`;
+    <div class="investment-portfolio-metrics"><span>UAP account<strong>${money(i.unitTrust?.balance??i.portfolio.portfolioValue)}</strong></span><span>Profit so far<strong>${money(i.unitTrust?.profitThisMonth??i.portfolio.profit)}</strong></span><span>As of<strong>${escapeHtml(i.unitTrust?.asOf||"Today")}</strong></span></div></section>`;
 }
 function investmentActiveProjectsWidget(i) {
   return `<section class="finance-panel"><div class="finance-panel-head"><div><h3>Active Projects</h3><p>Live unit trust first, then other projects</p></div><button data-investment-page="investment-projects">View all ></button></div><div class="investment-project-mini">${i.projects.slice(0,4).map(p=>{
