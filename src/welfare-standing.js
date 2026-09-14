@@ -109,7 +109,8 @@ async function loadWelfareMonth() {
     to_char((CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date, 'YYYY-MM') AS period`);
   const rows = (
     await query(
-      `SELECT c.member_id AS "memberId", c.amount::float AS amount, m.full_name AS member
+      `SELECT c.member_id AS "memberId", m.full_name AS member, m.member_number AS "memberNumber",
+         c.amount::float AS amount, c.contribution_date::text AS date, c.receipt_number AS receipt
        FROM welfare_contributions c
        JOIN members m ON m.id = c.member_id
        WHERE c.status IN ('verified','completed','recorded')
@@ -117,7 +118,8 @@ async function loadWelfareMonth() {
          AND c.contribution_type NOT ILIKE '%standing%'
          AND COALESCE(c.reference,'') NOT LIKE 'WEL-STANDING-%'
          AND c.contribution_date >= $1::date
-         AND c.contribution_date < $2::date`,
+         AND c.contribution_date < $2::date
+       ORDER BY c.contribution_date, m.full_name`,
       [bounds.start, bounds.end]
     )
   ).rows;

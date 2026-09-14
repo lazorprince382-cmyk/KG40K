@@ -1,11 +1,11 @@
 /* Ordered application loader. */
 [
-  "app-core.js?v=162",
+  "app-core.js?v=163",
   "department-theme.js?v=63",
   "department-core.js?v=68",
   "audit-dashboard.js?v=63",
   "audit-modules.js?v=63",
-  "welfare-module.js?v=70",
+  "welfare-module.js?v=71",
   "legal-module.js?v=64",
   "legal-biodata-module.js?v=69",
   "legal-family-ui.js?v=2",

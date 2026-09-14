@@ -1000,6 +1000,7 @@ app.get("/api/executive/command-center",auth,requireExecutive("view"),asyncRoute
     investmentProjects:investmentProjectsLive,recentLoans,
     welfare:{...welfare.rows[0],fundBalance:welfareBalance,monthlyContributions:welfareMonth.total,
       contributionMonthLabel:welfareMonth.label,contributionMonth:welfareMonth.period,
+      monthPayers:welfareMonth.rows,
       collectedSince:welfareStanding.collectedSince,sinceLabel:welfareStanding.sinceLabel||"June 2024",
       membersContributing:welfareStanding.membersContributing,newMembers:welfareStanding.newMembers,
       standingMembers:welfareStanding.standingMembers,byMember:welfareStanding.byMember,
@@ -1408,7 +1409,8 @@ app.get("/api/finance/command-center",auth,requireFinance("view"),asyncRoute(asy
     collected:welfareCollected,
     percent:welfareExpected?Math.min(100,Math.round(welfareCollected/welfareExpected*100)):0,
     activeMembers:activeMemberCount,
-    membersPaid:welfareMonth.membersPaid
+    membersPaid:welfareMonth.membersPaid,
+    payers:welfareMonth.rows
   };
   const welfareStanding=await loadWelfareStanding();
   const displayBank=historicalPeriod
@@ -3188,7 +3190,8 @@ app.get("/api/welfare/command-center",auth,requireWelfare("view"),asyncRoute(asy
       remainingBalance:closingBalance,
       collectedSince:welfareStanding.collectedSince,sinceLabel:welfareStanding.sinceLabel,
       membersContributing:welfareStanding.membersContributing,
-      contributionMonthLabel:welfareMonth.label,contributionMonth:welfareMonth.period},
+      contributionMonthLabel:welfareMonth.label,contributionMonth:welfareMonth.period,
+      monthPayers:welfareMonth.rows},
     fund:{openingBalance,contributions:contributed,assistancePaid,otherExpenses,closingBalance,
       growth:openingBalance?Number(((closingBalance-openingBalance)/openingBalance*100).toFixed(2)):0,
       collectedSince:welfareStanding.collectedSince,sinceLabel:welfareStanding.sinceLabel,sinceDate:welfareStanding.sinceDate,

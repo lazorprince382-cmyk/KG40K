@@ -1238,7 +1238,7 @@ function executiveModuleView(module) {
     const standingRows=standingList.slice(0,20).map(x=>[x.member,x.memberNumber||"",money(x.collected),escapeHtml(x.sinceLabel||"June 2024")]);
     const note=standing.note||e.welfare?.note||"Most members hold UGX 650,000 welfare since June 2024 inside personal savings. Vicent holds UGX 50,000 since July 2026. Oketcho and Baraza are excluded from this standing.";
     const open=Boolean(state.welfareStandingOpen?.executive);
-    const body=`<div class="exec-module-metrics">${executiveModuleMetric("Since June 2024",money(sinceTotal),"violet")}${executiveModuleMetric("Members on standing",standing.membersContributing||standingList.length,"blue")}${executiveModuleMetric("Pending requests",e.welfare?.pending||0,"orange")}${executiveModuleMetric(`${e.welfare?.contributionMonthLabel||"This month"} contributions`,money(e.welfare?.monthlyContributions||0),"blue")}</div>
+    const body=`<div class="exec-module-metrics">${executiveModuleMetric("Since June 2024",money(sinceTotal),"violet")}${executiveModuleMetric("Members on standing",standing.membersContributing||standingList.length,"blue")}${executiveModuleMetric("Pending requests",e.welfare?.pending||0,"orange")}${executiveModuleMetric(`${e.welfare?.contributionMonthLabel||"This month"} contributions`,money(e.welfare?.monthlyContributions||0),"blue","payers")}</div>
       ${executiveRecordTable("Welfare standing since June 2024 (15 members)",["Member","Number","Welfare","Since"],standingRows)}
       ${executiveRecordTable("New / recent members — welfare vs personal savings",["Member","Number","Joined","Welfare collected","Personal savings","Since"],newRows)}
       ${executiveRecordTable("Welfare request summary",["Reference","Member","Request","Amount","Status"],(e.welfareRequests||[]).map(x=>[x.reference,x.member,x.requestType,money(x.amount),status(x.status)]))}`;
@@ -1273,7 +1273,32 @@ function executiveFinanceSummary(e) {
     <div class="executive-account-grid">${accounts.length?accounts.map(account=>`<article>${account.accountCode==="GL-4500"?`<button type="button" class="executive-account-open" data-executive-page="finance-unit-trust">`:`<div class="executive-account-open">`}<div class="executive-account-icon">${account.accountType==="bank"||account.accountCode==="GL-4500"?icons.building:icons.wallet}</div><div class="executive-account-title"><span>${escapeHtml(account.accountCode==="GL-4104"?"Centenary bank":account.accountCode==="GL-4500"?"Unit Trust (UAP)":String(account.accountType||"account").replaceAll("_"," "))}</span><h4>${escapeHtml(account.accountCode==="GL-4104"?"Centenary bank account":account.accountCode==="GL-4500"?"UAP account":account.accountName)}</h4><p>${escapeHtml(account.bankName||"Organization funds")} ${account.maskedAccountNumber?`· ${escapeHtml(account.maskedAccountNumber)}`:""}</p></div><strong>${money(account.balance)}</strong><div class="executive-account-meta"><span class="status ${account.restricted?"pending":"active"}">${account.restricted?"Restricted":"Available"}</span><small>${account.accountCode==="GL-4500"?"Open live movement":account.lastReconciledAt?`Reconciled ${new Date(account.lastReconciledAt).toLocaleDateString()}`:"Not yet reconciled"}</small></div>${account.accountCode==="GL-4500"?"</button>":"</div>"}</article>`).join(""):`<div class="exec-empty">Finance has not registered any bank, cash or fund accounts yet.</div>`}</div>
   </section>${executiveFinancialWidget(e)}${executiveRecordTable("Major finance entries",["Reference","Category","Description","Amount","Status"],e.financeEntries.filter(x=>!/management accounts import/i.test(x.paymentMethod||"")).map(x=>[x.reference,x.category,x.description,money(x.amount),status(x.status)]))}`;
 }
-function executiveModuleMetric(label,value,color) { return `<div class="exec-module-metric ${color}"><small>${label}</small><strong>${value}</strong><span>Executive summary</span></div>`; }
+function executiveModuleMetric(label,value,color,action) {
+  const hint=action==="payers"?"Tap to see who paid":"Executive summary";
+  if(action==="payers")return `<button type="button" class="exec-module-metric ${color} is-action" data-welfare-month-payers="1"><small>${label}</small><strong>${value}</strong><span>${hint}</span></button>`;
+  return `<div class="exec-module-metric ${color}"><small>${label}</small><strong>${value}</strong><span>${hint}</span></div>`;
+}
+function formatLedgerDate(value){
+  const day=String(value||"").slice(0,10);
+  const [year,month,date]=day.split("-");
+  return year&&month&&date?`${date}/${month}/${year}`:"—";
+}
+function monthWelfarePayers(){
+  return state.executive?.welfare?.monthPayers||state.finance?.welfareProgress?.payers||state.welfare?.stats?.monthPayers||[];
+}
+function monthWelfareLabel(){
+  return state.executive?.welfare?.contributionMonthLabel||state.finance?.welfareProgress?.periodLabel||state.welfare?.stats?.contributionMonthLabel||"This month";
+}
+function openMonthWelfarePayers(){
+  const rows=monthWelfarePayers();
+  const label=monthWelfareLabel();
+  const total=rows.reduce((sum,row)=>sum+Number(row.amount||0),0);
+  const body=rows.length?`<div class="table-scroll"><table><thead><tr><th>Member</th><th>Number</th><th>Date</th><th>Amount</th></tr></thead><tbody>${rows.map(row=>`<tr><td><strong>${escapeHtml(row.member)}</strong></td><td>${escapeHtml(row.memberNumber||"—")}</td><td>${formatLedgerDate(row.date)}</td><td><strong>${money(row.amount)}</strong></td></tr>`).join("")}</tbody></table></div>`:`<div class="exec-empty">No welfare contributions have been posted this month yet.</div>`;
+  closeModal();
+  document.body.insertAdjacentHTML("beforeend",`<div class="modal-backdrop" id="modal-backdrop"><div class="modal" role="dialog" aria-modal="true"><div class="modal-head"><div><h2>${escapeHtml(label)} contributions</h2><p>${rows.length} member${rows.length===1?"":"s"} · ${money(total)}</p></div><button class="modal-close" data-close>${icons.x}</button></div>${body}</div></div>`);
+  document.querySelector("[data-close]").onclick=closeModal;
+  document.getElementById("modal-backdrop")?.addEventListener("click",event=>{if(event.target.id==="modal-backdrop")closeModal();});
+}
 function executiveRecordTable(title,headers,rows) {
   return `<section class="exec-panel exec-table-panel"><div class="exec-panel-head"><div><h3>${title}</h3><p>Summary view?operational entry remains with the responsible department</p></div></div><div class="table-scroll"><table><thead><tr>${headers.map(h=>`<th>${h}</th>`).join("")}</tr></thead><tbody>${rows.length?rows.map(r=>`<tr>${r.map(v=>`<td>${v}</td>`).join("")}</tr>`).join(""):`<tr><td colspan="${headers.length}">No records found.</td></tr>`}</tbody></table></div></section>`;
 }
@@ -1416,7 +1441,7 @@ function financeWelfareStandingSection(f){
       ${executiveModuleMetric("Since June 2024",money(sinceTotal),"violet")}
       ${executiveModuleMetric("Members on standing",standing.membersContributing||standingList.length,"blue")}
       ${executiveModuleMetric("Pending requests",pending,"orange")}
-      ${executiveModuleMetric(`${f.welfareProgress?.periodLabel||"This month"} contributions`,money(monthly),"blue")}
+      ${executiveModuleMetric(`${f.welfareProgress?.periodLabel||"This month"} contributions`,money(monthly),"blue","payers")}
     </div>
     ${executiveRecordTable("Welfare standing since June 2024 (15 members)",["Member","Number","Welfare","Since"],standingRows)}
     ${executiveRecordTable("New / recent members — welfare vs personal savings",["Member","Number","Joined","Welfare collected","Personal savings","Since"],newRows)}`;
@@ -3714,6 +3739,11 @@ function settingsView() {
 function settingRow(key,title,description,icon) { return `<div class="setting-row"><div class="setting-icon">${icons[icon]}</div><div class="setting-copy"><strong>${title}</strong><span>${description}</span></div><button class="toggle ${state.settings[key]?"on":""}" data-toggle="${key}" aria-label="${title}"></button></div>`; }
 
 function bind() {
+  document.querySelectorAll("[data-welfare-month-payers]").forEach(el=>el.addEventListener("click",event=>{
+    event.preventDefault();
+    event.stopPropagation();
+    openMonthWelfarePayers();
+  }));
   document.querySelectorAll("[data-workspace-id]").forEach(el=>el.addEventListener("click",async event=>{
     event.preventDefault();
     const workspace=findWorkspace(el.dataset.workspaceId);

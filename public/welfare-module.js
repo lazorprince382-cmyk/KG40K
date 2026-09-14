@@ -4,12 +4,12 @@
   const formEnd=label=>`<div class="form-actions"><button type="button" class="button secondary" data-close-modal>Cancel</button><button type="submit" class="button primary">${label}</button></div>`;
   const ago=value=>{if(!value)return "Time unavailable";const seconds=Math.max(0,Math.floor((Date.now()-new Date(value).getTime())/1000));if(seconds<60)return "just now";if(seconds<3600){const n=Math.floor(seconds/60);return `${n} minute${n===1?"":"s"} ago`;}if(seconds<86400){const n=Math.floor(seconds/3600);return `${n} hour${n===1?"":"s"} ago`;}const n=Math.floor(seconds/86400);return `${n} day${n===1?"":"s"} ago`;};
   const members=()=>state.members.map(x=>`<option value="${x.databaseId}">${esc(x.id)}  -  ${esc(x.name)}</option>`).join("");
-  const stat=(label,value,iconName,tone,note,target)=>`<button class="welfare-stat ${tone}" data-dept-target="${target}"><span>${icons[iconName]}</span><div><small>${label}</small><strong>${value}</strong><em>${note}</em></div></button>`;
+  const stat=(label,value,iconName,tone,note,target)=>{const payers=target==="welfare-month-payers";return `<button class="welfare-stat ${tone}" ${payers?"data-welfare-month-payers=\"1\"":`data-dept-target="${target}"`}><span>${icons[iconName]}</span><div><small>${label}</small><strong>${value}</strong><em>${note}</em></div></button>`;};
   function requestTable(rows,actions=false){return table(["Request","Member","Category","Amount","Urgency","Officer","Status","Action"],rows.map(x=>`<tr><td><strong>${esc(x.reference)}</strong><small>${date(x.createdAt)}</small></td><td>${esc(x.member)}<small>${esc(x.memberNumber)}</small></td><td>${esc(x.category)}</td><td><strong>${money(x.amount)}</strong></td><td>${risk(x.urgency)}</td><td>${esc(x.assignedOfficer)}</td><td>${badge(x.status)}</td><td>${actions&&!["approved","rejected","closed"].includes(x.status)?`<button class="mini-btn" data-welfare-review="${x.id}">${icons.eye}</button>`:" - "}</td></tr>`).join(""));}
   D.dashboards.welfare=()=>{
     const w=W(),s=w.stats,standing=w.welfareStanding||w.fund||{},cards=[
       [`Welfare since June 2024`,money(standing.collectedSince||s.collectedSince||0),"receipt","violet",`${standing.membersContributing||0} members × standing balance`,"welfare-contributions"],
-      [`${s.contributionMonthLabel||"This month"} contributions`,money(s.contributionsMonth),"receipt","blue","Posted this month only, not July standing","welfare-contributions"],
+      [`${s.contributionMonthLabel||"This month"} contributions`,money(s.contributionsMonth),"receipt","blue","Tap to see who paid","welfare-month-payers"],
       ["Assistance Paid This Month",money(s.assistancePaidMonth),"wallet","violet","Approved support","welfare-payments"],
       ["Pending Welfare Requests",s.pendingRequests,"clock","orange","Awaiting progress","welfare-requests"],
       ["Approved Requests",s.approvedRequests,"check","teal","Recorded decisions","welfare-requests"],
