@@ -47,7 +47,7 @@ const rolePages = {
   Auditor: ["dashboard","messages","settings"],
   "System Admin": ["dashboard","messages","audit","settings"],
   "Finance Officer": ["dashboard","finance-income","finance-expenses","finance-vouchers","finance-receipts","finance-invoices",
-    "finance-budgets","finance-bank","finance-unit-trust","finance-cashbook","finance-assets","finance-procurement","finance-approvals",
+    "finance-budgets","finance-bank","finance-unit-trust","finance-cashbook","finance-assets","finance-approvals",
     "finance-reports","finance-analytics","finance-documents","messages","settings"],
   "Investment Officer": ["dashboard","investment-projects","investment-portfolio","investment-proposals","investment-investors",
     "investment-revenue","investment-expenses","investment-pl","investment-budgets","investment-assets",
@@ -393,27 +393,31 @@ async function enterWorkspace(workspace,{skipRender=false,preserveNavigation=fal
   persistWorkspaceChoice(workspace);
   if(!preserveNavigation)state.executiveWorkspace=null;
   if(workspace.type==="member"){
-    if(!state.memberCenter){
-      [state.memberCenter,state.memberSelfService]=await Promise.all([
-        api("/api/member/command-center"),
-        api("/api/member/self-service").catch(()=>({opportunities:[],applications:[]}))
-      ]);
-    }
     state.memberContext=true;
     state.memberOversight=false;
     if(!preserveNavigation)state.page="member-dashboard";
     if(state.user?.role&&state.user.role!=="Member")state.role=state.user.role;
     else state.role="Member";
-  }else{
-    state.memberContext=false;
-    state.memberOversight=false;
-    state.role=workspace.role;
-    state.permissions=workspace.permissions||state.permissions||[];
-    if(!preserveNavigation)state.page="dashboard";
-    await loadWorkspaceCenter(workspace.role);
+    persistUiState();
+    if(!skipRender){render();window.scrollTo(0,0);}
+    if(!state.memberCenter){
+      [state.memberCenter,state.memberSelfService]=await Promise.all([
+        api("/api/member/command-center"),
+        api("/api/member/self-service").catch(()=>({opportunities:[],applications:[]}))
+      ]);
+      if(!skipRender)render();
+    }
+    return;
   }
+  state.memberContext=false;
+  state.memberOversight=false;
+  state.role=workspace.role;
+  state.permissions=workspace.permissions||state.permissions||[];
+  if(!preserveNavigation)state.page="dashboard";
   persistUiState();
   if(!skipRender){render();window.scrollTo(0,0);}
+  await loadWorkspaceCenter(workspace.role);
+  if(!skipRender)render();
 }
 function workspacePickerView(workspaces,error=""){
   const cards=workspaces.map(item=>{
@@ -452,6 +456,7 @@ function workspacePickerView(workspaces,error=""){
   }));
   document.querySelector("[data-workspace-signout]")?.addEventListener("click",async()=>{
     try{await api("/api/auth/logout",{method:"POST"});}catch{}
+    clearIdleLock();
     try{sessionStorage.removeItem("kg40k_ui");sessionStorage.removeItem("kg40k_workspace");}catch{}
     pageHistory=[];previousNavKey=null;state.user=null;state.activeWorkspace=null;state.executiveWorkspace=null;loginView();
   });
@@ -467,11 +472,11 @@ function injectWorkspaceSwitcher(html){
   }
   return html;
 }
-async function refreshData(seedUser=null) {
+async function refreshData(seedUser=null,{skipCenter=false}={}) {
   const knownRole=seedUser?.role||state.activeWorkspace?.role||state.role||state.user?.role||null;
   const centerByRole=WORKSPACE_CENTER;
-  const centerUrl=centerByRole[knownRole]||null;
-  const memberNeeded=Boolean(seedUser?.member_id||state.user?.member_id);
+  const centerUrl=!skipCenter?(centerByRole[knownRole]||null):null;
+  const memberNeeded=!skipCenter&&(knownRole==="Member"||seedUser?.role==="Member");
   const [data,center,memberCenter]=await Promise.all([
     api("/api/bootstrap"),
     centerUrl?api(centerUrl).catch(()=>null):Promise.resolve(null),
@@ -484,9 +489,6 @@ async function refreshData(seedUser=null) {
   state.primaryRole=data.user.role;
   if(memberCenter){
     state.memberCenter=memberCenter;
-    if(data.user.role==="Member"&&state.page==="dashboard"&&!previousWorkspace)state.page="member-dashboard";
-  }else if(data.user.member_id){
-    try{state.memberCenter=await api("/api/member/command-center");}catch{}
     if(data.user.role==="Member"&&state.page==="dashboard"&&!previousWorkspace)state.page="member-dashboard";
   }
   if(center){
@@ -521,7 +523,7 @@ async function login(event) {
     state.primaryRole=session.user.role; state.activeWorkspace=null; state.memberContext=false; state.executiveWorkspace=null;
     persistWorkspaceChoice(null);
     document.getElementById("app").innerHTML=`<div class="loading-screen"><div class="loading-mark"><div class="brand-mark">${icons.logo}</div>Opening your workspace<div class="spinner"></div></div></div>`;
-    await refreshData(session.user);
+    await refreshData(session.user,{skipCenter:true});
     const workspaces=session.workspaces?.length?session.workspaces:availableWorkspaces();
     state.workspaces=workspaces;
     if(workspaceNeedsPicker(workspaces)){
@@ -529,31 +531,33 @@ async function login(event) {
       return;
     }
     const only=workspaces[0];
-    if(only)await enterWorkspace(only,{skipRender:true});
-    else state.page=session.user.role==="Member"?"member-dashboard":"dashboard";
-    render();
+    if(only)await enterWorkspace(only);
+    else{
+      state.page=session.user.role==="Member"?"member-dashboard":"dashboard";
+      render();
+    }
   } catch(error) { loginView(error.message); }
 }
 async function init() {
   document.getElementById("app").innerHTML=`<div class="loading-screen"><div class="loading-mark"><div class="brand-mark">${icons.logo}</div>Kasangati G40 Kwagalana<div class="spinner"></div></div></div>`;
   try {
-    await refreshData();
+    await refreshData(null,{skipCenter:true});
     const workspaces=availableWorkspaces();
     const saved=readPersistedWorkspace();
     const ui=readUiState();
     const savedWorkspace=saved?findWorkspace(saved.id,workspaces):null;
-    if(savedWorkspace)await enterWorkspace(savedWorkspace,{skipRender:true,preserveNavigation:true});
-    else if(workspaces.length===1)await enterWorkspace(workspaces[0],{skipRender:true,preserveNavigation:true});
+    if(ui?.page)state.page=ui.page;
+    if(ui?.searchTerm)searchTerm=ui.searchTerm;
+    if(ui?.executiveWorkspace)state.executiveWorkspace=ui.executiveWorkspace;
+    if(savedWorkspace)await enterWorkspace(savedWorkspace,{preserveNavigation:true});
+    else if(workspaces.length===1)await enterWorkspace(workspaces[0],{preserveNavigation:true});
     else if(workspaceNeedsPicker(workspaces)&&!savedWorkspace){
       workspacePickerView(workspaces);
       return;
-    }
-    if(ui?.page)state.page=ui.page;
-    if(ui?.searchTerm)searchTerm=ui.searchTerm;
-    if(ui?.executiveWorkspace)await restoreExecutiveWorkspace(ui.executiveWorkspace);
+    }else render();
+    if(ui?.executiveWorkspace)restoreExecutiveWorkspace(ui.executiveWorkspace).then(()=>render()).catch(()=>{});
     previousNavKey=navKey();
     pageHistory=[];
-    render();
   } catch { loginView(); }
 }
 function loginView(error = "") {
@@ -606,6 +610,48 @@ function canCreditsDisburse(){
 function navAlertDot(show){
   return show?`<span class="nav-alert-dot" aria-hidden="true"></span>`:"";
 }
+let idleTimer=null;
+let idleInstalled=false;
+let sessionLocked=false;
+const IDLE_LOCK_MS=10*60*1000;
+function installIdleLock(){
+  if(idleInstalled)return;
+  idleInstalled=true;
+  ["pointerdown","keydown","wheel","touchstart"].forEach(type=>{
+    document.addEventListener(type,noteActivity,{passive:true,capture:true});
+  });
+}
+function noteActivity(){
+  if(sessionLocked||!state.user)return;
+  armIdleLock();
+}
+function armIdleLock(){
+  clearTimeout(idleTimer);
+  idleTimer=setTimeout(returnToSignIn,IDLE_LOCK_MS);
+}
+function ensureIdleLock(){
+  installIdleLock();
+  if(!state.user)return clearIdleLock();
+  if(sessionLocked)return;
+  if(!idleTimer)armIdleLock();
+}
+function clearIdleLock(){
+  clearTimeout(idleTimer);
+  idleTimer=null;
+  sessionLocked=false;
+}
+async function returnToSignIn(){
+  if(!state.user||sessionLocked)return;
+  sessionLocked=true;
+  clearTimeout(idleTimer);
+  idleTimer=null;
+  try{await api("/api/auth/logout",{method:"POST"});}catch{}
+  try{sessionStorage.removeItem("kg40k_ui");sessionStorage.removeItem("kg40k_workspace");}catch{}
+  pageHistory=[];previousNavKey=null;
+  state.user=null;state.activeWorkspace=null;state.executiveWorkspace=null;state.memberContext=false;
+  sessionLocked=false;
+  loginView();
+}
 function render() {
   const workspaceRole=executiveWorkspaceRole();
   const allowed = rolePages[workspaceRole]||rolePages[state.role];
@@ -657,6 +703,7 @@ function render() {
   bind();
   if(typeof setSidebarOpen==="function")setSidebarOpen(false);
   if(state.page==="executive-credits") ensureExecutiveCreditsDesk();
+  ensureIdleLock();
 }
 
 function sidebar() {
@@ -740,7 +787,7 @@ function financeSidebar() {
   const entryPending=(state.finance?.pendingEntries||state.finance?.entries||[]).filter(x=>x.status==="pending_finance_review").length+(state.finance?.pendingSavings||[]).length;
   const investmentPending=(state.finance?.investmentAnalyses||[]).length;
   const pages=rolePages[executiveWorkspaceRole()]||rolePages[state.role];
-  const sidebarPages=new Set(["dashboard","messages","finance-income","finance-expenses","finance-invoices","finance-budgets","finance-bank","finance-unit-trust","finance-assets","finance-procurement","finance-approvals","finance-reports","finance-documents","settings"]);
+  const sidebarPages=new Set(["dashboard","messages","finance-income","finance-expenses","finance-invoices","finance-budgets","finance-bank","finance-unit-trust","finance-assets","finance-approvals","finance-reports","finance-documents","settings"]);
   const alertFor=page=>page==="finance-approvals"&&(pending||entryPending||investmentPending)||page==="messages"&&state.unreadMessages;
   return `<aside class="sidebar executive-sidebar finance-sidebar" id="sidebar">
     <div class="executive-brand"><div class="executive-crest finance-crest">${icons.wallet}</div><div><strong>KASANGATI G40<br>KWAGALANA</strong><span>Finance Department</span></div></div>
@@ -1046,12 +1093,12 @@ function executiveDashboardView() {
     ["Total Members",s.totalMembers,"members","members","Verified membership"],
     ["Active Members",s.activeMembers,"members","members","Currently active"],
     ["Pending Approvals",s.pendingApprovals,"approvals","executive-approvals","Needs authority"],
-    ["UAP account",money(uap),"building","executive-finance","Old Mutual unit trust"],
+    ["UAP account",money(uap),"building","finance-unit-trust","Old Mutual unit trust — open the live movement"],
     ["Centenary bank account",money(bank),"wallet","executive-finance","Company bank live balance"],
     ["Money in loans",money(loansOut),"loans","executive-credits","Outstanding loan principal"],
     ["Total Company Funds",money(company),"reports","executive-finance","UAP + Centenary + loans"],
     ["Welfare since June 2024",money(e.welfare?.collectedSince||e.welfareStanding?.collectedSince||0),"receipt","executive-welfare",e.welfare?.sinceLabel?`Collected since ${e.welfare.sinceLabel}`:"Also inside personal savings"],
-    ["Income this month",money(s.organizationIncomeMonth??s.organizationIncome),"arrowDown","executive-finance","Org receipts — excludes member savings"],
+    ["Income this month",money(s.organizationIncomeMonth||0),"arrowDown","executive-finance","Live organization receipts. Member savings are not income"],
     ["Expenditure this month",money(s.organizationExpenditureMonth??s.organizationExpenditure),"arrowUp","executive-finance","Live operational payments"],
     ["Total SACCO Savings",money(s.totalSavings),"savings","executive-credits","Member savings"],
     ["Active Investments",s.activeInvestments,"reports","executive-investments","Running projects"],
@@ -1064,7 +1111,6 @@ function executiveDashboardView() {
   return `<div class="exec-welcome"><div><p class="eyebrow">Executive command center</p><h2>Good ${new Date().getHours()<12?"morning":new Date().getHours()<17?"afternoon":"evening"}, ${actor().split(" ")[0]}</h2><p>${e.historicalPeriod?`Viewing the supplied FY ${e.selectedFiscalYear} closing records.`:"Live positions match Finance — UAP, Centenary, loans, and welfare savings since June 2024."}</p></div><div class="dashboard-year-control"><label>Financial year</label><select data-executive-fy>${yearOptions}</select><span class="exec-live"><i></i>${e.historicalPeriod?"Historical statement":"Live organization overview"}</span></div></div>
     <div class="exec-stat-grid">${cards.slice(0,9).map((c,i)=>executiveStatCard(...c,i)).join("")}</div>
     <div class="exec-command-grid">
-      ${executivePerformanceWidget(e)}
       ${executiveApprovalWidget(e.approvals.slice(0,5))}
       ${executiveActivityWidget(e.activities.slice(0,7))}
       ${executiveFinancialWidget(e)}
@@ -1074,8 +1120,11 @@ function executiveDashboardView() {
         ["Total savings",money(s.totalSavings)],["Active loans",e.loans.active],["Loans due today",e.loans.due_today],
         ["Loans in default",e.loans.defaults],["Money in loans",money(loansOut)]])}
       ${executiveHealthCard("Investment","executive-investments","reports",[
-        ["Projects running",e.investment.running],["Profitable projects",e.investment.profitable],["Projects losing money",e.investment.losing],
-        ["Expected returns",money(e.investment.expected_return)],["Investment growth",`${e.investment.growth}%`]])}
+        ["UAP account",money(e.investment.unitTrust?.balance??e.investment.current_value)],
+        ["Profit so far",money(e.investment.unitTrust?.profitThisMonth||0)],
+        ["Profit by month end",money(e.investment.unitTrust?.profitByMonthEnd||0)],
+        ["Still to accrue",money(e.investment.unitTrust?.projectedProfit||0)],
+        ["Daily rate",`${Number(e.investment.unitTrust?.rate||12.96).toFixed(2)}% a year`]])}
       ${executiveHealthCard("Welfare","executive-welfare","users",[
         ["Since June 2024",money(e.welfare.collectedSince||0)],
         ["Members contributing",e.welfare.membersContributing||0],["New members tracked",(e.welfare.newMembers||[]).length],
@@ -1087,7 +1136,7 @@ function executiveDashboardView() {
         ["Contracts awaiting review",e.legal.contracts],["Cases open",e.legal.open_cases],["Policies pending",e.legal.policies],
         ["Compliance alerts",e.legal.alerts]])}
       ${executiveHealthCard("Supervisory","executive-supervisory","shield",[
-        ["Department performance",`${e.performance.supervisory}%`],["Recommendations",e.supervisory.recommendations],
+        ["Recommendations",e.supervisory.recommendations],
         ["Pending follow-ups",e.supervisory.followups],["Departments below target",e.supervisory.departmentsBelowTarget]])}
     </div>
     <div class="exec-bottom-grid">${executiveNotificationsWidget(e.notifications.slice(0,6))}${executiveCalendarWidget(e.meetings.slice(0,7))}</div>
@@ -1158,24 +1207,16 @@ function executiveQuickPanel() {
 function executiveDepartmentsView() {
   const e=state.executive;
   const modules=[
-    ["executive","Executive Department","Strategy and authority","Pending approvals",e.stats.pendingApprovals,"Upcoming meetings",e.stats.upcomingMeetings,e.performance.executive,"dashboard","blue",null],
-    ["finance","Finance Department","Budgets and finances","Income this month",money(e.stats.organizationIncome),"Expenses",money(e.stats.organizationExpenditure),e.performance.finance,"executive-finance","green","finance"],
-    ["credits","Credits Department (SACCO)","Savings, loans and credit","Total savings",money(e.stats.totalSavings),"Outstanding loans",money(e.stats.outstandingLoans),e.performance.credits,"executive-credits","blue","credits"],
-    ["investment","Investment Department","Ventures and projects","Active projects",e.investment.running,"Expected returns",money(e.investment.expected_return),e.performance.investment,"executive-investments","violet","investment"],
-    ["welfare","Welfare Department","Member welfare support","Since June 2024",money(e.welfare.collectedSince||e.welfareStanding?.collectedSince||0),"Pending requests",e.welfare.pending,e.performance.welfare,"executive-welfare","orange","welfare"],
-    ["legal","Legal Department","Contracts and compliance","Active cases",e.legal.open_cases,"Contracts under review",e.legal.contracts,e.performance.legal,"executive-legal","red","legal"],
-    ["audit","Audit Department","Financial integrity","Open audit issues",e.audit.open,"Compliance score",`${Math.round(Number(e.audit.compliance)||0)}%`,e.performance.audit,"executive-audit","teal","audit"],
-    ["supervisory","Supervisory Department","Oversight and accountability","Pending follow-ups",e.supervisory.followups,"Department compliance",`${e.performance.supervisory}%`,e.performance.supervisory,"executive-supervisory","amber","supervisory"]
+    ["executive","Executive Department","Strategy and authority","Pending approvals",e.stats.pendingApprovals,"Upcoming meetings",e.stats.upcomingMeetings,"dashboard",null],
+    ["finance","Finance Department","Budgets and finances","Income this month",money(e.stats.organizationIncomeMonth||0),"Expenses this month",money(e.stats.organizationExpenditureMonth||0),"executive-finance","finance"],
+    ["credits","Credits Department (SACCO)","Savings, loans and credit","Total savings",money(e.stats.totalSavings),"Outstanding loans",money(e.stats.outstandingLoans),"executive-credits","credits"],
+    ["investment","Investment Department","Old Mutual unit trust","UAP account",money(e.investment.unitTrust?.balance??e.investment.current_value),"Profit so far",money(e.investment.unitTrust?.profitThisMonth||0),"executive-investments","investment"],
+    ["welfare","Welfare Department","Member welfare support","Since June 2024",money(e.welfare.collectedSince||e.welfareStanding?.collectedSince||0),"Pending requests",e.welfare.pending,"executive-welfare","welfare"],
+    ["legal","Legal Department","Contracts and compliance","Active cases",e.legal.open_cases,"Contracts under review",e.legal.contracts,"executive-legal","legal"],
+    ["audit","Audit Department","Financial integrity","Open audit issues",e.audit.open,"Resolved issues",e.audit.resolved,"executive-audit","audit"],
+    ["supervisory","Supervisory Department","Oversight and accountability","Pending follow-ups",e.supervisory.followups,"Recommendations",e.supervisory.recommendations,"executive-supervisory","supervisory"]
   ];
-  const totalDepartments=e.departments.length,activeDepartments=e.departments.length;
-  const scores=modules.map(module=>Number(module[7]||0));
-  const performingWell=scores.filter(score=>score>=85).length,needAttention=scores.filter(score=>score<85).length;
-  return `<div class="exec-dept-top"><div class="exec-mini-stat"><span>${icons.building}</span><div><small>Total Departments</small><strong>${totalDepartments}</strong><em>Active organization arms</em></div></div>
-    <div class="exec-mini-stat"><span class="green">${icons.check}</span><div><small>Active Departments</small><strong>${activeDepartments}</strong><em>${activeDepartments===totalDepartments?"100% active":`${totalDepartments-activeDepartments} inactive`}</em></div></div>
-    <div class="exec-mini-stat"><span class="violet">${icons.reports}</span><div><small>Performing Well</small><strong>${performingWell}</strong><em>85% or above</em></div></div>
-    <div class="exec-mini-stat"><span class="orange">${icons.info}</span><div><small>Need Attention</small><strong>${needAttention}</strong><em>Below 85% target</em></div></div></div>
-    <div class="exec-department-layout"><div class="exec-department-cards">${modules.map(m=>`<article class="exec-department-card"><div class="exec-dept-title"><span class="${m[9]}">${icons[departmentIcon(m[0])]}</span><div><h3>${m[1]}</h3><p>${m[2]}</p></div></div><div class="exec-dept-values"><div><small>${m[3]}</small><strong>${m[4]}</strong><small>${m[5]}</small><strong>${m[6]}</strong></div><div class="exec-ring" style="--score:${m[7]}"><span>${m[7]}%</span></div></div><div class="exec-dept-actions"><button data-executive-page="${m[8]}">View summary <b>&gt;</b></button>${m[10]?`<button class="primary" data-executive-workspace="${m[10]}">Open desk <b>&gt;</b></button>`:""}</div></article>`).join("")}</div>${executivePerformanceWidget(e)}</div>
-    <div class="exec-panel exec-dept-chart"><div class="exec-panel-head"><div><h3>Department Performance Chart</h3><p>Live scores from current operations</p></div></div><div class="exec-wide-bars">${modules.map(m=>`<div><div><i style="height:${Math.max(2,Number(m[7]||0))}%"></i></div><span>${m[0]} - ${m[7]}%</span></div>`).join("")}</div></div>`;
+  return `<div class="exec-department-cards" style="grid-template-columns:repeat(auto-fill,minmax(280px,1fr));margin-bottom:16px">${modules.map(m=>`<article class="exec-department-card"><div class="exec-dept-title"><span class="${m[0]==="finance"?"green":m[0]==="credits"?"blue":m[0]==="investment"?"violet":m[0]==="welfare"?"orange":m[0]==="legal"?"red":m[0]==="audit"?"teal":m[0]==="supervisory"?"amber":"blue"}">${icons[departmentIcon(m[0])]}</span><div><h3>${m[1]}</h3><p>${m[2]}</p></div></div><div class="exec-dept-values"><div><small>${m[3]}</small><strong>${m[4]}</strong><small>${m[5]}</small><strong>${m[6]}</strong></div></div><div class="exec-dept-actions"><button type="button" data-executive-page="${m[7]}">View summary <b>&gt;</b></button>${m[8]?`<button type="button" class="primary" data-executive-workspace="${m[8]}">Open desk <b>&gt;</b></button>`:""}</div></article>`).join("")}</div>`;
 }
 function executiveModuleView(module) {
   const e=state.executive;
@@ -1230,7 +1271,7 @@ function executiveFinanceSummary(e) {
   </div>
   <section class="exec-panel executive-account-summary"><div class="exec-panel-head"><div><h3>Bank, Cash &amp; Fund Accounts</h3><p>Read-only Finance summary - same live balances as the Finance dashboard</p></div><span class="executive-readonly-badge">${icons.shield} Read only</span></div>
     <div class="executive-account-overview"><span>Registered accounts<strong>${accounts.length}</strong></span><span>UAP account<strong>${money(uap)}</strong></span><span>Centenary bank<strong>${money(bank)}</strong></span><span>Money in loans<strong>${money(loans)}</strong></span></div>
-    <div class="executive-account-grid">${accounts.length?accounts.map(account=>`<article><div class="executive-account-icon">${account.accountType==="bank"||account.accountCode==="GL-4500"?icons.building:icons.wallet}</div><div class="executive-account-title"><span>${escapeHtml(account.accountCode==="GL-4104"?"Centenary bank":account.accountCode==="GL-4500"?"Unit Trust (UAP)":String(account.accountType||"account").replaceAll("_"," "))}</span><h4>${escapeHtml(account.accountCode==="GL-4104"?"Centenary bank account":account.accountCode==="GL-4500"?"UAP account":account.accountName)}</h4><p>${escapeHtml(account.bankName||"Organization funds")} ${account.maskedAccountNumber?`· ${escapeHtml(account.maskedAccountNumber)}`:""}</p></div><strong>${money(account.balance)}</strong><div class="executive-account-meta"><span class="status ${account.restricted?"pending":"active"}">${account.restricted?"Restricted":"Available"}</span><small>${account.lastReconciledAt?`Reconciled ${new Date(account.lastReconciledAt).toLocaleDateString()}`:"Not yet reconciled"}</small></div></article>`).join(""):`<div class="exec-empty">Finance has not registered any bank, cash or fund accounts yet.</div>`}</div>
+    <div class="executive-account-grid">${accounts.length?accounts.map(account=>`<article>${account.accountCode==="GL-4500"?`<button type="button" class="executive-account-open" data-executive-page="finance-unit-trust">`:`<div class="executive-account-open">`}<div class="executive-account-icon">${account.accountType==="bank"||account.accountCode==="GL-4500"?icons.building:icons.wallet}</div><div class="executive-account-title"><span>${escapeHtml(account.accountCode==="GL-4104"?"Centenary bank":account.accountCode==="GL-4500"?"Unit Trust (UAP)":String(account.accountType||"account").replaceAll("_"," "))}</span><h4>${escapeHtml(account.accountCode==="GL-4104"?"Centenary bank account":account.accountCode==="GL-4500"?"UAP account":account.accountName)}</h4><p>${escapeHtml(account.bankName||"Organization funds")} ${account.maskedAccountNumber?`· ${escapeHtml(account.maskedAccountNumber)}`:""}</p></div><strong>${money(account.balance)}</strong><div class="executive-account-meta"><span class="status ${account.restricted?"pending":"active"}">${account.restricted?"Restricted":"Available"}</span><small>${account.accountCode==="GL-4500"?"Open live movement":account.lastReconciledAt?`Reconciled ${new Date(account.lastReconciledAt).toLocaleDateString()}`:"Not yet reconciled"}</small></div>${account.accountCode==="GL-4500"?"</button>":"</div>"}</article>`).join(""):`<div class="exec-empty">Finance has not registered any bank, cash or fund accounts yet.</div>`}</div>
   </section>${executiveFinancialWidget(e)}${executiveRecordTable("Major finance entries",["Reference","Category","Description","Amount","Status"],e.financeEntries.filter(x=>!/management accounts import/i.test(x.paymentMethod||"")).map(x=>[x.reference,x.category,x.description,money(x.amount),status(x.status)]))}`;
 }
 function executiveModuleMetric(label,value,color) { return `<div class="exec-module-metric ${color}"><small>${label}</small><strong>${value}</strong><span>Executive summary</span></div>`; }
@@ -1265,24 +1306,19 @@ function executiveMeetingsView() {
 }
 function executiveProjectsView() {
   const e=state.executive;
-  const projects=e.investmentProjects||[],atRisk=projects.filter(p=>["watch","losing","underperforming"].includes(p.performanceStatus)||p.status==="suspended").length;
-  return `<div class="exec-module-metrics">${executiveModuleMetric("Active projects",projects.filter(p=>["active","running","construction"].includes(p.status)).length,"blue")}${executiveModuleMetric("Current value (live UAP)",money(e.investment.current_value),"green")}${executiveModuleMetric("Interest earned",money(e.investment.expected_return),"violet")}${executiveModuleMetric("Need attention",atRisk,"orange")}</div>
-    <section class="exec-panel executive-project-note"><div>${icons.shield}<div><strong>Executive project governance</strong><span>Monitor results, review evidence, record strategic comments, escalate concerns, and control suspension or closure. Operational editing remains with Investment. Unit Trust figures follow live UAP balance and unit-trust movements.</span></div></div></section>
-    <div class="exec-project-grid executive-governance-projects">${projects.map(p=>{
-      const isUt=Boolean(p.isUnitTrust)||/unit trust|old mutual|INV-FUND-OM/i.test(`${p.reference||""} ${p.name||""} ${p.category||""}`);
-      const invested=Number(p.raisedAmount||p.targetAmount||0);
-      const profit=Number(isUt?(p.expectedReturn??p.profit??0):(p.profit||0));
-      const utilization=isUt?(invested?100:0):(p.targetAmount?Math.round(Number(p.expenses||0)/p.targetAmount*100):0);
-      const spendLabel=isUt?"Capital in UAP":"Budget spent";
-      return `<article class="exec-project-card"><div><span>${escapeHtml(p.reference)} - ${escapeHtml(p.category||"Investment")}</span>${status(p.status)}</div><h3>${escapeHtml(p.name)}</h3><p>${escapeHtml(p.description)}</p><div class="executive-project-meta"><span>Manager<strong>${escapeHtml(p.manager||"Not assigned")}</strong></span><span>Location<strong>${escapeHtml(p.location||"Not recorded")}</strong></span><span>Completion<strong>${Number(p.progress||0)}%</strong></span><span>Performance<strong>${escapeHtml(String(p.performanceStatus||"unrated").replaceAll("_"," "))}</strong></span></div>${progress("Project completion",`${p.progress||0}%`,p.progress||0,p.progress<50?"amber":"lime")}${progress(spendLabel,`${utilization}%`,Math.min(100,utilization),utilization>=80?"amber":"blue")}<div class="exec-project-values"><span>Current value<strong>${money(p.currentValue)}</strong></span><span>${isUt?"Interest / net":"Net position"}<strong class="${profit>=0?"positive":"negative"}">${money(profit)}</strong></span></div><small class="executive-project-proposal">${p.proposalReference?`Approved proposal ${escapeHtml(p.proposalReference)}`:"Legacy project - no linked proposal"}</small><button data-executive-project="${p.id}">${icons.eye} Open governance summary</button></article>`;
-    }).join("")||`<section class="exec-panel exec-empty">No investment projects have been registered.</section>`}</div>`;
+  const projects=e.investmentProjects||[];
+  const u=e.investment.unitTrust;
+  const others=projects.filter(p=>!(p.isUnitTrust||/unit trust|old mutual|INV-FUND-OM/i.test(`${p.reference||""} ${p.name||""}`)));
+  return `<div class="exec-module-metrics">${financeUnitTrustMetric("UAP account",money(u?.balance??e.investment.current_value),"Live balance. Interest posts each day","violet")}${financeUnitTrustMetric("Profit so far",money(u?.profitThisMonth||0),"Interest earned this month","green")}${financeUnitTrustMetric("Profit by month end",money(u?.profitByMonthEnd||0),"Keeps accruing until the month ends","blue")}${financeUnitTrustMetric("Still to accrue",money(u?.projectedProfit||0),"Projected interest for the rest of this month","orange")}</div>
+    <section class="exec-panel executive-project-note"><div>${icons.shield}<div><strong>Same live Unit Trust as Finance</strong><span>This is the Old Mutual account, not a loss-making project. Profit already posted is in the balance. The rest of the month is still to accrue.</span></div><button class="button secondary" data-executive-page="finance-unit-trust">Open movement</button></div></section>
+    ${others.length?`<div class="exec-project-grid executive-governance-projects">${others.map(p=>`<article class="exec-project-card"><div><span>${escapeHtml(p.reference)} - ${escapeHtml(p.category||"Investment")}</span>${status(p.status)}</div><h3>${escapeHtml(p.name)}</h3><p>${escapeHtml(p.description)}</p><div class="exec-project-values"><span>Current value<strong>${money(p.currentValue)}</strong></span><span>Net position<strong>${money(p.profit||0)}</strong></span></div><button data-executive-project="${p.id}">${icons.eye} Open governance summary</button></article>`).join("")}</div>`:""}`;
 }
 async function openExecutiveProject(id) {
   try{
     const data=await api(`/api/executive/projects/${id}`),p=data.project,profit=Number(p.profit||0);
     const isUt=Boolean(p.isUnitTrust)||/unit trust|old mutual|INV-FUND-OM/i.test(`${p.reference||""} ${p.name||""}`);
     closeModal();document.body.insertAdjacentHTML("beforeend",`<div class="modal-backdrop" id="modal-backdrop"><div class="modal executive-project-modal"><div class="modal-head"><div><h2>${escapeHtml(p.name)}</h2><p>${escapeHtml(p.reference)} - Executive governance summary${isUt?" · live Unit Trust":""}</p></div><button class="modal-close" data-close>${icons.x}</button></div><div class="executive-project-detail">
-      ${p.photoUrl?`<img class="executive-project-hero" src="${p.photoUrl}" alt="${escapeHtml(p.name)}">`:""}<div class="executive-project-kpis">${isUt?`<span>Live UAP value<strong>${money(p.currentValue)}</strong></span><span>Interest earned<strong class="positive">${money(p.expectedReturn||profit)}</strong></span><span>Capital / budget<strong>${money(p.budget)}</strong></span><span>Net position<strong class="${profit>=0?"positive":"negative"}">${money(profit)}</strong></span><span>ROI<strong>${p.roi}%</strong></span><span>Progress<strong>${p.progress}%</strong></span>`:`<span>Budget<strong>${money(p.budget)}</strong></span><span>Spent<strong>${money(p.expenses)}</strong></span><span>Revenue<strong>${money(p.revenue)}</strong></span><span>Net position<strong class="${profit>=0?"positive":"negative"}">${money(profit)}</strong></span><span>ROI<strong>${p.roi}%</strong></span><span>Progress<strong>${p.progress}%</strong></span>`}</div>
+      ${p.photoUrl?`<img class="executive-project-hero" src="${p.photoUrl}" alt="${escapeHtml(p.name)}">`:""}<div class="executive-project-kpis">${isUt?`<span>UAP account<strong>${money(p.unitTrust?.balance??p.currentValue)}</strong></span><span>Profit so far<strong class="positive">${money(p.unitTrust?.profitThisMonth??p.expectedReturn)}</strong></span><span>Profit by month end<strong>${money(p.unitTrust?.profitByMonthEnd||0)}</strong></span><span>Still to accrue<strong>${money(p.unitTrust?.projectedProfit||0)}</strong></span>`:`<span>Budget<strong>${money(p.budget)}</strong></span><span>Spent<strong>${money(p.expenses)}</strong></span><span>Revenue<strong>${money(p.revenue)}</strong></span><span>Net position<strong class="${profit>=0?"positive":"negative"}">${money(profit)}</strong></span><span>ROI<strong>${p.roi}%</strong></span><span>Progress<strong>${p.progress}%</strong></span>`}</div>
       <div class="executive-project-columns"><section><h3>Project profile</h3><p>${escapeHtml(p.description)}</p><dl><dt>Status</dt><dd>${status(p.status)}</dd><dt>Manager</dt><dd>${escapeHtml(p.manager||"Not assigned")}</dd><dt>Location</dt><dd>${escapeHtml(p.location||"Not recorded")}</dd><dt>Period</dt><dd>${p.startsOn?new Date(p.startsOn).toLocaleDateString():"Not set"} - ${p.endsOn?new Date(p.endsOn).toLocaleDateString():"Not set"}</dd><dt>Funding</dt><dd>${escapeHtml(p.fundingSource||"Not recorded")}</dd><dt>${isUt?"Capital deployed":"Budget utilization"}</dt><dd>${p.budgetUtilization}%</dd></dl></section><section><h3>Approval and risk</h3><dl><dt>Proposal</dt><dd>${escapeHtml(p.proposalReference||"Legacy project")}</dd><dt>Approved by</dt><dd>${escapeHtml(p.proposalApprovedBy||"Historical record")}</dd><dt>Approved on</dt><dd>${p.proposalApprovedAt?new Date(p.proposalApprovedAt).toLocaleString():"Not recorded"}</dd><dt>Risk assessment</dt><dd>${escapeHtml(p.riskAssessment||"Not recorded")}</dd><dt>Finance analysis</dt><dd>${escapeHtml(p.financeAnalysis||"Not recorded")}</dd><dt>Finance recommendation</dt><dd>${escapeHtml(p.financeRecommendation||"Not recorded")}</dd></dl>${p.supportingDocument?`<a class="button secondary" href="${p.supportingDocument}" target="_blank">${icons.file} View supporting evidence</a>`:"<p>No project evidence uploaded.</p>"}</section></div>
       <section class="executive-project-related"><h3>Related records</h3><div><span>Transactions<strong>${data.transactions.length}</strong></span><span>Contracts<strong>${data.contracts.length}</strong></span><span>Assets<strong>${data.assets.length}</strong></span></div></section>
       <section><h3>Executive oversight history</h3><div class="executive-oversight-list">${data.oversight.map(o=>`<article><div>${status(o.actionType)}</div><strong>${escapeHtml(o.createdBy)}</strong><span>${new Date(o.createdAt).toLocaleString()}${o.targetDepartment?` - ${escapeHtml(o.targetDepartment)}`:""}</span><p>${escapeHtml(o.comment)}</p></article>`).join("")||`<div class="exec-empty">No Executive oversight actions recorded yet.</div>`}</div></section>
@@ -1305,8 +1341,7 @@ function executiveReportsView() {
 }
 function executiveAnalyticsView() {
   const e=state.executive,series=[["Membership Growth","savings","green"],["Monthly Revenue","income","blue"],["Monthly Expenses","expenses","red"],["Loan Growth","loans","orange"],["Savings Growth","savings","violet"],["Investment Growth","investment","teal"]];
-  return `<div class="exec-analytics-grid">${series.map(([title,key,color])=>`<section class="exec-panel"><div class="exec-panel-head"><div><h3>${title}</h3><p>Six-month organizational trend</p></div><strong class="trend-up">? ${key==="expenses"?"Controlled":"Growing"}</strong></div><div class="exec-line-chart ${color}">${e.monthly.map((m,i)=>`<div><i style="height:${Math.min(100,(m[key]||m.income)/(Math.max(...e.monthly.map(x=>x[key]||x.income)))*100)}%"></i><span>${m.month}</span></div>`).join("")}</div></section>`).join("")}</div>
-    <section class="exec-panel"><div class="exec-panel-head"><div><h3>Department Performance</h3><p>Attendance, budget and goal achievement indicators</p></div></div>${executivePerformanceWidget(e).replace('<section class="exec-panel exec-performance">','<div class="embedded-performance">').replace("</section>","</div>")}</section>`;
+  return `<div class="exec-analytics-grid">${series.map(([title,key,color])=>`<section class="exec-panel"><div class="exec-panel-head"><div><h3>${title}</h3><p>Six-month organizational trend</p></div><strong class="trend-up">${key==="expenses"?"Controlled":"Growing"}</strong></div><div class="exec-line-chart ${color}">${e.monthly.map((m)=>`<div><i style="height:${Math.min(100,(m[key]||m.income)/(Math.max(...e.monthly.map(x=>x[key]||x.income),1))*100)}%"></i><span>${m.month}</span></div>`).join("")}</div></section>`).join("")}</div>`;
 }
 function executiveNotificationsView() {
   return `<section class="exec-panel"><div class="exec-notification-page">${state.executive.notifications.map(n=>`<article><span>${icons.bell}</span><div><small>${n.type}</small><h3>${n.title}</h3><p>${n.detail}</p></div><time>${relativeTime(n.createdAt||n.time)}</time><button>Mark read</button></article>`).join("")}</div></section>`;
@@ -1338,7 +1373,7 @@ function financeDashboardView() {
     ["Total assets",money(s.totalAssets),"building","finance-assets","Statement assets"],
     ["Total liabilities",money(s.totalLiabilities),"file","finance-invoices","Statement liabilities"]
   ]:[
-    ["Income this month",money(s.monthlyIncome),"arrowDown","finance-income","Includes member savings on Centenary"],
+    ["Income this month",money(s.monthlyIncome),"arrowDown","finance-income","Live organization receipts. Member savings are not income"],
     ["Expenses this month",money(s.monthlyExpenses),"arrowUp","finance-expenses","Live organization payments"],
     ["Pending payment requests",String(s.pendingPaymentRequests||0),"approvals","finance-approvals","Awaiting Finance / Executive"],
     ["Centenary bank account",money(s.currentBankBalance),"wallet","finance-bank","Company bank live balance"]
@@ -1708,7 +1743,7 @@ function financeUnitTrustView(){
   const canEdit=Boolean(state.finance?.access?.canEdit||state.finance?.access?.canCreate);
   const monthOptions=(report.availableMonths||[]).map(m=>`<option value="${m}" ${report.month===m?"selected":""}>${m}</option>`).join("");
   const monthLabel=report.month||"All months";
-  return `<div class="finance-title-strip"><div><p class="eyebrow">Unit Trust / Old Mutual</p><h2>UAP account movement</h2><p>Live Unit Trust balance, daily interest and transfers from the company bank. Filter by month to open that period.</p></div>
+  return `<div class="finance-title-strip"><div><p class="eyebrow">Unit Trust / Old Mutual</p><h2>UAP account movement</h2><p>Interest posts every day through the end of the month. Posted rows are in the live balance. Rows marked not posted yet are the profit still to come.</p></div>
     <div class="dashboard-year-control"><label>Month</label><select data-unit-trust-month><option value="">All months</option>${monthOptions}</select></div></div>
     <div class="module-actions" style="margin-bottom:14px">
       <button class="button primary" data-finance-modal="transfer-uap">${icons.arrowUp||icons.plus}Transfer to UAP</button>
@@ -1718,14 +1753,14 @@ function financeUnitTrustView(){
       <button class="button secondary" data-finance-page="finance-bank">${icons.building}Open company bank</button>
     </div>
     <div class="exec-module-metrics">
-      ${financeUnitTrustMetric("UAP account",money(s.currentBalance||s.closingBalance),"Live Old Mutual balance","violet")}
-      ${financeUnitTrustMetric("Interest earned",money(s.interestEarned),`${monthLabel} interest`,"green")}
-      ${financeUnitTrustMetric("Deposits / transfers in",money(s.deposits),"From company bank","blue")}
-      ${financeUnitTrustMetric("Withdrawals",money(s.withdrawals),`${monthLabel} outflows`,"orange")}
+      ${financeUnitTrustMetric("UAP account",money(s.currentBalance||s.closingBalance),"Live balance. Interest posts each day","violet")}
+      ${financeUnitTrustMetric("Profit so far",money(s.profitThisMonth??s.interestEarned),"Interest earned this month","green")}
+      ${financeUnitTrustMetric("Profit by month end",money(s.profitByMonthEnd??s.interestEarned),"Keeps accruing until the month ends","blue")}
+      ${financeUnitTrustMetric("Still to accrue",money(s.projectedProfit||0),"Projected interest for the rest of this month","orange")}
     </div>
     <section class="finance-panel"><div class="finance-panel-head"><div><h3>UAP account · ${escapeHtml(report.account?.accountName||"Old Mutual Unit Trust")}</h3><p>${escapeHtml(report.account?.accountNumber||"99171-CKA1073440")} · ${escapeHtml(report.account?.bankName||"Old Mutual Investment Group")} · month ${escapeHtml(monthLabel)}</p></div><strong>${money(s.currentBalance||s.closingBalance)}</strong></div>
     <div class="table-scroll"><table><thead><tr><th>Date</th><th>Description</th><th>Deposit</th><th>Interest</th><th>Withdrawal</th><th>Rate</th><th>Balance</th>${canEdit?"<th>Actions</th>":""}</tr></thead>
-    <tbody>${rows.map(r=>`<tr><td>${new Date(r.date).toLocaleDateString("en-GB")}</td><td>${escapeHtml(r.description)}</td><td>${Number(r.deposit)?money(r.deposit):"—"}</td><td>${Number(r.interest)?money(r.interest):"—"}</td><td class="${Number(r.withdrawal)?"negative":""}">${Number(r.withdrawal)?money(r.withdrawal):"—"}</td><td>${r.rate!=null?`${Number(r.rate).toFixed(2)}%`:"—"}</td><td><strong>${money(r.balance)}</strong></td>${canEdit?`<td><button class="danger-action" data-unit-trust-delete="${r.id}">Delete</button></td>`:""}</tr>`).join("")||`<tr><td colspan="${canEdit?8:7}">No Unit Trust movements for this period. Choose another month or record a transfer.</td></tr>`}</tbody></table></div></section>`;
+    <tbody>${rows.map(r=>`<tr class="${r.projected?"pending-receipt":""}"><td>${new Date(r.date).toLocaleDateString("en-GB")}</td><td>${escapeHtml(r.description)}${r.projected?" <small>Not posted yet</small>":""}</td><td>${Number(r.deposit)?money(r.deposit):"—"}</td><td>${Number(r.interest)?money(r.interest):"—"}</td><td class="${Number(r.withdrawal)?"negative":""}">${Number(r.withdrawal)?money(r.withdrawal):"—"}</td><td>${r.rate!=null?`${Number(r.rate).toFixed(2)}%`:"—"}</td><td><strong>${money(r.balance)}</strong></td>${canEdit?`<td>${r.projected||!r.id?"—":`<button class="danger-action" data-unit-trust-delete="${r.id}">Delete</button>`}</td>`:""}</tr>`).join("")||`<tr><td colspan="${canEdit?8:7}">No Unit Trust movements for this period. Choose another month or record a transfer.</td></tr>`}</tbody></table></div></section>`;
 }
 function financeCashbookView() {
   const f=state.finance;
@@ -2163,7 +2198,7 @@ function executiveReportPreviewContent(name) {
     columns=["Loan","Member","Product","Amount","Balance","Status"];
     rows=e.recentLoans.map(x=>[x.reference,x.member,x.product,money(x.amount),money(x.balance),x.status]);
   } else if(name==="Investment Report") {
-    metrics=[["Active projects",e.investment.running],["Current portfolio value",money(e.investment.current_value)],["Capital invested",money(e.investment.invested)],["Expected returns",money(e.investment.expected_return)],["Growth",`${e.investment.growth}%`]];
+    metrics=[["UAP account",money(e.investment.unitTrust?.balance??e.investment.current_value)],["Profit so far",money(e.investment.unitTrust?.profitThisMonth||0)],["Profit by month end",money(e.investment.unitTrust?.profitByMonthEnd||0)],["Still to accrue",money(e.investment.unitTrust?.projectedProfit||0)],["Rate",`${Number(e.investment.unitTrust?.rate||12.96).toFixed(2)}%`]];
     columns=["Project","Name","Status","Performance","Current value","Expected return"];
     rows=e.investmentProjects.map(x=>[x.reference,x.name,x.status,x.performanceStatus,money(x.currentValue),money(x.expectedReturn)]);
   } else if(name==="Welfare Report") {
@@ -2214,22 +2249,21 @@ function openExecutiveTaskModal() {
 
 function investmentDashboardView() {
   const i=state.investment;if(!i)return `<div class="executive-loading">Loading Investment workspace?</div>`;
-  const s=i.stats,cards=[
+  const s=i.stats,u=i.unitTrust;
+  const cards=u?[
+    ["UAP account",money(u.balance),"building","investment-projects","Live Old Mutual balance"],
+    ["Profit so far",money(u.profitThisMonth),"arrowUp","investment-projects","Interest posted this month"],
+    ["Profit by month end",money(u.profitByMonthEnd),"clock","investment-projects","Keeps accruing until the month ends"],
+    ["Still to accrue",money(u.projectedProfit),"reports","investment-projects","Projected interest for the rest of this month"]
+  ]:[
     ["Total Portfolio",money(s.totalPortfolio),"building","investment-portfolio","Current portfolio value"],
     ["Active Projects",s.activeProjects,"reports","investment-projects","Income-generating projects"],
     ["Under Construction",s.underConstruction,"building","investment-projects","Implementation stage"],
-    ["Completed Projects",s.completedProjects,"check","investment-projects","Closed implementation"],
-    ["Monthly Profit",money(s.monthlyProfit),"arrowUp","investment-pl","Revenue less expenses"],
-    ["Monthly Loss",money(s.monthlyLoss),"arrowDown","investment-pl","Loss-making position"],
-    ["Expected Returns",money(s.expectedReturns),"clock","investment-portfolio","Forecast returns"],
-    ["Actual Returns",money(s.actualReturns),"receipt","investment-revenue","Recorded net return"],
-    ["Pending Proposals",s.pendingProposals,"file","investment-proposals","Review pipeline"],
-    ["Available Capital",money(s.availableCapital),"wallet","investment-budgets","Unallocated project capital"],
-    ["Total Investors",s.totalInvestors,"users","investment-investors","Active funding sources"],
-    ["Portfolio ROI",`${s.roi}%`,"reports","investment-analytics","Return on invested capital"]
+    ["Completed Projects",s.completedProjects,"check","investment-projects","Closed implementation"]
   ];
-  return `<div class="finance-title-strip investment-title-strip"><div><p class="eyebrow">Investment Department</p><h2>Portfolio intelligence center</h2><p>Projects, capital, opportunities and returns?operational accounting remains in Finance.</p></div><time>${new Date().toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"})}</time></div>
-    <div class="finance-stat-grid investment-stat-grid">${cards.slice(0,8).map((card,index)=>investmentStatCard(...card,index)).join("")}</div>
+  return `<div class="finance-title-strip investment-title-strip"><div><p class="eyebrow">Investment Department</p><h2>${u?"Old Mutual unit trust":"Portfolio intelligence center"}</h2><p>${u?"Same live account Finance shows. Interest posts every day through the end of the month.":"Projects, capital, opportunities and returns. Operational accounting remains in Finance."}</p></div><time>${new Date().toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"})}</time></div>
+    <div class="exec-module-metrics" style="margin-bottom:14px">${cards.map((card,index)=>financeUnitTrustMetric(card[0],card[1],card[4],["violet","green","blue","orange"][index])).join("")}</div>
+    ${u?"":`<div class="finance-stat-grid investment-stat-grid">${cards.map((card,index)=>investmentStatCard(...card,index)).join("")}</div>`}
     <div class="investment-dashboard-grid">
       ${investmentPortfolioWidget(i)}${investmentActiveProjectsWidget(i)}${investmentTrendWidget(i)}${investmentNotificationsWidget(i)}
       ${investmentProfitLossWidget(i)}${investmentTopProjectsWidget(i)}${investmentBudgetWidget(i)}${investmentProposalWidget(i)}
@@ -2246,10 +2280,13 @@ function investmentPortfolioWidget(i) {
   let cursor=0;const stops=i.categories.map((x,index)=>{const start=cursor;cursor+=x.value/total*100;return `${["#2372d8","#d89b00","#724bdc","#ed8e09","#ec3349","#0aa0a8"][index%6]} ${start}% ${cursor}%`}).join(",");
   return `<section class="finance-panel investment-portfolio-panel"><div class="finance-panel-head"><div><h3>Investment Portfolio Overview</h3><p>Capital allocation and current value</p></div><button data-investment-page="investment-portfolio">Open portfolio &gt;</button></div>
     <div class="investment-portfolio-layout"><div class="investment-donut" style="background:radial-gradient(circle,#fff 0 52%,transparent 53%),conic-gradient(${stops||"#ddd 0 100%"})"><strong>${money(i.portfolio.portfolioValue)}</strong><span>Total portfolio</span></div><div class="investment-allocation">${i.categories.map((x,index)=>`<div><i class="${colors[index%colors.length]}"></i><span>${x.category}</span><strong>${money(x.value)} - ${Math.round(x.value/total*100)}%</strong></div>`).join("")}</div></div>
-    <div class="investment-portfolio-metrics"><span>Capital invested<strong>${money(i.portfolio.totalInvested)}</strong></span><span>Profit earned<strong>${money(i.portfolio.profit)}</strong></span><span>Growth<strong>${i.portfolio.growth}%</strong></span></div></section>`;
+    <div class="investment-portfolio-metrics"><span>UAP account<strong>${money(i.unitTrust?.balance??i.portfolio.portfolioValue)}</strong></span><span>Profit so far<strong>${money(i.unitTrust?.profitThisMonth??i.portfolio.profit)}</strong></span><span>Profit by month end<strong>${money(i.unitTrust?.profitByMonthEnd??0)}</strong></span></div></section>`;
 }
 function investmentActiveProjectsWidget(i) {
-  return `<section class="finance-panel"><div class="finance-panel-head"><div><h3>Active Projects</h3><p>Progress, budgets and profit</p></div><button data-investment-page="investment-projects">View all ></button></div><div class="investment-project-mini">${i.projects.slice(0,4).map(p=>`<article><div class="investment-project-icon ${p.category?.toLowerCase().replaceAll(" ","-")}">${icons.building}</div><div><span>${p.category||"Investment"}</span><strong>${p.name}</strong>${progress(`Completion - ${p.progress}%`,money(p.budget),p.progress,p.progress<50?"amber":"lime")}</div><div><small>Profit</small><b class="${p.profit>=0?"positive":"negative"}">${money(p.profit)}</b></div></article>`).join("")}</div></section>`;
+  return `<section class="finance-panel"><div class="finance-panel-head"><div><h3>Active Projects</h3><p>Live unit trust first, then other projects</p></div><button data-investment-page="investment-projects">View all ></button></div><div class="investment-project-mini">${i.projects.slice(0,4).map(p=>{
+    const live=Boolean(p.isUnitTrust);
+    return `<article><div class="investment-project-icon ${p.category?.toLowerCase().replaceAll(" ","-")}">${icons.building}</div><div><span>${live?"Old Mutual":(p.category||"Investment")}</span><strong>${p.name}</strong>${live?`<p>Live balance ${money(p.currentValue)}. Profit so far ${money(p.unitTrust?.profitThisMonth??p.profit)}.</p>`:progress(`Completion - ${p.progress}%`,money(p.budget),p.progress,p.progress<50?"amber":"lime")}</div><div><small>${live?"Profit so far":"Profit"}</small><b class="${p.profit>=0?"positive":"negative"}">${money(live?(p.unitTrust?.profitThisMonth??p.profit):p.profit)}</b></div></article>`;
+  }).join("")}</div></section>`;
 }
 function investmentTrendWidget(i) {
   const max=Math.max(...i.monthly.flatMap(x=>[x.revenue,x.expenses,x.profit]),1);
@@ -2836,21 +2873,31 @@ async function submitCreditsForm(event) {
   catch(error){button.disabled=false;button.textContent="Try again";toast(error.message);}
 }
 async function refreshCredits(){state.credits=await api("/api/credits/command-center");const boot=normalize(await api("/api/bootstrap"));state.loans=boot.loans;state.transactions=boot.transactions;state.members=boot.members;}
-async function openExecutiveWorkspace(code) {
+async function openExecutiveWorkspace(code,landingPage) {
   if(state.role!=="Executive Officer") return;
   const endpoints={credits:"/api/credits/command-center",finance:"/api/finance/command-center",investment:"/api/investment/command-center",welfare:"/api/welfare/command-center",legal:"/api/legal/command-center",audit:"/api/audit/command-center",supervisory:"/api/supervisory/command-center"};
   const stateKeys={credits:"credits",finance:"finance",investment:"investment",welfare:"welfare",legal:"legal",audit:"auditCenter",supervisory:"supervisory"};
   const landingPages={credits:"credits-active",finance:"dashboard",investment:"dashboard",welfare:"dashboard",legal:"dashboard",audit:"dashboard",supervisory:"dashboard"};
   if(!endpoints[code]) return toast("That department dashboard is not available.");
+  state.executiveWorkspace=code;
+  state.page=landingPage||landingPages[code]||"dashboard";
+  render();
+  window.scrollTo(0,0);
   try{
-    toast(`Opening ${code} dashboard...`);
-    state[stateKeys[code]]=await api(endpoints[code]);
-    state.executiveWorkspace=code;
-    state.page=landingPages[code]||"dashboard";
+    if(!state[stateKeys[code]])state[stateKeys[code]]=await api(endpoints[code]);
+    if(state.page==="finance-unit-trust")await loadFinanceUnitTrust(defaultUnitTrustMonth());
     render();
-    window.scrollTo(0,0);
-    toast(`${code[0].toUpperCase()+code.slice(1)} dashboard opened in Executive read-only mode.`);
   }catch(error){toast(error.message||"Could not open that department dashboard.");}
+}
+async function openExecutiveUap(){
+  if(state.role==="Finance Officer"||state.executiveWorkspace==="finance"){
+    state.page="finance-unit-trust";
+    render();
+    try{await loadFinanceUnitTrust(defaultUnitTrustMonth());render();}catch(error){toast(error.message);}
+    window.scrollTo(0,0);
+    return;
+  }
+  await openExecutiveWorkspace("finance","finance-unit-trust");
 }
 async function ensureExecutiveCreditsDesk(){
   if(state.role!=="Executive Officer"||state.page!=="executive-credits") return;
@@ -3693,14 +3740,14 @@ function bind() {
     state.page=el.dataset.page;
     if(state.page==="departments") state.departmentData=null;
     if(state.page!=="messages"&&messagePoll){clearInterval(messagePoll);messagePoll=null;}
+    render(); window.scrollTo(0,0);
     if(state.page==="messages") {
-      state.messenger=null; render();
-      try { await loadMessenger(); } catch(error) { toast(error.message); }
+      state.messenger=null;
+      try { await loadMessenger(); render(); } catch(error) { toast(error.message); }
     }
     if(state.page==="users"&&!state.users) {
-      try { const result=await api("/api/users"); applyUsersApiResult(result); } catch(error) { toast(error.message); }
+      try { const result=await api("/api/users"); applyUsersApiResult(result); render(); } catch(error) { toast(error.message); }
     }
-    render(); window.scrollTo(0,0);
   }));
   document.querySelectorAll("[data-department]").forEach(el=>el.addEventListener("click",async()=>{
     try {
@@ -3711,13 +3758,11 @@ function bind() {
   }));
   document.querySelectorAll("[data-executive-page]").forEach(el=>el.addEventListener("click",async event=>{
     event.preventDefault();const target=el.dataset.executivePage;
+    if(target==="finance-unit-trust")return openExecutiveUap();
     if(!rolePages["Executive Officer"].includes(target)&&target!=="executive-search")return toast("This Executive page is not available.");
     state.executiveWorkspace=null;state.page=target;state.execQuickOpen=false;
-    if(target==="executive-welfare"||target==="executive-finance"){
-      try{state.executive=await api("/api/executive/command-center");}catch(error){toast(error.message);}
-    }
     render();window.scrollTo(0,0);
-    if(target==="executive-credits") await ensureExecutiveCreditsDesk();
+    if(target==="executive-credits") ensureExecutiveCreditsDesk();
   }));
   document.querySelectorAll("[data-executive-workspace]").forEach(el=>el.addEventListener("click",()=>openExecutiveWorkspace(el.dataset.executiveWorkspace)));
   document.querySelectorAll("[data-executive-workspace-exit]").forEach(el=>el.addEventListener("click",exitExecutiveWorkspace));
@@ -3726,10 +3771,10 @@ function bind() {
   document.querySelectorAll("[data-executive-project]").forEach(el=>el.addEventListener("click",()=>openExecutiveProject(el.dataset.executiveProject)));
   document.querySelectorAll("[data-finance-page]").forEach(el=>el.addEventListener("click",async()=>{
     state.page=el.dataset.financePage;state.financeQuickOpen=false;
-    if(state.page==="finance-unit-trust"&&!state.unitTrust){
-      try{await loadFinanceUnitTrust(defaultUnitTrustMonth());}catch(error){toast(error.message);}
-    }
     render();window.scrollTo(0,0);
+    if(state.page==="finance-unit-trust"){
+      try{await loadFinanceUnitTrust(state.unitTrust?.month||defaultUnitTrustMonth());render();}catch(error){toast(error.message);}
+    }
   }));
   document.querySelector("[data-unit-trust-month]")?.addEventListener("change",async event=>{
     try{event.target.disabled=true;await loadFinanceUnitTrust(event.target.value||"");render();}catch(error){toast(error.message);}
@@ -3962,6 +4007,7 @@ async function handleAction(action, element) {
   if (action==="nav-back") return handleInAppBack();
   if (action==="logout") {
     try{await api("/api/auth/logout",{method:"POST"});}catch{}
+    clearIdleLock();
     try{sessionStorage.removeItem("kg40k_ui");sessionStorage.removeItem("kg40k_workspace");}catch{}
     pageHistory=[];previousNavKey=null;state.user=null;state.activeWorkspace=null;state.executiveWorkspace=null;
     return loginView();

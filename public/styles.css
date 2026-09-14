@@ -1750,3 +1750,6 @@ table th,table td{font-size:15px;line-height:1.45}.dept-panel td small,.dept-pan
 .family-eligible-check input{width:18px!important;height:18px!important;min-width:18px;padding:0!important;margin:0;flex:none;accent-color:#d89b00;border-radius:4px}
 .family-form-actions{display:flex;justify-content:flex-end;gap:9px;margin-top:4px;padding-top:12px;border-top:1px solid #e2e8f0}
 @media(max-width:560px){.family-form-grid{grid-template-columns:1fr}.family-eligible-check{margin-top:0}.family-form-actions{flex-wrap:wrap}.family-form-actions .button{flex:1 1 auto}}
+.executive-account-open{display:contents}
+button.executive-account-open{display:grid;width:100%;border:0;background:transparent;text-align:left;cursor:pointer;color:inherit;font:inherit}
+tr.pending-receipt{background:#f8fafc;color:#64748b}
