@@ -165,6 +165,12 @@ async function main() {
       );
     }
 
+    if (!dryRun) {
+      const { enforceOneMonthlyWelfareCharge } = require("../src/welfare-standing");
+      const removed = await enforceOneMonthlyWelfareCharge(client);
+      if (removed.length) console.log(`Voided ${removed.length} extra monthly welfare charge(s). A member is charged only once in a month.`);
+    }
+
     await client.query(dryRun ? "ROLLBACK" : "COMMIT");
     console.log("\n== Summary ==");
     console.log(`  Standard members (since June 2024): ${standardCount} × ${STANDARD_AMOUNT.toLocaleString()} = ${standardTotal.toLocaleString()}`);

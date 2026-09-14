@@ -20,7 +20,7 @@ const {
   allocateGuarantorPledges
 } = require("./loan-security");
 const { getRunningLoan, getSavingsTargetStatus, getGuarantorEligibility } = require("./loan-eligibility");
-const { loadWelfareStanding, loadWelfareMonth } = require("./welfare-standing");
+const { loadWelfareStanding, loadWelfareMonth, enforceOneMonthlyWelfareCharge } = require("./welfare-standing");
 
 function isMemberSavingsFinanceCategory(category="") {
   return /member\s*savings|^savings$|savings\s*deposit/i.test(String(category || "").trim());
@@ -36,9 +36,12 @@ async function applyMonthlySavingsSplit(client,{memberId,grossAmount,onDate,user
   if(!Number.isFinite(gross)||gross<=0){const error=new Error("Enter a positive savings amount");error.status=400;throw error;}
   const welfareDue=await monthlyWelfareAmount(client);
   const paidOn=onDate||new Date();
+  await client.query(`SELECT id FROM members WHERE id=$1 FOR UPDATE`,[memberId]);
   const already=(await client.query(`SELECT id FROM welfare_contributions
     WHERE member_id=$1 AND status IN ('verified','completed','recorded')
       AND amount>0
+      AND contribution_type NOT ILIKE '%standing%'
+      AND COALESCE(reference,'') NOT LIKE 'WEL-STANDING-%'
       AND (
         period=to_char($2::date,'YYYY-MM')
         OR (contribution_date>=date_trunc('month',$2::date) AND contribution_date<date_trunc('month',$2::date)+INTERVAL '1 month')
@@ -1779,6 +1782,17 @@ app.post("/api/finance/entries/:id/review",auth,requireFinance("approve"),asyncR
         WHERE finance_entry_id=$1 AND status='pending_finance_review' RETURNING member_id,reference`,[entry.id])).rows[0];
       const affected=contribution||investment||memberContribution;if(affected)await client.query("INSERT INTO notifications (member_id,title,message) VALUES ($1,$2,$3)",[affected.member_id,"Payment verification rejected",`${affected.reference} was rejected by Finance. Contact the organization or submit correct payment evidence.`]);
       return entry;
+    }
+    const pendingWelfare=(await client.query(`SELECT id, member_id, contribution_date, contribution_type FROM welfare_contributions
+      WHERE finance_entry_id=$1 AND status='pending_finance_review' LIMIT 1`,[entry.id])).rows[0];
+    if(pendingWelfare&&!/standing/i.test(pendingWelfare.contribution_type||"")){
+      const already=(await client.query(`SELECT id FROM welfare_contributions
+        WHERE member_id=$1 AND id<>$2 AND status IN ('verified','completed','recorded') AND amount>0
+          AND contribution_type NOT ILIKE '%standing%'
+          AND COALESCE(reference,'') NOT LIKE 'WEL-STANDING-%'
+          AND date_trunc('month', contribution_date)=date_trunc('month',$3::date)
+        LIMIT 1`,[pendingWelfare.member_id,pendingWelfare.id,pendingWelfare.contribution_date])).rows[0];
+      if(already){const error=new Error("Monthly welfare is already taken for this member this month");error.status=409;throw error;}
     }
     const account=(await client.query("SELECT * FROM finance_accounts WHERE id=$1 AND active=true FOR UPDATE",[Number(req.body.accountId)])).rows[0];
     if(!account){const error=new Error("Choose the reconciled Finance account");error.status=400;throw error;}
@@ -5326,7 +5340,10 @@ function withLiveUnitTrust(project,position){
     performanceStatus:Number(position.profitThisMonth)>0?"profitable":"active",unitTrust:position};
 }
 async function runScheduledMaintenance() {
-  await transaction(async client=>{await accrueUnitTrustInterest(client);});
+  await transaction(async client=>{
+    await accrueUnitTrustInterest(client);
+    await enforceOneMonthlyWelfareCharge(client);
+  });
   const graceDays=0;
   await transaction(async client=>{
     // No grace window: unpaid installments become overdue the day after the due date.
