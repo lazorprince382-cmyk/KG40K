@@ -20,7 +20,7 @@ const {
   allocateGuarantorPledges
 } = require("./loan-security");
 const { getRunningLoan, getSavingsTargetStatus, getGuarantorEligibility } = require("./loan-eligibility");
-const { loadWelfareStanding } = require("./welfare-standing");
+const { loadWelfareStanding, loadWelfareMonth } = require("./welfare-standing");
 
 function isMemberSavingsFinanceCategory(category="") {
   return /member\s*savings|^savings$|savings\s*deposit/i.test(String(category || "").trim());
@@ -882,11 +882,10 @@ app.get("/api/executive/command-center",auth,requireExecutive("view"),asyncRoute
     JOIN loan_products p ON p.id=l.product_id ORDER BY l.id DESC LIMIT 20`)).rows;
   const welfareOpeningBalance=Number((await one("SELECT value FROM settings WHERE key='welfareFundBalance'"))?.value||0);
   const welfareStanding=await loadWelfareStanding();
-  const [budgetSummary,welfareMonth,welfareLedger,auditSummary,supervisorySummary,performanceRows,monthlyRows,financeAccounts]=await Promise.all([
+  const welfareMonth=await loadWelfareMonth();
+  const [budgetSummary,welfareLedger,auditSummary,supervisorySummary,performanceRows,monthlyRows,financeAccounts]=await Promise.all([
     one(`SELECT COALESCE(SUM(allocated_amount),0)::float AS allocated,COALESCE(SUM(used_amount),0)::float AS used
       FROM finance_budgets WHERE status='approved'`),
-    one(`SELECT COALESCE(SUM(amount),0)::float AS total FROM welfare_contributions
-      WHERE contribution_date>=date_trunc('month',CURRENT_DATE)`),
     one(`SELECT
       COALESCE((SELECT SUM(amount) FROM welfare_contributions),0)::float AS contributed,
       COALESCE((SELECT SUM(p.amount) FROM welfare_payments p LEFT JOIN welfare_requests wr ON wr.id=p.request_id
@@ -1000,6 +999,7 @@ app.get("/api/executive/command-center",auth,requireExecutive("view"),asyncRoute
       current_value:investmentCurrentValue,expected_return:investmentExpectedReturn,growth:investmentGrowth,unitTrust:unitTrustPosition},
     investmentProjects:investmentProjectsLive,recentLoans,
     welfare:{...welfare.rows[0],fundBalance:welfareBalance,monthlyContributions:welfareMonth.total,
+      contributionMonthLabel:welfareMonth.label,contributionMonth:welfareMonth.period,
       collectedSince:welfareStanding.collectedSince,sinceLabel:welfareStanding.sinceLabel||"June 2024",
       membersContributing:welfareStanding.membersContributing,newMembers:welfareStanding.newMembers,
       standingMembers:welfareStanding.standingMembers,byMember:welfareStanding.byMember,
@@ -1397,22 +1397,18 @@ app.get("/api/finance/command-center",auth,requireFinance("view"),asyncRoute(asy
   };
   const monthlyWelfarePerMember=Number((await one(`SELECT value FROM settings WHERE key='monthlyWelfareContribution'`))?.value||25000);
   const monthlyCombined=Number(subscriptionPolicy?.monthlySavingsTarget||425000);
-  const welfareMonthStart=(await one(`SELECT date_trunc('month',CURRENT_DATE)::date AS start`))?.start;
-  const welfareMonthContributions=welfareMonthStart?(await query(`SELECT c.member_id AS "memberId",c.amount::float,m.full_name AS member
-      FROM welfare_contributions c JOIN members m ON m.id=c.member_id
-      WHERE c.status IN ('verified','completed')
-        AND c.contribution_date>=$1 AND c.contribution_date<($1::date+INTERVAL '1 month')`,[welfareMonthStart])).rows:[];
-  const welfareCollected=welfareMonthContributions.reduce((sum,row)=>sum+Number(row.amount||0),0);
+  const welfareMonth=await loadWelfareMonth();
+  const welfareCollected=welfareMonth.total;
   const welfareExpected=activeMemberCount*monthlyWelfarePerMember;
   const welfareProgress={
-    periodLabel:welfareMonthStart?new Date(welfareMonthStart).toLocaleDateString("en-GB",{month:"long",year:"numeric"}):"This month",
+    periodLabel:welfareMonth.label,
     perMember:monthlyWelfarePerMember,
     monthlyCombined,
     expected:welfareExpected,
     collected:welfareCollected,
     percent:welfareExpected?Math.min(100,Math.round(welfareCollected/welfareExpected*100)):0,
     activeMembers:activeMemberCount,
-    membersPaid:new Set(welfareMonthContributions.map(row=>row.memberId)).size
+    membersPaid:welfareMonth.membersPaid
   };
   const welfareStanding=await loadWelfareStanding();
   const displayBank=historicalPeriod
@@ -3172,7 +3168,8 @@ app.get("/api/welfare/command-center",auth,requireWelfare("view"),asyncRoute(asy
   const averageApproval=requestRows.filter(r=>r.reviewedAt).length?Number((requestRows.filter(r=>r.reviewedAt)
     .reduce((s,r)=>s+(new Date(r.reviewedAt)-new Date(r.createdAt))/86400000,0)/requestRows.filter(r=>r.reviewedAt).length).toFixed(1)):0;
   const categories={};for(const payment of payments.rows)categories[payment.category]=(categories[payment.category]||0)+payment.amount;
-  const contributionsMonth=verifiedContributions.filter(c=>new Date(c.contributionDate||c.createdAt).getMonth()===new Date().getMonth()&&new Date(c.contributionDate||c.createdAt).getFullYear()===new Date().getFullYear()).reduce((s,c)=>s+c.amount,0);
+  const welfareMonth=await loadWelfareMonth();
+  const contributionsMonth=welfareMonth.total;
   const assistancePaidMonth=payments.rows.filter(p=>["paid","processed"].includes(p.status)&&p.paidAt&&new Date(p.paidAt).getMonth()===new Date().getMonth()&&new Date(p.paidAt).getFullYear()===new Date().getFullYear()).reduce((s,p)=>s+p.amount,0);
   const monthly=(await query(`WITH months AS (
       SELECT generate_series(date_trunc('month',CURRENT_DATE)-INTERVAL '5 months',date_trunc('month',CURRENT_DATE),INTERVAL '1 month') AS start_date)
@@ -3190,7 +3187,8 @@ app.get("/api/welfare/command-center",auth,requireWelfare("view"),asyncRoute(asy
       upcomingEvents:activities.rows.filter(a=>new Date(a.activityDate)>new Date()).length,averageApprovalTime:averageApproval,
       remainingBalance:closingBalance,
       collectedSince:welfareStanding.collectedSince,sinceLabel:welfareStanding.sinceLabel,
-      membersContributing:welfareStanding.membersContributing},
+      membersContributing:welfareStanding.membersContributing,
+      contributionMonthLabel:welfareMonth.label,contributionMonth:welfareMonth.period},
     fund:{openingBalance,contributions:contributed,assistancePaid,otherExpenses,closingBalance,
       growth:openingBalance?Number(((closingBalance-openingBalance)/openingBalance*100).toFixed(2)):0,
       collectedSince:welfareStanding.collectedSince,sinceLabel:welfareStanding.sinceLabel,sinceDate:welfareStanding.sinceDate,

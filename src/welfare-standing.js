@@ -102,4 +102,36 @@ async function loadWelfareStanding() {
   };
 }
 
-module.exports = { loadWelfareStanding, DEFAULT_SINCE, VICENT_SINCE };
+async function loadWelfareMonth() {
+  const bounds = await one(`SELECT
+    date_trunc('month', (CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date)::date AS start,
+    (date_trunc('month', (CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date) + INTERVAL '1 month')::date AS "end",
+    to_char((CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date, 'YYYY-MM') AS period`);
+  const rows = (
+    await query(
+      `SELECT c.member_id AS "memberId", c.amount::float AS amount, m.full_name AS member
+       FROM welfare_contributions c
+       JOIN members m ON m.id = c.member_id
+       WHERE c.status IN ('verified','completed','recorded')
+         AND c.amount > 0
+         AND c.contribution_type NOT ILIKE '%standing%'
+         AND COALESCE(c.reference,'') NOT LIKE 'WEL-STANDING-%'
+         AND c.contribution_date >= $1::date
+         AND c.contribution_date < $2::date`,
+      [bounds.start, bounds.end]
+    )
+  ).rows;
+  const [year, month] = String(bounds.period || "").split("-");
+  const label = year && month
+    ? new Date(Date.UTC(Number(year), Number(month) - 1, 1)).toLocaleDateString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" })
+    : "This month";
+  return {
+    total: rows.reduce((sum, row) => sum + Number(row.amount || 0), 0),
+    label,
+    period: bounds.period,
+    rows,
+    membersPaid: new Set(rows.map((row) => row.memberId)).size,
+  };
+}
+
+module.exports = { loadWelfareStanding, loadWelfareMonth, DEFAULT_SINCE, VICENT_SINCE };

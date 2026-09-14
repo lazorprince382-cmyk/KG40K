@@ -1127,7 +1127,7 @@ function executiveDashboardView() {
       ${executiveHealthCard("Welfare","executive-welfare","users",[
         ["Since June 2024",money(e.welfare.collectedSince||0)],
         ["Members contributing",e.welfare.membersContributing||0],["New members tracked",(e.welfare.newMembers||[]).length],
-        ["Monthly contributions",money(e.welfare.monthlyContributions)]])}
+        [`${e.welfare.contributionMonthLabel||"This month"} contributions`,money(e.welfare.monthlyContributions)]])}
       ${executiveHealthCard("Audit","executive-audit","audit",[
         ["Open audit issues",e.audit.open],["Resolved issues",e.audit.resolved],["Departments under review",e.audit.departmentsUnderReview],
         ["Compliance",`${e.audit.compliance}%`]])}
@@ -1238,7 +1238,7 @@ function executiveModuleView(module) {
     const standingRows=standingList.slice(0,20).map(x=>[x.member,x.memberNumber||"",money(x.collected),escapeHtml(x.sinceLabel||"June 2024")]);
     const note=standing.note||e.welfare?.note||"Most members hold UGX 650,000 welfare since June 2024 inside personal savings. Vicent holds UGX 50,000 since July 2026. Oketcho and Baraza are excluded from this standing.";
     const open=Boolean(state.welfareStandingOpen?.executive);
-    const body=`<div class="exec-module-metrics">${executiveModuleMetric("Since June 2024",money(sinceTotal),"violet")}${executiveModuleMetric("Members on standing",standing.membersContributing||standingList.length,"blue")}${executiveModuleMetric("Pending requests",e.welfare?.pending||0,"orange")}${executiveModuleMetric("Monthly contributions",money(e.welfare?.monthlyContributions||0),"blue")}</div>
+    const body=`<div class="exec-module-metrics">${executiveModuleMetric("Since June 2024",money(sinceTotal),"violet")}${executiveModuleMetric("Members on standing",standing.membersContributing||standingList.length,"blue")}${executiveModuleMetric("Pending requests",e.welfare?.pending||0,"orange")}${executiveModuleMetric(`${e.welfare?.contributionMonthLabel||"This month"} contributions`,money(e.welfare?.monthlyContributions||0),"blue")}</div>
       ${executiveRecordTable("Welfare standing since June 2024 (15 members)",["Member","Number","Welfare","Since"],standingRows)}
       ${executiveRecordTable("New / recent members — welfare vs personal savings",["Member","Number","Joined","Welfare collected","Personal savings","Since"],newRows)}
       ${executiveRecordTable("Welfare request summary",["Reference","Member","Request","Amount","Status"],(e.welfareRequests||[]).map(x=>[x.reference,x.member,x.requestType,money(x.amount),status(x.status)]))}`;
@@ -1416,7 +1416,7 @@ function financeWelfareStandingSection(f){
       ${executiveModuleMetric("Since June 2024",money(sinceTotal),"violet")}
       ${executiveModuleMetric("Members on standing",standing.membersContributing||standingList.length,"blue")}
       ${executiveModuleMetric("Pending requests",pending,"orange")}
-      ${executiveModuleMetric("Monthly contributions",money(monthly),"blue")}
+      ${executiveModuleMetric(`${f.welfareProgress?.periodLabel||"This month"} contributions`,money(monthly),"blue")}
     </div>
     ${executiveRecordTable("Welfare standing since June 2024 (15 members)",["Member","Number","Welfare","Since"],standingRows)}
     ${executiveRecordTable("New / recent members — welfare vs personal savings",["Member","Number","Joined","Welfare collected","Personal savings","Since"],newRows)}`;
@@ -2201,7 +2201,7 @@ function executiveReportPreviewContent(name) {
     columns=["Project","Name","Status","Performance","Current value","Expected return"];
     rows=e.investmentProjects.map(x=>[x.reference,x.name,x.status,x.performanceStatus,money(x.currentValue),money(x.expectedReturn)]);
   } else if(name==="Welfare Report") {
-    metrics=[["Since June 2024",money(e.welfare.collectedSince||e.welfareStanding?.collectedSince||0)],["Monthly contributions",money(e.welfare.monthlyContributions)],["Pending requests",e.welfare.pending],["Approved requests",e.welfare.approved],["Approved assistance",money(e.welfare.approved_amount)]];
+    metrics=[["Since June 2024",money(e.welfare.collectedSince||e.welfareStanding?.collectedSince||0)],[`${e.welfare.contributionMonthLabel||"This month"} contributions`,money(e.welfare.monthlyContributions)],["Pending requests",e.welfare.pending],["Approved requests",e.welfare.approved],["Approved assistance",money(e.welfare.approved_amount)]];
     columns=["Reference","Member","Category","Amount","Status","Submitted"];
     rows=e.welfareRequests.map(x=>[x.reference,x.member,x.requestType,money(x.amount),x.status,new Date(x.createdAt).toLocaleDateString()]);
   } else if(name==="Legal Report") {

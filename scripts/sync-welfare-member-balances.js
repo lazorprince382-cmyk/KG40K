@@ -105,7 +105,6 @@ async function main() {
            AND (
              reference = $2
              OR reference LIKE 'WEL-STANDING-%'
-             OR reference = 'WEL-SEP01-DAN-25K'
              OR (COALESCE(receipt_number,'') LIKE $3)
            )`,
         [member.id, ref, `%${MARKER}%`]
@@ -138,6 +137,22 @@ async function main() {
     }
 
     if (!dryRun) {
+      const danWelfare = (await client.query(`SELECT id FROM welfare_contributions WHERE reference='WEL-SEP01-DAN-25K'`)).rows[0];
+      const danReceipt = (await client.query(`SELECT id FROM organization_finance_entries WHERE reference='FIN-SEP01-DAN-425K'`)).rows[0];
+      if (!danWelfare && danReceipt) {
+        const dan = members.find((member) => /dan/i.test(member.full_name) && /rwebingira|ssalongo/i.test(member.full_name));
+        if (dan) {
+          await client.query(
+            `INSERT INTO welfare_contributions
+              (reference, member_id, contribution_type, period, expected_amount, amount, payment_method,
+               receipt_number, status, contribution_date, recorded_by, verified_by, verified_at)
+             VALUES ('WEL-SEP01-DAN-25K',$1,'Monthly Welfare Contribution','2026-09',25000,25000,'Bank transfer',
+               '394886009-WEL','verified','2026-09-01',$2,$2,NOW())`,
+            [dan.id, actor]
+          );
+          console.log("Restored Dan's September welfare share UGX 25,000 (standing sync must not remove it)");
+        }
+      }
       await client.query(
         `INSERT INTO settings (key, value) VALUES ('welfareStandingStandardTotal', $1)
          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,

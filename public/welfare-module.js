@@ -9,7 +9,7 @@
   D.dashboards.welfare=()=>{
     const w=W(),s=w.stats,standing=w.welfareStanding||w.fund||{},cards=[
       [`Welfare since June 2024`,money(standing.collectedSince||s.collectedSince||0),"receipt","violet",`${standing.membersContributing||0} members × standing balance`,"welfare-contributions"],
-      ["Contributions This Month",money(s.contributionsMonth),"receipt","blue","Member funding","welfare-contributions"],
+      [`${s.contributionMonthLabel||"This month"} contributions`,money(s.contributionsMonth),"receipt","blue","Posted this month only, not July standing","welfare-contributions"],
       ["Assistance Paid This Month",money(s.assistancePaidMonth),"wallet","violet","Approved support","welfare-payments"],
       ["Pending Welfare Requests",s.pendingRequests,"clock","orange","Awaiting progress","welfare-requests"],
       ["Approved Requests",s.approvedRequests,"check","teal","Recorded decisions","welfare-requests"],
