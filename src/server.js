@@ -43,33 +43,57 @@ async function applyMonthlySavingsSplit(client,{memberId,grossAmount,onDate,user
       AND contribution_type NOT ILIKE '%standing%'
       AND COALESCE(reference,'') NOT LIKE 'WEL-STANDING-%'
       AND (
-        period=to_char($2::date,'YYYY-MM')
-        OR (contribution_date>=date_trunc('month',$2::date) AND contribution_date<date_trunc('month',$2::date)+INTERVAL '1 month')
+        period=to_char(($2::timestamptz AT TIME ZONE 'Africa/Kampala')::date,'YYYY-MM')
+        OR (
+          (contribution_date AT TIME ZONE 'Africa/Kampala')::date
+            >= date_trunc('month',($2::timestamptz AT TIME ZONE 'Africa/Kampala')::date)::date
+          AND (contribution_date AT TIME ZONE 'Africa/Kampala')::date
+            < (date_trunc('month',($2::timestamptz AT TIME ZONE 'Africa/Kampala')::date)+INTERVAL '1 month')::date
+        )
       )
     LIMIT 1`,[memberId,paidOn])).rows[0];
-  const welfareAmount=already?0:Math.min(welfareDue,gross);
+  let welfareAmount=already?0:Math.min(welfareDue,gross);
+  let welfareReference=null;
+  let welfareId=null;
+  let welfareAlreadyPaid=Boolean(already);
+  if(welfareAmount>0){
+    const receipt=receiptReference("WRCPT");
+    welfareReference=reference("WCON");
+    await client.query("SAVEPOINT insert_monthly_welfare");
+    try{
+      const welfare=(await client.query(`INSERT INTO welfare_contributions
+        (reference,member_id,contribution_type,period,expected_amount,amount,payment_method,receipt_number,status,
+         contribution_date,recorded_by,verified_by,verified_at,verification_comment,payment_reference)
+        VALUES ($1,$2,'Monthly Welfare Contribution',to_char(($3::timestamptz AT TIME ZONE 'Africa/Kampala')::date,'YYYY-MM'),$4,$4,$5,$6,'verified',
+          ($3::timestamptz AT TIME ZONE 'Africa/Kampala')::date,$7,$7,NOW(),$8,$9)
+        RETURNING id`,
+        [welfareReference,memberId,paidOn,welfareAmount,method||"Bank transfer",receipt,userId,
+          `Taken once this month from ${sourceRef||"member savings receipt"}`,paymentReference||null])).rows[0];
+      await client.query("RELEASE SAVEPOINT insert_monthly_welfare");
+      welfareId=welfare?.id||null;
+      await client.query(`INSERT INTO settings (key,value) VALUES ('welfareFundBalance',$1)
+        ON CONFLICT (key) DO UPDATE SET value=(COALESCE(NULLIF(settings.value,''),'0')::numeric+$2)::text, updated_at=NOW()`,
+        [String(welfareAmount),welfareAmount]);
+    }catch(error){
+      await client.query("ROLLBACK TO SAVEPOINT insert_monthly_welfare");
+      if(error.code!=="23505")throw error;
+      welfareAmount=0;
+      welfareAlreadyPaid=true;
+      welfareReference=null;
+      welfareId=null;
+    }
+  }
   const savingsAmount=Math.max(0,Math.round((gross-welfareAmount)*100)/100);
   if(savingsAmount>0){
     await client.query("UPDATE members SET savings_balance=savings_balance+$1 WHERE id=$2",[savingsAmount,memberId]);
   }
-  let welfareReference=null;
-  let welfareId=null;
-  if(welfareAmount>0){
-    const receipt=receiptReference("WRCPT");
-    welfareReference=reference("WCON");
-    const welfare=(await client.query(`INSERT INTO welfare_contributions
-      (reference,member_id,contribution_type,period,expected_amount,amount,payment_method,receipt_number,status,
-       contribution_date,recorded_by,verified_by,verified_at,verification_comment,payment_reference)
-      VALUES ($1,$2,'Monthly Welfare Contribution',to_char($3::date,'YYYY-MM'),$4,$4,$5,$6,'verified',$3::date,$7,$7,NOW(),$8,$9)
-      RETURNING id`,
-      [welfareReference,memberId,paidOn,welfareAmount,method||"Bank transfer",receipt,userId,
-        `Taken once this month from ${sourceRef||"member savings receipt"}`,paymentReference||null])).rows[0];
-    welfareId=welfare?.id||null;
-    await client.query(`INSERT INTO settings (key,value) VALUES ('welfareFundBalance',$1)
-      ON CONFLICT (key) DO UPDATE SET value=(COALESCE(NULLIF(settings.value,''),'0')::numeric+$2)::text, updated_at=NOW()`,
-      [String(welfareAmount),welfareAmount]);
-  }
-  return {welfareAmount,savingsAmount,welfareAlreadyPaid:Boolean(already),welfareReference,welfareId};
+  return {welfareAmount,savingsAmount,welfareAlreadyPaid,welfareReference,welfareId};
+}
+async function syncOrganizationBankBalanceSetting(client,accountId){
+  const row=(await client.query(`SELECT balance::float AS balance, account_code FROM finance_accounts WHERE id=$1`,[accountId])).rows[0];
+  if(!row||row.account_code!=="GL-4104")return;
+  await client.query(`INSERT INTO settings (key,value) VALUES ('organizationBankBalance',$1)
+    ON CONFLICT (key) DO UPDATE SET value=$1, updated_at=NOW()`,[String(Math.round(Number(row.balance)))]);
 }
 async function postReceiptToCentenary(client,{grossAmount,memberName,method,description,onDate,userId,category}){
   const account=(await client.query(`SELECT id,account_name FROM finance_accounts
@@ -83,7 +107,8 @@ async function postReceiptToCentenary(client,{grossAmount,memberName,method,desc
     VALUES ($1,$2,'income',$3,$4,$5,$6,$7,'completed',$8,$9::date,$10,$10,NOW(),$11)
     RETURNING id,reference,receipt_number AS "receiptNumber"`,
     [department.id,ref,category||"Member savings",description,memberName,method||"Bank transfer",grossAmount,receipt,onDate||new Date(),userId,account.id])).rows[0];
-  // Member savings are already inside the reconciled Centenary SMS balance — ledger only.
+  await client.query("UPDATE finance_accounts SET balance=balance+$1,updated_at=NOW() WHERE id=$2",[grossAmount,account.id]);
+  await syncOrganizationBankBalanceSetting(client,account.id);
   return {...inserted,accountName:account.account_name,accountId:account.id};
 }
 function welfareTakenFrom(text){
@@ -159,17 +184,14 @@ async function deleteMemberRequest(client,id){
 }
 async function reverseIncomeReceipt(client,entry){
   const effects={accountName:null,accountDeducted:0,savingsReversed:0,welfareReversed:0,savingsMatched:true};
-  const memberSavings=isMemberSavingsFinanceCategory(entry.category);
-  if(!memberSavings&&["completed","approved"].includes(entry.status)&&entry.finance_account_id){
-    const account=(await client.query("SELECT id,account_name FROM finance_accounts WHERE id=$1 FOR UPDATE",[entry.finance_account_id])).rows[0];
+  if(["completed","approved"].includes(entry.status)&&entry.finance_account_id){
+    const account=(await client.query("SELECT id,account_name,account_code FROM finance_accounts WHERE id=$1 FOR UPDATE",[entry.finance_account_id])).rows[0];
     if(account){
       await client.query("UPDATE finance_accounts SET balance=balance-$1,updated_at=NOW() WHERE id=$2",[entry.amount,account.id]);
       effects.accountName=account.account_name;
       effects.accountDeducted=Number(entry.amount);
+      if(account.account_code==="GL-4104")await syncOrganizationBankBalanceSetting(client,account.id);
     }
-  }else if(memberSavings&&entry.finance_account_id){
-    const account=(await client.query("SELECT account_name FROM finance_accounts WHERE id=$1",[entry.finance_account_id])).rows[0];
-    if(account)effects.accountName=account.account_name;
   }
   const receipt=String(entry.receipt_number||"").trim();
   const ref=String(entry.reference||"").trim();
@@ -1569,9 +1591,8 @@ app.post("/api/finance/income",auth,asyncRoute(async(req,res,next)=>{
       RETURNING id,reference,receipt_number AS "receiptNumber"`,
     [department.id,ref,savings?"Member savings":category,description,payer,paymentMethod,
       amount,receipt,String(b.supportingDocument||"").trim()||null,paidOn,req.user.id,account.id])).rows[0];
-    if(!savings){
-      await client.query("UPDATE finance_accounts SET balance=balance+$1,updated_at=NOW() WHERE id=$2",[amount,account.id]);
-    }
+    await client.query("UPDATE finance_accounts SET balance=balance+$1,updated_at=NOW() WHERE id=$2",[amount,account.id]);
+    if(account.account_code==="GL-4104")await syncOrganizationBankBalanceSetting(client,account.id);
     if(split?.savingsTxId) await client.query("UPDATE transactions SET finance_entry_id=$1, receipt_number=$2 WHERE id=$3",[inserted.id,receipt,split.savingsTxId]);
     if(split?.welfareId) await client.query("UPDATE welfare_contributions SET finance_entry_id=$1 WHERE id=$2",[inserted.id,split.welfareId]);
     return {...inserted,accountName:account.account_name,savings:Boolean(savings),split};
