@@ -1098,7 +1098,7 @@ function executiveDashboardView() {
     ["Money in loans",money(loansOut),"loans","executive-credits","Outstanding loan principal"],
     ["Total Company Funds",money(company),"reports","executive-finance","UAP + Centenary + loans"],
     ["Welfare since June 2024",money(e.welfare?.collectedSince||e.welfareStanding?.collectedSince||0),"receipt","executive-welfare",e.welfare?.sinceLabel?`Collected since ${e.welfare.sinceLabel}`:"Also inside personal savings"],
-    ["Income this month",money(s.organizationIncomeMonth||0),"arrowDown","executive-finance","Live organization receipts. Member savings are not income"],
+    ["Income this month",money(s.organizationReceiptsMonth??s.organizationIncomeMonth??0),"arrowDown","executive-finance","All Centenary receipts this month, including member savings and welfare"],
     ["Expenditure this month",money(s.organizationExpenditureMonth??s.organizationExpenditure),"arrowUp","executive-finance","Live operational payments"],
     ["Total SACCO Savings",money(s.totalSavings),"savings","executive-credits","Member savings"],
     ["Active Investments",s.activeInvestments,"reports","executive-investments","Running projects"],
@@ -1207,7 +1207,7 @@ function executiveDepartmentsView() {
   const e=state.executive;
   const modules=[
     ["executive","Executive Department","Strategy and authority","Pending approvals",e.stats.pendingApprovals,"Upcoming meetings",e.stats.upcomingMeetings,"dashboard",null],
-    ["finance","Finance Department","Budgets and finances","Income this month",money(e.stats.organizationIncomeMonth||0),"Expenses this month",money(e.stats.organizationExpenditureMonth||0),"executive-finance","finance"],
+    ["finance","Finance Department","Budgets and finances","Income this month",money(e.stats.organizationReceiptsMonth??e.stats.organizationIncomeMonth??0),"Expenses this month",money(e.stats.organizationExpenditureMonth||0),"executive-finance","finance"],
     ["credits","Credits Department (SACCO)","Savings, loans and credit","Total savings",money(e.stats.totalSavings),"Outstanding loans",money(e.stats.outstandingLoans),"executive-credits","credits"],
     ["investment","Investment Department","Old Mutual unit trust","UAP account",money(e.investment.unitTrust?.balance??e.investment.current_value),"Profit so far",money(e.investment.unitTrust?.profitThisMonth||0),"executive-investments","investment"],
     ["welfare","Welfare Department","Member welfare support","Since June 2024",money(e.welfare.collectedSince||e.welfareStanding?.collectedSince||0),"Pending requests",e.welfare.pending,"executive-welfare","welfare"],
@@ -1263,7 +1263,7 @@ function executiveFinanceSummary(e) {
     ${executiveModuleMetric("Centenary bank account",money(bank),"green")}
     ${executiveModuleMetric("Money in loans",money(loans),"blue")}
     ${executiveModuleMetric("Total Company Funds",money(company),"orange")}
-    ${executiveModuleMetric("Income this month",money(e.stats.organizationIncomeMonth??e.stats.organizationIncome),"green")}
+    ${executiveModuleMetric("Income this month",money(e.stats.organizationReceiptsMonth??e.stats.organizationIncomeMonth??e.stats.organizationIncome),"green")}
     ${executiveModuleMetric("Expenditure this month",money(e.stats.organizationExpenditureMonth??e.stats.organizationExpenditure),"red")}
     ${executiveModuleMetric("Centenary bank balance",money(bank),"blue")}
     ${executiveModuleMetric("Pending payments",money(f.pending_payments||0),"red")}
@@ -1419,7 +1419,7 @@ function financeDashboardView() {
     ["Total assets",money(s.totalAssets),"building","finance-assets","Statement assets"],
     ["Total liabilities",money(s.totalLiabilities),"file","finance-invoices","Statement liabilities"]
   ]:[
-    ["Income this month",money(s.monthlyIncome),"arrowDown","finance-income","Live organization receipts. Member savings are not income"],
+    ["Income this month",money(s.monthlyReceipts??s.monthlyIncome),"arrowDown","finance-income","All Centenary receipts this month, including welfare share"],
     ["Expenses this month",money(s.monthlyExpenses),"arrowUp","finance-expenses","Live organization payments"],
     ["Pending payment requests",String(s.pendingPaymentRequests||0),"approvals","finance-approvals","Awaiting Finance / Executive"],
     ["Centenary bank account",money(s.currentBankBalance),"wallet","finance-bank","Company bank live balance"]
@@ -1642,7 +1642,7 @@ function financeRevenueGraph(f) {
   const months=[...(f.monthly||[])].sort((a,b)=>financeMonthSortKey(a).localeCompare(financeMonthSortKey(b)));
   const max=Math.max(...months.flatMap(row=>[Number(row.income||0),Number(row.expenses||0)]),1);
   return `<section class="finance-panel finance-revenue"><div class="finance-panel-head"><div><h3>Revenue vs Expenses</h3><p>Monthly income, expenses and net position</p></div><button data-finance-page="finance-analytics">View analytics &gt;</button></div>
-    <div class="finance-summary-row"><span>Income<strong class="positive">${money(f.stats.monthlyIncome)}</strong></span><span>Expenses<strong class="negative">${money(f.stats.monthlyExpenses)}</strong></span><span>Net position<strong>${money(f.stats.monthlyIncome-f.stats.monthlyExpenses)}</strong></span></div>
+    <div class="finance-summary-row"><span>Income<strong class="positive">${money(f.stats.monthlyReceipts??f.stats.monthlyIncome)}</strong></span><span>Expenses<strong class="negative">${money(f.stats.monthlyExpenses)}</strong></span><span>Net position<strong>${money((f.stats.monthlyReceipts??f.stats.monthlyIncome)-f.stats.monthlyExpenses)}</strong></span></div>
     <div class="finance-chart">${months.length?months.map(row=>`<div><div><i class="income" style="height:${Math.max(3,(Number(row.income||0)/max)*100)}%"></i><i class="expense" style="height:${Math.max(Number(row.expenses||0)?3:0,(Number(row.expenses||0)/max)*100)}%"></i></div><span>${escapeHtml(row.month)}</span></div>`).join(""):`<div class="exec-empty">No financial history recorded yet.</div>`}</div><div class="exec-legend"><span><i class="income"></i>Income</span><span><i class="expense"></i>Expenses</span></div></section>`;
 }
 function financeBudgetWidget(f) {
@@ -1768,7 +1768,7 @@ function financeBankView() {
   const welfareLabel=f.cashPosition?.welfareMonthLabel||f.welfareProgress?.periodLabel||"This month";
   const centenaryRows=(f.entries||[]).filter(x=>x.entryType==="income"&&["completed","approved"].includes(x.status)&&/member\s*savings/i.test(x.category||"")).slice(0,12);
   return `${canEdit&&!historical?`<div class="module-actions" style="margin-bottom:14px"><button class="button primary" data-finance-modal="transfer-uap">${icons.arrowUp||icons.wallet}Transfer to UAP</button><button class="button secondary" data-finance-modal="withdraw-uap">${icons.withdraw}Withdraw from UAP</button><button class="button secondary" data-finance-page="finance-unit-trust">${icons.reports}Unit Trust movement</button></div>`:`<div class="module-actions" style="margin-bottom:14px"><button class="button secondary" data-finance-page="finance-unit-trust">${icons.reports}Unit Trust movement</button></div>`}
-  <p class="exec-report-preview-note">Welfare is not a second bank. When a member pays UGX 425,000, the whole UGX 425,000 goes onto Centenary. UGX 25,000 is marked as welfare and UGX 400,000 as savings — both already sit in this Centenary balance.</p>
+  <p class="exec-report-preview-note">Welfare is not a second bank. The live Centenary figure is reconciled to the bank SMS balance. Member receipts are logged here with welfare and savings splits; they do not change this reconciled balance until the next bank reconciliation.</p>
   <div class="exec-module-metrics" style="margin-bottom:14px">${executiveModuleMetric("Centenary bank",money(f.stats?.currentBankBalance||f.cashPosition?.bankBalance||0),"green")}${executiveModuleMetric(`${welfareLabel} welfare in Centenary`,money(welfareOnBank),"blue")}${executiveModuleMetric("UAP account",money(f.stats?.uapBalance||f.cashPosition?.uapBalance||0),"violet")}${executiveModuleMetric("Money in loans",money(f.stats?.loansOutstanding||f.cashPosition?.loansOutstanding||0),"orange")}</div>
   <div class="finance-account-grid">${accounts.map(a=>`<article><div><span>${icons[a.accountType==="bank"||a.accountCode==="GL-4500"?"building":"wallet"]}</span><div><small>${a.accountCode==="GL-4500"?"Unit Trust (UAP)":a.accountCode==="GL-4104"?"Centenary bank":(a.accountType||"account").replaceAll("_"," ")}</small><h3>${a.accountCode==="GL-4500"?"UAP account":a.accountCode==="GL-4104"?"Centenary bank account":a.accountName}</h3><p>${a.bankName||"Organization cash"} ${a.accountNumber||""}</p></div></div><strong>${money(a.balance)}</strong><small>${a.accountCode==="GL-4104"?`Includes ${welfareLabel.toLowerCase()} welfare share ${money(welfareOnBank)} from member deposits`:`Opening balance: ${money(a.openingBalance||0)} - ${a.openingBalanceDate?formatLedgerDate(a.openingBalanceDate):"Date unavailable"}`}</small><small>${historical?`Statement period: ${f.selectedFiscalLabel||f.selectedFiscalYear}`:`Last reconciled: ${a.lastReconciledAt?formatLedgerDate(a.lastReconciledAt):"Never"}`}</small><div class="finance-account-actions">${historical?`<span class="status pending">Historical statement</span>`:`${a.accountType==="bank"?`<button data-finance-reconcile="${a.id}">Reconcile</button>`:""}${a.accountCode==="GL-4500"?`<button data-finance-page="finance-unit-trust">View movement</button>`:`<button data-finance-account-edit="${a.id}">Edit</button><button class="danger-action" data-finance-account-delete="${a.id}">Delete</button>`}`}</div></article>`).join("")||`<div class="exec-empty">No funded accounts yet.</div>`}</div>
   ${historical?"":`${financeCashPositionWidget(f)}${financeDataTable("Recent Centenary member receipts",["Receipt","Date","Member","On Centenary","Split"],centenaryRows.map(x=>{const split=savingsSplitFromText(x.description||"");const welfare=split.welfare||0;const savings=Number(x.savingsAmount)>0?Number(x.savingsAmount):Math.max(0,Number(x.amount||0)-welfare);return [x.receiptNumber||x.reference,formatLedgerDate(x.transactionDate),escapeHtml(x.counterparty||"—"),money(x.amount),welfare?`Savings ${money(savings)} · welfare ${money(welfare)}`:"Full amount savings"];}))}`}`;
@@ -1893,7 +1893,7 @@ function configureFinanceIncomeAccounts(form) {
       const centenary=[...account.options].find(option=>option.dataset.accountCode==="GL-4104");
       [...account.options].forEach(option=>{option.hidden=Boolean(centenary)&&option!==centenary;option.disabled=option.hidden;});
       if(centenary)account.value=centenary.value;
-      form.querySelector("[data-account-help]").textContent="Always the Centenary bank account. The first deposit this month sends UGX 25,000 to welfare; later deposits this month are not deducted. Recorded immediately — no approval.";
+      form.querySelector("[data-account-help]").textContent="Always the Centenary bank account. The first deposit this month sends UGX 25,000 to welfare; later deposits this month are not deducted. Logged immediately — does not change the reconciled SMS balance.";
       return;
     }
     const allowed=map[method.value]||[];
@@ -1960,7 +1960,7 @@ async function deleteFinanceIncome(id){
   const label=entry.receiptNumber||entry.reference;
   const account=entry.accountName||"the receiving account";
   const message=savings
-    ?`Delete receipt ${label} for ${money(entry.amount)}? ${account} will be reduced by this receipt amount. Member savings and any welfare taken from this receipt will also be reversed.`
+    ?`Delete receipt ${label} for ${money(entry.amount)}? The reconciled Centenary balance stays unchanged. Member savings and any welfare taken from this receipt will be reversed.`
     :`Delete receipt ${label} for ${money(entry.amount)}? ${account} will be reduced by this receipt amount.`;
   if(!await confirmDialog(message))return;
   try{

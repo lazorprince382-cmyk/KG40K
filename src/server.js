@@ -83,7 +83,7 @@ async function postReceiptToCentenary(client,{grossAmount,memberName,method,desc
     VALUES ($1,$2,'income',$3,$4,$5,$6,$7,'completed',$8,$9::date,$10,$10,NOW(),$11)
     RETURNING id,reference,receipt_number AS "receiptNumber"`,
     [department.id,ref,category||"Member savings",description,memberName,method||"Bank transfer",grossAmount,receipt,onDate||new Date(),userId,account.id])).rows[0];
-  await client.query("UPDATE finance_accounts SET balance=balance+$1,updated_at=NOW() WHERE id=$2",[grossAmount,account.id]);
+  // Member savings are already inside the reconciled Centenary SMS balance — ledger only.
   return {...inserted,accountName:account.account_name,accountId:account.id};
 }
 function welfareTakenFrom(text){
@@ -159,13 +159,17 @@ async function deleteMemberRequest(client,id){
 }
 async function reverseIncomeReceipt(client,entry){
   const effects={accountName:null,accountDeducted:0,savingsReversed:0,welfareReversed:0,savingsMatched:true};
-  if(["completed","approved"].includes(entry.status)&&entry.finance_account_id){
+  const memberSavings=isMemberSavingsFinanceCategory(entry.category);
+  if(!memberSavings&&["completed","approved"].includes(entry.status)&&entry.finance_account_id){
     const account=(await client.query("SELECT id,account_name FROM finance_accounts WHERE id=$1 FOR UPDATE",[entry.finance_account_id])).rows[0];
     if(account){
       await client.query("UPDATE finance_accounts SET balance=balance-$1,updated_at=NOW() WHERE id=$2",[entry.amount,account.id]);
       effects.accountName=account.account_name;
       effects.accountDeducted=Number(entry.amount);
     }
+  }else if(memberSavings&&entry.finance_account_id){
+    const account=(await client.query("SELECT account_name FROM finance_accounts WHERE id=$1",[entry.finance_account_id])).rows[0];
+    if(account)effects.accountName=account.account_name;
   }
   const receipt=String(entry.receipt_number||"").trim();
   const ref=String(entry.reference||"").trim();
@@ -743,6 +747,10 @@ app.get("/api/executive/command-center",auth,requireExecutive("view"),asyncRoute
         AND COALESCE(category,'') !~* 'member[[:space:]]*savings|savings[[:space:]]*deposit'
         AND transaction_date>=date_trunc('month',(CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala'))::date
         AND transaction_date<(date_trunc('month',(CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala'))+INTERVAL '1 month')::date),0)::float AS income_month,
+      COALESCE(SUM(amount) FILTER (WHERE entry_type='income' AND status IN ('approved','completed')
+        AND COALESCE(payment_method,'') NOT ILIKE 'Management accounts import'
+        AND transaction_date>=date_trunc('month',(CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala'))::date
+        AND transaction_date<(date_trunc('month',(CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala'))+INTERVAL '1 month')::date),0)::float AS receipts_month,
       COALESCE(SUM(amount) FILTER (WHERE entry_type='expense' AND status IN ('approved','completed')
         AND COALESCE(payment_method,'') NOT ILIKE 'Management accounts import'),0)::float AS expenditure,
       COALESCE(SUM(amount) FILTER (WHERE entry_type='expense' AND status IN ('approved','completed')
@@ -986,6 +994,7 @@ app.get("/api/executive/command-center",auth,requireExecutive("view"),asyncRoute
     stats:{totalMembers:memberStats.rows[0].total,activeMembers:memberStats.rows[0].active,newMembers:memberStats.rows[0].new_this_month,
       totalDepartments:departments.rows.length,pendingApprovals:approvals.rows.length+pendingDocumentCount,organizationIncome:finance.income,
       organizationIncomeMonth:finance.income_month,
+      organizationReceiptsMonth:finance.receipts_month,
       organizationExpenditure:finance.expenditure,organizationExpenditureMonth:finance.expenditure_month,
       netBalance:finance.income-finance.expenditure,totalSavings:savings.rows[0].total,
       outstandingLoans:loansOutstandingLive,uapBalance,bankBalance:companyBankBalance,companyFunds,
@@ -1560,7 +1569,9 @@ app.post("/api/finance/income",auth,asyncRoute(async(req,res,next)=>{
       RETURNING id,reference,receipt_number AS "receiptNumber"`,
     [department.id,ref,savings?"Member savings":category,description,payer,paymentMethod,
       amount,receipt,String(b.supportingDocument||"").trim()||null,paidOn,req.user.id,account.id])).rows[0];
-    await client.query("UPDATE finance_accounts SET balance=balance+$1,updated_at=NOW() WHERE id=$2",[amount,account.id]);
+    if(!savings){
+      await client.query("UPDATE finance_accounts SET balance=balance+$1,updated_at=NOW() WHERE id=$2",[amount,account.id]);
+    }
     if(split?.savingsTxId) await client.query("UPDATE transactions SET finance_entry_id=$1, receipt_number=$2 WHERE id=$3",[inserted.id,receipt,split.savingsTxId]);
     if(split?.welfareId) await client.query("UPDATE welfare_contributions SET finance_entry_id=$1 WHERE id=$2",[inserted.id,split.welfareId]);
     return {...inserted,accountName:account.account_name,savings:Boolean(savings),split};
