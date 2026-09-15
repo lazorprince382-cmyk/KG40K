@@ -1345,7 +1345,11 @@ app.get("/api/finance/command-center",auth,requireFinance("view"),asyncRoute(asy
     .map(row=>({...row,utilization:row.allocated?Math.round(row.used/row.allocated*100):0}))
     .sort((a,b)=>(budgetOrder[a.departmentCode]||99)-(budgetOrder[b.departmentCode]||99));
   const incomeBySource=Object.entries(entries.rows.filter(x=>x.entryType==="income"&&["completed","approved"].includes(x.status)&&!/management accounts import/i.test(x.paymentMethod||""))
-    .reduce((totals,row)=>(totals[row.category]=(totals[row.category]||0)+row.amount,totals),{})).map(([label,amount])=>({label,amount}));
+    .reduce((totals,row)=>{
+      const label=/member\s*savings/i.test(row.category||"")?"Member savings (Centenary)":(row.category||"Other");
+      totals[label]=(totals[label]||0)+row.amount;
+      return totals;
+    },{})).map(([label,amount])=>({label,amount}));
   const expensesByCategory=Object.entries(entries.rows.filter(x=>x.entryType==="expense"&&["completed","approved"].includes(x.status)&&!/management accounts import/i.test(x.paymentMethod||""))
     .reduce((totals,row)=>(totals[row.category]=(totals[row.category]||0)+row.amount,totals),{})).map(([label,amount])=>({label,amount}));
   const monthly=(await query(`WITH months AS (
@@ -1420,7 +1424,9 @@ app.get("/api/finance/command-center",auth,requireFinance("view"),asyncRoute(asy
     percent:welfareExpected?Math.min(100,Math.round(welfareCollected/welfareExpected*100)):0,
     activeMembers:activeMemberCount,
     membersPaid:welfareMonth.membersPaid,
-    payers:welfareMonth.rows
+    payers:welfareMonth.rows,
+    heldOnCentenary:true,
+    note:"Welfare taken from member deposits stays inside the Centenary bank balance. It is not a separate bank account."
   };
   const welfareStanding=await loadWelfareStanding();
   const displayBank=historicalPeriod
@@ -1448,7 +1454,9 @@ app.get("/api/finance/command-center",auth,requireFinance("view"),asyncRoute(asy
       totalAssets:historicalPeriod?(snapshotAmount('total_assets')||0):totalAssets,
       totalLiabilities:historicalPeriod?(snapshotAmount('total_liabilities')||0):liabilities,
       annualSubscriptionsCollected:subscriptionCollected,annualSubscriptionsExpected:subscriptionExpected},
-    cashPosition:{bankBalance:liveBank,cashBalance:displayCash,uapBalance,loansOutstanding,companyFunds,pettyCash:historicalPeriod?0:petty,mobileMoney:historicalPeriod?periodAccounts.filter(a=>a.accountType==="mobile_money").reduce((s,a)=>s+a.balance,0):mobile,availableFunds:Math.max(0,(historicalPeriod?liveBank+displayCash:liquidFunds)-restricted),restrictedFunds:historicalPeriod?periodAccounts.filter(a=>a.restricted).reduce((s,a)=>s+a.balance,0):restricted},
+    cashPosition:{bankBalance:liveBank,cashBalance:displayCash,uapBalance,loansOutstanding,companyFunds,pettyCash:historicalPeriod?0:petty,mobileMoney:historicalPeriod?periodAccounts.filter(a=>a.accountType==="mobile_money").reduce((s,a)=>s+a.balance,0):mobile,availableFunds:Math.max(0,(historicalPeriod?liveBank+displayCash:liquidFunds)-restricted),restrictedFunds:historicalPeriod?periodAccounts.filter(a=>a.restricted).reduce((s,a)=>s+a.balance,0):restricted,
+      welfareOnCentenaryThisMonth:historicalPeriod?0:welfareMonth.total,
+      welfareMonthLabel:welfareMonth.label},
     financialSnapshot,accounts:periodAccounts,departments:departments.rows,budgets:budgetRows,vouchers:vouchers.rows,entries:entries.rows,
     pendingEntries:pendingFinanceEntries,invoices:invoices.rows,assets:assets.rows,
     procurements:procurements.rows,documents:documents.rows,investmentAnalyses:investmentAnalyses.rows,monthly,daily,
