@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 "use strict";
 /**
- * Record Centenary deposit 01-Sep-2026 for Dan Rwebingira Ssalongo (UGX 425,000)
+ * Record Centenary deposit 31-Aug-2026 for Dan Rwebingira Ssalongo (UGX 425,000)
  * and set monthly contribution policy: 425,000 combined (25,000 welfare + 400,000 savings).
  *
  * Member dashboards keep one 425k monthly savings target (not split).
  * Welfare + Finance dashboards track the 25k welfare portion with progress bars.
- * The 01 Sep SMS figure UGX 8,351,473 is historical. A higher live Centenary balance is left as-is.
+ * The post-deposit SMS figure UGX 8,351,473 is historical. A higher live Centenary balance is left as-is.
  * Dan's member savings is then pinned to UGX 8,900,000 without adding a further
  * credit to the finance account current balance.
  *
@@ -50,7 +50,7 @@ const DEPOSIT_TOTAL = 425000;
 const WELFARE_SHARE = 25000;
 const SAVINGS_SHARE = DEPOSIT_TOTAL - WELFARE_SHARE; // 400,000 stays on savings after the 25,000 welfare share
 const PIN_SAVINGS = 8900000; // official current savings; not posted to finance_accounts
-const TX_AT = "2026-09-01T18:20:00+03:00";
+const TX_AT = "2026-08-31T18:20:00+03:00";
 const BANK_REF = "394886009";
 const BANK_NOTE = "AGNTBANK DEP DAN/Financia";
 const MEMBER_ALIASES = ["Dan Rwebingira Ssalongo", "Rwebingira Dan Ssalongo", "Dan Rwebingira"];
@@ -83,7 +83,7 @@ async function actorId(client) {
 }
 
 async function main() {
-  console.log(dryRun ? "DRY RUN\n" : "Syncing Sep 2026 Dan 425k + monthly welfare policy\n");
+  console.log(dryRun ? "DRY RUN\n" : "Syncing Dan 425k (31 Aug 2026) + monthly welfare policy\n");
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -165,7 +165,7 @@ async function main() {
           [
             financeDept.id,
             finRef,
-            `${BANK_REF}-${BANK_NOTE} | Combined monthly UGX ${DEPOSIT_TOTAL.toLocaleString()} (UGX ${WELFARE_SHARE.toLocaleString()} welfare). SMS bal UGX ${FINAL_BALANCE.toLocaleString()}. [${MARKER}]`,
+            `${BANK_REF}-${BANK_NOTE} | Combined monthly UGX ${DEPOSIT_TOTAL.toLocaleString()} (UGX ${WELFARE_SHARE.toLocaleString()} welfare share). SMS bal UGX ${FINAL_BALANCE.toLocaleString()}. August member money — not a UAP receipt. [${MARKER}]`,
             member.full_name,
             DEPOSIT_TOTAL,
             BANK_REF,
@@ -176,7 +176,18 @@ async function main() {
         );
         console.log(`  Finance income ${finRef} recorded (balance already set to SMS figure)`);
       } else {
-        console.log(`  SKIP finance entry — ${finRef} exists`);
+        await client.query(
+          `UPDATE organization_finance_entries
+           SET transaction_date=$1::date,
+               description=$2
+           WHERE id=$3`,
+          [
+            TX_AT.slice(0, 10),
+            `${BANK_REF}-${BANK_NOTE} | Combined monthly UGX ${DEPOSIT_TOTAL.toLocaleString()} (UGX ${WELFARE_SHARE.toLocaleString()} welfare share). SMS bal UGX ${FINAL_BALANCE.toLocaleString()}. August member money — not a UAP receipt. [${MARKER}]`,
+            existingFin.id,
+          ]
+        );
+        console.log(`  Finance entry ${finRef} date set to 31/08/2026`);
       }
 
       if (!existingTx) {
@@ -198,7 +209,11 @@ async function main() {
         );
         console.log(`  Savings receipt ${txRef} recorded at UGX ${SAVINGS_SHARE.toLocaleString()} (bank receipt stays UGX ${DEPOSIT_TOTAL.toLocaleString()})`);
       } else {
-        console.log(`  SKIP savings tx — ${txRef} already recorded; existing amount left unchanged`);
+        await client.query(
+          `UPDATE transactions SET created_at=$1::timestamptz, verified_at=$1::timestamptz WHERE id=$2`,
+          [TX_AT, existingTx.id]
+        );
+        console.log(`  Savings tx ${txRef} date set to 31/08/2026`);
       }
 
       // Official current savings. Do not add the 425k on top of the pin, and do not
@@ -215,7 +230,7 @@ async function main() {
           [
             welRef,
             member.id,
-            "2026-09",
+            "2026-08",
             WELFARE_SHARE,
             BANK_REF + "-WEL",
             TX_AT.slice(0, 10),
@@ -230,7 +245,13 @@ async function main() {
         );
         console.log(`  Welfare contribution ${welRef} +${WELFARE_SHARE.toLocaleString()}`);
       } else {
-        console.log(`  SKIP welfare — ${welRef} exists`);
+        await client.query(
+          `UPDATE welfare_contributions
+           SET contribution_date=$1::date, period='2026-08'
+           WHERE id=$2`,
+          [TX_AT.slice(0, 10), existingWel.id]
+        );
+        console.log(`  Welfare ${welRef} date set to 31/08/2026 (August charge)`);
       }
     } else {
       console.log("  Would update monthly policy, reconcile Centenary, record savings + welfare");

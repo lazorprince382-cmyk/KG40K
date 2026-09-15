@@ -1259,6 +1259,9 @@ app.get("/api/finance/command-center",auth,requireFinance("view"),asyncRoute(asy
         AND transaction_date=(CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date
         AND COALESCE(payment_method,'') NOT ILIKE 'Management accounts import'
         AND COALESCE(category,'') !~* 'member[[:space:]]*savings|savings[[:space:]]*deposit'),0)::float AS income_today,
+      COALESCE(SUM(amount) FILTER (WHERE entry_type='income' AND status IN ('completed','approved')
+        AND transaction_date=(CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date
+        AND COALESCE(payment_method,'') NOT ILIKE 'Management accounts import'),0)::float AS receipts_today,
       COALESCE(SUM(amount) FILTER (WHERE entry_type='expense' AND status IN ('completed','approved')
         AND transaction_date=(CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date
         AND COALESCE(payment_method,'') NOT ILIKE 'Management accounts import'),0)::float AS expense_today,
@@ -1267,6 +1270,10 @@ app.get("/api/finance/command-center",auth,requireFinance("view"),asyncRoute(asy
         AND transaction_date<(date_trunc('month',(CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala'))+INTERVAL '1 month')::date
         AND COALESCE(payment_method,'') NOT ILIKE 'Management accounts import'
         AND COALESCE(category,'') !~* 'member[[:space:]]*savings|savings[[:space:]]*deposit'),0)::float AS income_month,
+      COALESCE(SUM(amount) FILTER (WHERE entry_type='income' AND status IN ('completed','approved')
+        AND transaction_date>=date_trunc('month',(CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala'))::date
+        AND transaction_date<(date_trunc('month',(CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala'))+INTERVAL '1 month')::date
+        AND COALESCE(payment_method,'') NOT ILIKE 'Management accounts import'),0)::float AS receipts_month,
       COALESCE(SUM(amount) FILTER (WHERE entry_type='expense' AND status IN ('completed','approved')
         AND transaction_date>=date_trunc('month',(CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala'))::date
         AND COALESCE(payment_method,'') NOT ILIKE 'Management accounts import'),0)::float AS expense_month
@@ -1430,8 +1437,10 @@ app.get("/api/finance/command-center",auth,requireFinance("view"),asyncRoute(asy
     selectedFiscalYear,selectedFiscalKey,selectedFiscalLabel,availableFiscalYears,historicalPeriod,
     stats:{currentBankBalance:liveBank,cashOnHand:displayCash,uapBalance,loansOutstanding,companyFunds,
       incomeToday:historicalPeriod?(snapshotAmount('total_income')||snapshotAmount('net_income')||0):incomeExpense.rows[0].income_today,
+      receiptsToday:historicalPeriod?(snapshotAmount('total_income')||0):incomeExpense.rows[0].receipts_today,
       expensesToday:historicalPeriod?(snapshotAmount('total_operating_expenses')||snapshotAmount('total_expenses')||0):incomeExpense.rows[0].expense_today,
       monthlyIncome:historicalPeriod?(snapshotAmount('total_income')||0):incomeExpense.rows[0].income_month,
+      monthlyReceipts:historicalPeriod?(snapshotAmount('total_income')||0):incomeExpense.rows[0].receipts_month,
       monthlyExpenses:historicalPeriod?(snapshotAmount('total_operating_expenses')||snapshotAmount('total_expenses')||0):incomeExpense.rows[0].expense_month,
       outstandingPayments:historicalPeriod?0:outstandingPayments,pendingPaymentRequests:historicalPeriod?0:outstandingVouchers.length,
       pendingFinanceEntries:pendingFinanceEntries.length,

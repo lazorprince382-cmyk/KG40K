@@ -146,8 +146,8 @@ async function main() {
             `INSERT INTO welfare_contributions
               (reference, member_id, contribution_type, period, expected_amount, amount, payment_method,
                receipt_number, status, contribution_date, recorded_by, verified_by, verified_at)
-             VALUES ('WEL-SEP01-DAN-25K',$1,'Monthly Welfare Contribution','2026-09',25000,25000,'Bank transfer',
-               '394886009-WEL','verified','2026-09-01',$2,$2,NOW())`,
+             VALUES ('WEL-SEP01-DAN-25K',$1,'Monthly Welfare Contribution','2026-08',25000,25000,'Bank transfer',
+               '394886009-WEL','verified','2026-08-31',$2,$2,NOW())`,
             [dan.id, actor]
           );
           console.log("Restored Dan's September welfare share UGX 25,000 (standing sync must not remove it)");

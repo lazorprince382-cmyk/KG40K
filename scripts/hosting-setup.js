@@ -81,6 +81,10 @@ if (!skipSync) {
     "scripts/sync-dan-savings-8900000.js",
     ...dry,
   ]);
+  run("Correct receipt dates (Dan 31/08; Sep as DD/MM)", "node", [
+    "scripts/sync-sep2026-receipt-dates.js",
+    ...dry,
+  ]);
 } else {
   console.log("\n== Sync ==\nSkipped (--skip-sync)");
 }
