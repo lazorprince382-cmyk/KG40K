@@ -216,7 +216,7 @@ module.exports = function registerMemberAccountApi({
 
   async function buildMemberCommandCenter(memberId, { viewerUserId = null } = {}) {
     const [member, transactions, loans, guarantees, investments, welfareRequests, welfareContributions,
-      meetings, documents, notifications, announcements, support] = await Promise.all([
+      welfareAssistanceHistory, meetings, documents, notifications, announcements, support] = await Promise.all([
       one(`SELECT m.id,m.member_number AS "memberNumber",m.full_name AS "fullName",m.email,CASE WHEN m.provisional THEN NULL ELSE m.phone END AS phone,CASE WHEN m.provisional THEN NULL ELSE m.national_id END AS "nationalId",
         m.occupation,m.employer,m.address,m.next_of_kin AS "nextOfKin",m.beneficiaries,m.status,m.joined_at AS "joinedAt",
         m.savings_balance::float AS savings,m.share_capital::float AS shares,m.dividends::float,br.name AS branch,
@@ -323,6 +323,13 @@ module.exports = function registerMemberAccountApi({
         receipt_number AS "receiptNumber",status,(evidence_stored_name IS NOT NULL) AS "hasEvidence",
         evidence_original_name AS "evidenceName",contribution_date AS "contributionDate"
         FROM welfare_contributions WHERE member_id=$1 ORDER BY id DESC`,[memberId]),
+      query(`SELECT p.reference, p.beneficiary_name AS beneficiary, p.amount::float, p.status,
+        p.paid_at AS "paidAt", wr.request_type AS category, wr.description
+        FROM welfare_payments p
+        JOIN welfare_requests wr ON wr.id = p.request_id
+        WHERE COALESCE(p.status, '') IN ('paid','processed')
+        ORDER BY p.paid_at DESC NULLS LAST, p.id DESC
+        LIMIT 100`),
       query(`SELECT id,reference,title,meeting_type AS "meetingType",agenda,venue,scheduled_at AS "scheduledAt",status
         FROM organization_meetings WHERE visibility_level<=1 ORDER BY scheduled_at DESC LIMIT 100`),
       query(`SELECT id,reference,document_type AS "documentType",title,version,file_name AS "fileName",updated_at AS "updatedAt",
@@ -423,7 +430,7 @@ module.exports = function registerMemberAccountApi({
     const welfareSinceLabel=welfareExcluded?null:welfareVicent?"July 2026":"June 2024";
     const welfareCardNote=welfareExcluded
       ?"Not on the welfare standing register"
-      :`Welfare since ${welfareSinceLabel}`;
+      :`Remaining welfare since ${welfareSinceLabel}`;
     return {
       member, summary: {
         savings: member.savings, totalMemberFunds: Number(member.savings) + Number(member.shares),
@@ -443,7 +450,11 @@ module.exports = function registerMemberAccountApi({
       },
       organizationStanding:{uapBalance,bankBalance,loansOutstanding,companyFunds},
       transactions: transactions.rows, loans: loans.rows, guarantees: guarantees.rows, investments: investments.rows,
-      welfare: { requests: welfareRequests.rows, contributions: welfareContributions.rows }, meetings: meetings.rows,
+      welfare: {
+        requests: welfareRequests.rows,
+        contributions: welfareContributions.rows,
+        assistanceHistory: welfareAssistanceHistory.rows
+      }, meetings: meetings.rows,
       documents: documents.rows, notifications: notifications.rows, announcements: announcements.rows, support: support.rows, recentActivity,
       financialYearProgress, pastYearProgress, closingPosition,
       loanEligibility:{

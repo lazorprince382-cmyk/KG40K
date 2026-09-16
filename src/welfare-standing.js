@@ -79,7 +79,7 @@ async function loadWelfareStanding() {
   const collectedSince = standingMembers.reduce((sum, row) => sum + Number(row.collected || 0), 0);
   const collectedAllTime = allContributing.reduce((sum, row) => sum + Number(row.collected || 0), 0);
   const newMembers = byMember.filter((row) => row.isVicent || row.isNewMember);
-  const closingBalance = openingBalance + collectedAllTime - assistancePaid;
+  const closingBalance = Math.max(0, collectedAllTime);
 
   return {
     sinceDate,
@@ -93,9 +93,9 @@ async function loadWelfareStanding() {
     membersContributing: standingMembers.length,
     assistancePaid,
     closingBalance,
-    standardMemberTarget: 650000,
+    standardMemberTarget: Number((await one(`SELECT value FROM settings WHERE key='welfareStandingAfterHistorical'`))?.value || 650000),
     note:
-      "Most members hold UGX 650,000 welfare since June 2024 inside personal savings. Vicent holds UGX 50,000 since July 2026. Oketcho and Baraza are excluded from this standing.",
+      "Member welfare standing is the remaining balance after historical burial and wedding payouts. Vicent holds UGX 50,000 since July 2026. Oketcho and Baraza are excluded. Joshua Ssewanyana appears only in assistance history.",
     byMember,
     standingMembers,
     newMembers,

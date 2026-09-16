@@ -415,9 +415,8 @@ async function enterWorkspace(workspace,{skipRender=false,preserveNavigation=fal
   state.permissions=workspace.permissions||state.permissions||[];
   if(!preserveNavigation)state.page="dashboard";
   persistUiState();
-  if(!skipRender){render();window.scrollTo(0,0);}
   await loadWorkspaceCenter(workspace.role);
-  if(!skipRender)render();
+  if(!skipRender){render();window.scrollTo(0,0);}
 }
 function workspacePickerView(workspaces,error=""){
   const cards=workspaces.map(item=>{
@@ -1236,7 +1235,7 @@ function executiveModuleView(module) {
     const newPool=standing.newMembers||e.welfare?.newMembers||[];
     const newRows=newPool.map(x=>[x.member,x.memberNumber||"",x.joinedAt?new Date(x.joinedAt).toLocaleDateString("en-GB"):"—",money(x.collected),money(x.savingsBalance||0),escapeHtml(x.sinceLabel||(x.isVicent?"July 2026":"June 2024"))]);
     const standingRows=standingList.slice(0,20).map(x=>[x.member,x.memberNumber||"",money(x.collected),escapeHtml(x.sinceLabel||"June 2024")]);
-    const note=standing.note||e.welfare?.note||"Most members hold UGX 650,000 welfare since June 2024 inside personal savings. Vicent holds UGX 50,000 since July 2026. Oketcho and Baraza are excluded from this standing.";
+    const note=standing.note||e.welfare?.note||"Member welfare standing is the remaining balance after historical burial and wedding payouts. Vicent holds UGX 50,000 since July 2026. Oketcho and Baraza are excluded.";
     const open=Boolean(state.welfareStandingOpen?.executive);
     const body=`<div class="exec-module-metrics">${executiveModuleMetric("Since June 2024",money(sinceTotal),"violet")}${executiveModuleMetric("Members on standing",standing.membersContributing||standingList.length,"blue")}${executiveModuleMetric("Pending requests",e.welfare?.pending||0,"orange")}${executiveModuleMetric(`${e.welfare?.contributionMonthLabel||"This month"} contributions`,money(e.welfare?.monthlyContributions||0),"blue","payers")}</div>
       ${executiveRecordTable("Welfare standing since June 2024 (15 members)",["Member","Number","Welfare","Since"],standingRows)}
@@ -1458,7 +1457,7 @@ function financeWelfareStandingSection(f){
   const pending=Number(f.welfareProgress?.pendingRequests??0);
   const monthly=Number(f.welfareProgress?.collected??0);
   const open=Boolean(state.welfareStandingOpen?.finance);
-  const note=standing.note||"Most members hold UGX 650,000 welfare since June 2024 inside personal savings. Vicent holds UGX 50,000 since July 2026. Oketcho and Baraza are excluded from this standing.";
+  const note=standing.note||"Member welfare standing is the remaining balance after historical burial and wedding payouts. Vicent holds UGX 50,000 since July 2026. Oketcho and Baraza are excluded.";
   const body=`<div class="exec-module-metrics" style="margin-bottom:14px">
       ${executiveModuleMetric("Since June 2024",money(sinceTotal),"violet")}
       ${executiveModuleMetric("Members on standing",standing.membersContributing||standingList.length,"blue")}
@@ -1573,8 +1572,8 @@ function financeWelfareProgressWidget(f){
     </div>
   </section>
   <section class="finance-panel finance-welfare-standing">
-    <div class="finance-panel-head"><div><h3>Welfare savings since June 2024</h3><p>${escapeHtml(standing.note||"15 members hold UGX 650,000 welfare since June 2024 inside personal savings. Vicent holds UGX 50,000 since July 2026.")}</p></div><strong>${money(standing.collectedSince||0)}</strong></div>
-    <div class="finance-subscription-meta" style="margin-bottom:12px"><span>${standing.membersContributing||0} members on standing</span><span>${money(standing.standardMemberTarget||650000)} each</span><span>Vicent since July 2026</span></div>
+    <div class="finance-panel-head"><div><h3>Welfare savings since June 2024</h3><p>${escapeHtml(standing.note||"Remaining standing after historical burial and wedding payouts. Vicent holds UGX 50,000 since July 2026.")}</p></div><strong>${money(standing.collectedSince||0)}</strong></div>
+    <div class="finance-subscription-meta" style="margin-bottom:12px"><span>${standing.membersContributing||0} members on standing</span><span>${money(standing.standardMemberTarget||0)} each</span><span>Vicent since July 2026</span></div>
     <div class="table-scroll"><table class="finance-compact-table"><thead><tr><th>New / recent member</th><th>Joined</th><th>Welfare collected</th><th>Personal savings</th><th>Since</th></tr></thead><tbody>${newRows}</tbody></table></div>
   </section>`;
 }

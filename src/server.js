@@ -3428,7 +3428,7 @@ app.get("/api/legal/command-center",auth,requireLegal("view"),asyncRoute(async(r
     query("SELECT id,code,name FROM departments WHERE active=true ORDER BY sort_order")
   ]);
   const openCases=cases.rows.filter(x=>!["resolved","closed"].includes(x.status)),resolvedCases=cases.rows.filter(x=>["resolved","closed"].includes(x.status));
-  const disciplinary=cases.rows.filter(x=>x.category.toLowerCase().includes("disciplinary"));
+  const disciplinary=cases.rows.filter(x=>String(x.category||"").toLowerCase().includes("disciplinary"));
   const contractsReview=contracts.rows.filter(x=>["draft","submitted","under_review","information_requested"].includes(x.status));
   const contractsApproved=contracts.rows.filter(x=>["approved","legal_approved","active"].includes(x.status));
   const policiesReview=policies.rows.filter(x=>["draft","under_review","amendment_required"].includes(x.status));

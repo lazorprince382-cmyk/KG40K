@@ -77,6 +77,10 @@ if (!skipSync) {
     "scripts/sync-welfare-member-balances.js",
     ...dry,
   ]);
+  run("Historical welfare expenditures (burials + weddings)", "node", [
+    "scripts/sync-welfare-historical-expenditures.js",
+    ...dry,
+  ]);
   run("Pin Dan savings to UGX 8,900,000 (finance accounts unchanged)", "node", [
     "scripts/sync-dan-savings-8900000.js",
     ...dry,
@@ -105,7 +109,8 @@ console.log("  npm run db:sync-uap-flow");
 console.log("  npm run db:clarify-uap-flow");
 console.log("  npm run db:sync-sep2026-live");
 console.log("  npm run db:sync-vicent-welfare");
-console.log("  npm run db:sync-welfare-balances");
-console.log("  npm run db:sync-live-pack");
+  console.log("  npm run db:sync-welfare-balances");
+  console.log("  npm run db:sync-welfare-history");
+  console.log("  npm run db:sync-live-pack");
 console.log("  npm run db:verify-live");
 console.log("  npm run db:export-system      # refresh dump after local data changes");

@@ -30,12 +30,24 @@ const VICENT_SAVINGS = 550000;
 const STANDARD_SINCE = "2024-06-01";
 const VICENT_SINCE = "2026-07-01";
 const MARKER = "sync-welfare-member-balances";
+const HISTORICAL_PAYOUT_TOTAL = 7000000;
 
 function isExcluded(name) {
   return /oketcho/i.test(name) || (/baraza/i.test(name) && /nakayiza|olivia/i.test(name));
 }
 function isVicent(name) {
   return /vicent|vincent/i.test(name) && /gumisiriza/i.test(name);
+}
+
+function standingTargetForMembers(count, afterHistorical) {
+  if (!afterHistorical || count <= 0) return { amountForIndex: () => STANDARD_AMOUNT, total: STANDARD_AMOUNT * count };
+  const totalAfter = STANDARD_AMOUNT * count - HISTORICAL_PAYOUT_TOTAL;
+  const base = Math.floor(totalAfter / count);
+  const rem = totalAfter - base * count;
+  return {
+    total: totalAfter,
+    amountForIndex: (index) => (index < rem ? base + 1 : base),
+  };
 }
 
 async function main() {
@@ -67,13 +79,20 @@ async function main() {
     const members = (
       await client.query(
         `SELECT id, full_name, member_number, savings_balance::float AS savings
-         FROM members WHERE deleted_at IS NULL AND status='active' ORDER BY full_name`
+         FROM members WHERE deleted_at IS NULL AND status='active' ORDER BY full_name, id`
       )
     ).rows;
+
+    const historicalApplied = Number(
+      (await client.query(`SELECT value FROM settings WHERE key='welfareHistoricalFundDeducted'`)).rows[0]?.value || 0
+    ) >= HISTORICAL_PAYOUT_TOTAL;
+    const standardMembers = members.filter((m) => !isExcluded(m.full_name) && !isVicent(m.full_name));
+    const targets = standingTargetForMembers(standardMembers.length, historicalApplied);
 
     let standardCount = 0;
     let standardTotal = 0;
     let vicentTotal = 0;
+    let standardIndex = 0;
 
     for (const member of members) {
       if (isExcluded(member.full_name)) {
@@ -82,7 +101,8 @@ async function main() {
       }
 
       const vicent = isVicent(member.full_name);
-      const amount = vicent ? VICENT_AMOUNT : STANDARD_AMOUNT;
+      const amount = vicent ? VICENT_AMOUNT : targets.amountForIndex(standardIndex);
+      if (!vicent) standardIndex += 1;
       const since = vicent ? VICENT_SINCE : STANDARD_SINCE;
       const ref = `WEL-STANDING-${member.member_number}`;
 
@@ -94,7 +114,9 @@ async function main() {
       } else {
         standardCount += 1;
         standardTotal += amount;
-        console.log(`${member.full_name}: welfare ${amount.toLocaleString()} since June 2024`);
+        console.log(
+          `${member.full_name}: welfare ${amount.toLocaleString()} since June 2024${historicalApplied ? " (after historical 7M deduction)" : ""}`
+        );
       }
 
       if (dryRun) continue;

@@ -1,6 +1,12 @@
 /* Confidential Legal case, contract, policy and compliance workspace. */
 (() => {
-  const D=window.DepartmentUi,{esc,date,badge,risk,panel,empty,table,options,modal,reload,download}=D,L=()=>state.legal;
+  const D=window.DepartmentUi,{esc,date,badge,risk,panel,empty,table,options,modal,reload,download}=D;
+  const emptyLegal={
+    stats:{activeCases:0,contractsUnderReview:0,contractsApproved:0,policiesAwaitingReview:0,disciplinaryCases:0,legalNotices:0,pendingLegalOpinions:0,complianceScore:0,courtCases:0,upcomingDeadlines:0,resolvedCases:0,legalDocuments:0,documentRecords:0},
+    cases:[],contracts:[],policies:[],complaints:[],opinions:[],compliance:[],courtMatters:[],documents:[],departments:[],deadlines:[],notifications:[],
+    access:{authorityLevel:1,canCreate:false,canEdit:false,canApprove:false}
+  };
+  const L=()=>state.legal||emptyLegal;
   const formEnd=label=>`<div class="form-actions"><button type="button" class="button secondary" data-close-modal>Cancel</button><button type="submit" class="button primary">${label}</button></div>`;
   const departments=()=>`<option value="">Organization-wide</option>${options(L().departments)}`;
   const stat=(label,value,iconName,tone,note,target)=>`<button class="legal-stat ${tone}" data-dept-target="${target}"><span>${icons[iconName]}</span><div><small>${label}</small><strong>${value}</strong><em>${note}</em></div></button>`;
