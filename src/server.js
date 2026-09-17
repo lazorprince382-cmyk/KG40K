@@ -2457,10 +2457,17 @@ app.get("/api/credits/command-center",auth,requireCredits("view"),asyncRoute(asy
     arrearsPaid:pastContributionMembers.reduce((sum,m)=>sum+m.pastYearArrearsPaid,0),
     totalPaid:pastContributionMembers.reduce((sum,m)=>sum+m.pastYearTotalPaid,0),
     variance:pastContributionMembers.reduce((sum,m)=>sum+m.pastYearVariance,0)}:null;
+  const combinedMonthlySetting=Number((await one(`SELECT value FROM settings WHERE key='monthlyCombinedContribution'`))?.value||0);
+  const welfareMonthlySetting=Number((await one(`SELECT value FROM settings WHERE key='monthlyWelfareContribution'`))?.value||25000);
+  const savingsMonthlyOnly=Number(contributionPolicy?.monthlySavingsTarget||0);
+  const displayMonthlyTarget=combinedMonthlySetting>0
+    ?combinedMonthlySetting
+    :(savingsMonthlyOnly>0?savingsMonthlyOnly+Math.max(0,welfareMonthlySetting):0);
   const contributionProgress=contributionPolicy?{
     fiscalYear:contributionPolicy.fiscalYear,monthsDue:Number(contributionPolicy.monthsDue),
-    monthlySavingsTarget:Number(contributionPolicy.monthlySavingsTarget),
-    annualSavingsTarget:Number(contributionPolicy.monthlySavingsTarget)*12,
+    monthlySavingsTarget:displayMonthlyTarget,
+    monthlySavingsOnly:savingsMonthlyOnly,
+    annualSavingsTarget:displayMonthlyTarget*12,
     annualShareTarget:Number(contributionPolicy.annualShareTarget),annualSubscriptionFee:Number(contributionPolicy.annualSubscriptionFee),
     expectedSavingsToDate:expectedPerMember*activeContributionMembers.length,
     verifiedSavings:activeContributionMembers.reduce((sum,member)=>sum+member.currentYearSavings,0),

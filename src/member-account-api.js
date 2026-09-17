@@ -359,6 +359,13 @@ module.exports = function registerMemberAccountApi({
       COALESCE(SUM(amount) FILTER (WHERE type='Share purchase' AND status='completed'),0)::float AS shares,
       COALESCE(SUM(amount) FILTER (WHERE type='Annual subscription fee' AND status='completed'),0)::float AS subscription
       FROM transactions WHERE member_id=$1 AND (target_fiscal_year=EXTRACT(YEAR FROM $3::date)::int OR (target_fiscal_year IS NULL AND created_at::date BETWEEN $2 AND $3))`,[memberId,financialYear.startsOn,financialYear.endsOn]) : { savings: 0, shares: 0, subscription: 0 };
+    const welfarePaidThisYear = financialYear ? Number((await one(`SELECT COALESCE(SUM(amount),0)::float AS amount
+      FROM welfare_contributions
+      WHERE member_id=$1 AND status IN ('verified','completed','recorded') AND amount>0
+        AND contribution_type NOT ILIKE '%standing%'
+        AND COALESCE(reference,'') NOT LIKE 'WEL-STANDING-%'
+        AND contribution_date::date BETWEEN $2 AND $3`,
+      [memberId,financialYear.startsOn,financialYear.endsOn]))?.amount || 0) : 0;
     const closingPosition = await one(`SELECT p.period_end AS "periodEnd",b.savings_balance::float AS savings,
       b.share_capital::float AS shares,b.expected_savings::float AS expected,
       b.deficit_surplus::float AS "deficitSurplus",b.proposed_dividend::float AS "proposedDividend"
@@ -372,14 +379,20 @@ module.exports = function registerMemberAccountApi({
       totalPaid: Number(closingPosition.savings) + previousArrearsPaid, expected: Number(closingPosition.expected),
       variance: Number(closingPosition.savings) + previousArrearsPaid - Number(closingPosition.expected)
     } : null;
-    const monthlyTarget = Number(financialYear?.monthlySavingsTarget || 0);
+    const savingsMonthlyTarget = Number(financialYear?.monthlySavingsTarget || 0);
+    const combinedMonthlySetting = Number((await one(`SELECT value FROM settings WHERE key='monthlyCombinedContribution'`))?.value || 0);
+    const welfareMonthlySetting = Number((await one(`SELECT value FROM settings WHERE key='monthlyWelfareContribution'`))?.value || 25000);
+    // Display bar uses the combined monthly pay (400k savings + 25k welfare) × 12 = 5,100,000.
+    const monthlyTarget = combinedMonthlySetting > 0
+      ? combinedMonthlySetting
+      : (savingsMonthlyTarget > 0 ? savingsMonthlyTarget + Math.max(0, welfareMonthlySetting) : 0);
     const pastSurplus = Math.max(0, Number(pastYearProgress?.variance || 0));
-    const coveredMonthsExact = monthlyTarget > 0 ? pastSurplus / monthlyTarget : 0;
+    const coveredMonthsExact = savingsMonthlyTarget > 0 ? pastSurplus / savingsMonthlyTarget : 0;
     const coveredMonths = Math.floor(coveredMonthsExact + 1e-9);
-    const coveredMonthsRemainder = Math.max(0, pastSurplus - (coveredMonths * monthlyTarget));
+    const coveredMonthsRemainder = Math.max(0, pastSurplus - (coveredMonths * savingsMonthlyTarget));
     const openingShareCredit = 0;
     const savingsPaidThisYear = Number(yearContributions.savings || 0);
-    const savingsTowardTarget = savingsPaidThisYear + pastSurplus;
+    const savingsTowardTarget = savingsPaidThisYear + welfarePaidThisYear + pastSurplus;
     const sharePaidThisYear = Number(yearContributions.shares || 0);
     const sharePaidTowardTarget = sharePaidThisYear;
     const subscriptionPaid = Number(yearContributions.subscription || 0);
@@ -389,9 +402,14 @@ module.exports = function registerMemberAccountApi({
     const combinedAnnualTarget = annualSavingsTarget + annualShareTarget + annualSubscriptionFee;
     const combinedAnnualPaid = Math.min(annualSavingsTarget, savingsTowardTarget) + Math.min(annualShareTarget, sharePaidTowardTarget) + Math.min(annualSubscriptionFee, subscriptionPaid);
     const financialYearProgress = financialYear ? {
-      ...financialYear, annualSavingsTarget,
+      ...financialYear,
+      monthlySavingsTarget: monthlyTarget,
+      monthlySavingsOnly: savingsMonthlyTarget,
+      monthlyWelfareIncluded: Math.max(0, monthlyTarget - savingsMonthlyTarget),
+      annualSavingsTarget,
       expectedSavingsToDate: monthlyTarget * Number(financialYear.monthsDue),
       savingsPaid: savingsPaidThisYear,
+      welfarePaidTowardTarget: welfarePaidThisYear,
       savingsTowardTarget,
       pastYearSurplusApplied: pastSurplus,
       coveredMonths,

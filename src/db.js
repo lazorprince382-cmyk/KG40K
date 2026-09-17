@@ -25,11 +25,28 @@ const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   max: 15,
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 5000
+  // Neon / hosted Postgres can sleep; allow a cold wake instead of failing login with a generic 500.
+  connectionTimeoutMillis: 30000
 });
 
-async function query(text, params = []) {
-  return pool.query(text, params);
+function isTransientDbError(error) {
+  const code = String(error?.code || "");
+  const message = String(error?.message || "").toLowerCase();
+  return code === "ETIMEDOUT" || code === "ECONNRESET" || code === "ECONNREFUSED" || code === "57P01"
+    || message.includes("connection terminated") || message.includes("connection timeout")
+    || message.includes("timeout exceeded when trying to connect");
+}
+
+async function query(text, params = [], attempt = 1) {
+  try {
+    return await pool.query(text, params);
+  } catch (error) {
+    if (attempt < 3 && isTransientDbError(error)) {
+      await new Promise((resolve) => setTimeout(resolve, attempt * 750));
+      return query(text, params, attempt + 1);
+    }
+    throw error;
+  }
 }
 
 async function one(text, params = []) {
