@@ -57,7 +57,7 @@ const rolePages = {
     "credits-charges","credits-reports","credits-analytics","credits-documents","credits-notifications","messages","settings"],
   "Legal Officer": ["dashboard","settings"],
   "Welfare Officer": ["dashboard","settings"],
-  "Executive Officer": ["dashboard","messages","members","departments","users","executive-finance","executive-credits","executive-investments","executive-welfare","executive-legal","executive-audit","executive-supervisory","executive-approvals","executive-meetings","executive-reports","executive-analytics","notifications","executive-documents","settings"],
+  "Executive Officer": ["dashboard","messages","members","departments","users","executive-finance","executive-credits","executive-investments","executive-welfare","executive-legal","executive-audit","executive-supervisory","executive-approvals","executive-meetings","executive-reports","notifications","executive-documents","settings"],
   "Supervisory Officer": ["dashboard","settings"]
 };const pageMeta = {
   dashboard: ["Organization overview", "Dashboard"], departments: ["Organization structure", "Departmental dashboards"], messages: ["Communication", "Messages"], users: ["System accounts", "System accounts"], members: ["People", "Members"], savings: ["Credits", "Savings"],
@@ -68,7 +68,7 @@ const rolePages = {
   "executive-legal":["Department summary","Legal"],"executive-audit":["Assurance","Audit"],
   "executive-supervisory":["Oversight","Supervisory"],"executive-approvals":["Executive authority","Approvals"],
   "executive-meetings":["Organization calendar","Meetings"],"executive-projects":["Strategic portfolio","Projects"],
-  "executive-reports":["Decision support","Reports"],"executive-analytics":["Organization intelligence","Analytics"],
+  "executive-reports":["Decision support","Reports"],
   notifications:["Executive alerts","Notifications"],"executive-documents":["Official records","Documents"],
   "executive-search":["Global search","Search results"],"credits-active":["Disbursed facilities","Active Loans"]
 };
@@ -661,7 +661,7 @@ function render() {
   trackNavigation();
   let [eyebrow, title] = pageMeta[state.page]||["Organization","Dashboard"];
   if(state.page==="dashboard"&&state.role==="Executive Officer"&&!state.executiveWorkspace)[eyebrow,title]=["Executive Department","Executive Command Center"];
-  if(state.page==="dashboard"&&(state.role==="Finance Officer"||state.executiveWorkspace==="finance"))[eyebrow,title]=["Finance Department","Finance Dashboard"];
+  if(state.page==="dashboard"&&(state.role==="Finance Officer"||state.executiveWorkspace==="finance"))[eyebrow,title]=["Finance","Dashboard"];
   if(state.page==="dashboard"&&(state.role==="Credits Officer"||state.executiveWorkspace==="credits"))[eyebrow,title]=["Credits Department","Credits (SACCO) Dashboard"];
   if(state.page==="dashboard"&&(state.role==="Investment Officer"||state.executiveWorkspace==="investment"))[eyebrow,title]=["Investment Department","Investment Dashboard"];
   const app = document.getElementById("app");
@@ -678,7 +678,7 @@ function render() {
             <button class="icon-button" data-action="help" title="Help">${icons.help}</button>
             <button class="icon-button" data-action="notifications" title="Notifications">${icons.bell}<span class="notification-dot"></span></button>
             ${state.role==="Executive Officer"?`<button class="icon-button exec-calendar-button" data-executive-page="executive-meetings">${icons.clock}</button><div class="exec-top-profile"><div class="avatar blue">${initials(actor())}</div><div><strong>${actor()}</strong><span>${state.executiveWorkspace?`Viewing ${state.executiveWorkspace} (read only)`:"Executive Department"}</span></div></div>`:""}
-            ${state.role==="Finance Officer"?`<div class="exec-top-profile"><div class="avatar blue">${initials(actor())}</div><div><strong>${actor()}</strong><span>Finance Department</span></div></div>`:""}
+            ${state.role==="Finance Officer"?`<div class="exec-top-profile"><div class="avatar blue">${initials(actor())}</div><div><strong>${actor()}</strong><span>Finance</span></div></div>`:""}
             ${state.role==="Credits Officer"?`<div class="exec-top-profile"><div class="avatar blue">${initials(actor())}</div><div><strong>${actor()}</strong><span>Credits Department</span></div></div>`:""}
             ${state.role==="Investment Officer"?`<div class="exec-top-profile"><div class="avatar blue">${initials(actor())}</div><div><strong>${actor()}</strong><span>Investment Department</span></div></div>`:""}
             <button class="icon-button mobile-signout" data-action="logout" title="Sign out" aria-label="Sign out">${icons.logout}</button>
@@ -789,23 +789,23 @@ function financeSidebar() {
   const sidebarPages=new Set(["dashboard","messages","finance-income","finance-expenses","finance-invoices","finance-budgets","finance-bank","finance-unit-trust","finance-assets","finance-approvals","finance-reports","finance-documents","settings"]);
   const alertFor=page=>page==="finance-approvals"&&(pending||entryPending||investmentPending)||page==="messages"&&state.unreadMessages;
   return `<aside class="sidebar executive-sidebar finance-sidebar" id="sidebar">
-    <div class="executive-brand"><div class="executive-crest finance-crest">${icons.wallet}</div><div><strong>KASANGATI G40<br>KWAGALANA</strong><span>Finance Department</span></div></div>
+    <div class="executive-brand"><div class="executive-crest finance-crest">${icons.wallet}</div><div><strong>KASANGATI G40<br>KWAGALANA</strong><span>Finance</span></div></div>
     <nav class="nav executive-nav">${pages.filter(page=>sidebarPages.has(page)).map(page=>`<button class="nav-item ${state.page===page?"active":""}" data-page="${page}">${icons[iconsByPage[page]||page]||icons.dashboard}<span>${labels[page]}</span>${navAlertDot(alertFor(page))}</button>`).join("")}</nav>
     <div class="sidebar-bottom">${state.executiveWorkspace?`<button class="executive-quick" data-executive-workspace-exit>${icons.arrowUp}<span>Back to Executive</span></button>`:`<button class="executive-quick" data-action="finance-quick">${icons.arrowUp}<span>Quick Actions</span><b>&gt;</b></button>`}
-      <div class="sidebar-user"><div class="avatar blue">${initials(actor())}</div><div><div class="user-name">${actor()}</div><div class="user-role">${state.executiveWorkspace?"Executive read-only view":"Finance Department"}</div></div></div></div>
+      <div class="sidebar-user"><div class="avatar blue">${initials(actor())}</div><div><div class="user-name">${actor()}</div><div class="user-role">${state.executiveWorkspace?"Executive read-only view":"Finance"}</div></div></div></div>
   </aside>`;
 }
 function executiveSidebar() {
   const labels={dashboard:"Dashboard",messages:"Messages",members:"Members",departments:"Departments",users:"System accounts","executive-finance":"Finance","executive-credits":"Credits (SACCO)",
     "executive-investments":"Investments","executive-welfare":"Welfare","executive-legal":"Legal","executive-audit":"Audit",
     "executive-supervisory":"Supervisory","executive-approvals":"Approvals","executive-meetings":"Meetings","executive-projects":"Projects",
-    "executive-reports":"Reports","executive-analytics":"Analytics",notifications:"Notifications","executive-documents":"Documents",settings:"Settings"};
+    "executive-reports":"Reports",notifications:"Notifications","executive-documents":"Documents",settings:"Settings"};
   const iconMap={"executive-finance":"wallet","executive-credits":"loans","executive-investments":"reports","executive-welfare":"users",
     "executive-legal":"file","executive-audit":"audit","executive-supervisory":"shield","executive-approvals":"approvals",
-    "executive-meetings":"clock","executive-projects":"building","executive-reports":"reports","executive-analytics":"reports",
+    "executive-meetings":"clock","executive-projects":"building","executive-reports":"reports",
     notifications:"bell","executive-documents":"file",users:"lock"};
   const pending=state.executive?.stats?.pendingApprovals||((state.executive?.approvals||[]).length+((state.executive?.documents||[]).filter(d=>d.status==="pending_executive").length));
-  const sidebarPages=new Set(["dashboard","messages","members","departments","users","executive-approvals","executive-meetings","executive-reports","executive-analytics","notifications","executive-documents","settings"]);
+  const sidebarPages=new Set(["dashboard","messages","members","departments","users","executive-approvals","executive-meetings","executive-reports","notifications","executive-documents","settings"]);
   const alertFor=page=>page==="executive-approvals"&&pending||page==="messages"&&state.unreadMessages||page==="notifications"&&(state.notifications||[]).some(n=>!n.readAt);
   return `<aside class="sidebar executive-sidebar" id="sidebar">
     <div class="executive-brand"><div class="executive-crest">${icons.shield}</div><div><strong>KASANGATI G40<br>KWAGALANA</strong><span>Executive Department</span></div></div>
@@ -818,7 +818,7 @@ function executiveSidebar() {
 function subtitle() {
   const copy = {
     dashboard: state.role === "Member" ? "Your membership, department, benefits and financial activity in one place." :
-      state.role==="Finance Officer"?"Overview of the organization's financial activities?not SACCO savings and loans.":
+      state.role==="Finance Officer"?"":
       state.role==="Credits Officer"?"Savings, loans, guarantors, repayments and portfolio recovery in one SACCO workspace.":
       state.role==="Investment Officer"?"Projects, opportunities, capital, returns and portfolio performance in one business-intelligence workspace.":
       state.role==="Executive Officer"?"Strategic organization health, performance, alerts and major decisions.":"A central view of verified organization information and work requiring attention.",
@@ -844,7 +844,6 @@ function subtitle() {
     "executive-meetings":"Board, committee, welfare, investment and training events.",
     "executive-projects":"Organization investment projects and expected returns.",
     "executive-reports":"Download strategic reports across every organizational arm.",
-    "executive-analytics":"Trends for membership, revenue, expenses, loans, savings and performance.",
     notifications:"Urgent alerts and important organization updates.",
     "executive-documents":"Constitution, policies, minutes, contracts and formal reports.",
     "executive-search":"Search results across members, loans, departments, projects, cases and records."
@@ -857,7 +856,7 @@ function subtitle() {
     "finance-invoices":"Monitor supplier invoices, due dates and liabilities.",
     "finance-budgets":"Allocate departmental budgets and act on utilization alerts.",
     "finance-bank":"Organization bank, cash, Unit Trust (UAP) and reconciliation summary.",
-    "finance-unit-trust":"Live Old Mutual / UAP balance, daily interest and bank transfers — view or download the movement report.",
+    "finance-unit-trust":"Old Mutual / UAP balance, daily interest and bank transfers — view or download the movement report.",
     "finance-cashbook":"A chronological ledger of organization income and expenditure.",
     "finance-assets":"Land, buildings, vehicles, furniture, computers and equipment.",
     "finance-procurement":"Track purchasing from departmental request through payment and closure.",
@@ -1015,7 +1014,6 @@ function view() {
   if(state.page==="executive-meetings") return executiveMeetingsView();
   if(state.page==="executive-projects") return executiveProjectsView();
   if(state.page==="executive-reports") return executiveReportsView();
-  if(state.page==="executive-analytics") return executiveAnalyticsView();
   if(state.page==="executive-documents") return executiveDocumentsView();
   if(state.page==="notifications") return executiveNotificationsView();
   if(state.page==="executive-search") return executiveSearchView();
@@ -1081,13 +1079,14 @@ function departmentSpecialView(data) {
 }
 
 function executiveDashboardView() {
-  const e=state.executive;if(!e)return `<div class="executive-loading">Loading executive command center?</div>`;
+  const e=state.executive;if(!e)return `<div class="executive-loading">Loading organization overview…</div>`;
   const s=e.stats;
   const org=e.organizationStanding||{};
   const uap=Number(s.uapBalance??org.uapBalance??0);
   const bank=Number(s.bankBalance??org.bankBalance??0);
   const loansOut=Number(s.outstandingLoans??org.loansOutstanding??0);
   const company=Number(s.companyFunds??org.companyFunds??(uap+bank+loansOut));
+  const welfareGross=Number(e.welfareStanding?.collectedSince||e.welfareStanding?.grossCollectedSince||e.welfare?.collectedSince||e.welfare?.grossCollectedSince||0);
   const cards=[
     ["Total Members",s.totalMembers,"members","members","Verified membership"],
     ["Active Members",s.activeMembers,"members","members","Currently active"],
@@ -1096,7 +1095,7 @@ function executiveDashboardView() {
     ["Centenary bank account",money(bank),"wallet","executive-finance","Company bank live balance"],
     ["Money in loans",money(loansOut),"loans","executive-credits","Outstanding loan principal"],
     ["Total Company Funds",money(company),"reports","executive-finance","UAP + Centenary + loans"],
-    ["Welfare since June 2024",money(e.welfare?.collectedSince||e.welfareStanding?.collectedSince||0),"receipt","executive-welfare",e.welfare?.sinceLabel?`Collected since ${e.welfare.sinceLabel}`:"Also inside personal savings"],
+    ["Welfare since June 2024",money(welfareGross),"receipt","executive-welfare","Standing collected since June 2024"],
     ["Income this month",money(s.organizationReceiptsMonth??s.organizationIncomeMonth??0),"arrowDown","executive-finance","All Centenary receipts this month, including member savings and welfare"],
     ["Expenditure this month",money(s.organizationExpenditureMonth??s.organizationExpenditure),"arrowUp","executive-finance","Live operational payments"],
     ["Total SACCO Savings",money(s.totalSavings),"savings","executive-credits","Member savings"],
@@ -1106,13 +1105,11 @@ function executiveDashboardView() {
     ["Supervisory Recommendations",s.supervisoryRecommendations,"shield","executive-supervisory","Pending follow-up"],
     ["Upcoming Meetings",s.upcomingMeetings,"clock","executive-meetings","Organization calendar"]
   ];
-  const yearOptions=(e.availableFiscalYears||[]).map(y=>`<option value="${y.year}" ${Number(y.year)===Number(e.selectedFiscalYear)?"selected":""}>${escapeHtml(y.label||`FY ending ${y.year}`)}</option>`).join("");
-  return `<div class="exec-welcome"><div><p class="eyebrow">Executive command center</p><h2>Good ${new Date().getHours()<12?"morning":new Date().getHours()<17?"afternoon":"evening"}, ${actor().split(" ")[0]}</h2><p>${e.historicalPeriod?`Viewing the supplied FY ${e.selectedFiscalYear} closing records.`:"Live positions match Finance — UAP, Centenary, loans, and welfare savings since June 2024."}</p></div><div class="dashboard-year-control"><label>Financial year</label><select data-executive-fy>${yearOptions}</select><span class="exec-live"><i></i>${e.historicalPeriod?"Historical statement":"Live organization overview"}</span></div></div>
+  return `<div class="exec-welcome"><div><h2>Good ${new Date().getHours()<12?"morning":new Date().getHours()<17?"afternoon":"evening"}, ${actor().split(" ")[0]}</h2><p>Positions match Finance — UAP, Centenary, loans, and welfare savings since June 2024.</p></div><div class="dashboard-year-control"><label>Financial year</label><strong class="exec-fy-static">FY 26/27</strong><span class="exec-live"><i></i>Organization Overview</span></div></div>
     <div class="exec-stat-grid">${cards.slice(0,9).map((c,i)=>executiveStatCard(...c,i)).join("")}</div>
     <div class="exec-command-grid">
       ${executiveApprovalWidget(e.approvals.slice(0,5))}
       ${executiveActivityWidget(e.activities.slice(0,7))}
-      ${executiveFinancialWidget(e)}
     </div>
     <div class="exec-health-grid">
       ${executiveHealthCard("Loan overview","executive-credits","loans",[
@@ -1123,10 +1120,6 @@ function executiveDashboardView() {
         ["Profit so far",money(e.investment.unitTrust?.profitThisMonth||0)],
         ["Profit by month end",money(e.investment.unitTrust?.profitByMonthEnd||0)],
         ["Still to accrue",money(e.investment.unitTrust?.projectedProfit||0)]])}
-      ${executiveHealthCard("Welfare","executive-welfare","users",[
-        ["Since June 2024",money(e.welfare.collectedSince||0)],
-        ["Members contributing",e.welfare.membersContributing||0],["New members tracked",(e.welfare.newMembers||[]).length],
-        [`${e.welfare.contributionMonthLabel||"This month"} contributions`,money(e.welfare.monthlyContributions)]])}
       ${executiveHealthCard("Audit","executive-audit","audit",[
         ["Open audit issues",e.audit.open],["Resolved issues",e.audit.resolved],["Departments under review",e.audit.departmentsUnderReview],
         ["Compliance",`${e.audit.compliance}%`]])}
@@ -1209,7 +1202,7 @@ function executiveDepartmentsView() {
     ["finance","Finance Department","Budgets and finances","Income this month",money(e.stats.organizationReceiptsMonth??e.stats.organizationIncomeMonth??0),"Expenses this month",money(e.stats.organizationExpenditureMonth||0),"executive-finance","finance"],
     ["credits","Credits Department (SACCO)","Savings, loans and credit","Total savings",money(e.stats.totalSavings),"Outstanding loans",money(e.stats.outstandingLoans),"executive-credits","credits"],
     ["investment","Investment Department","Old Mutual unit trust","UAP account",money(e.investment.unitTrust?.balance??e.investment.current_value),"Profit so far",money(e.investment.unitTrust?.profitThisMonth||0),"executive-investments","investment"],
-    ["welfare","Welfare Department","Member welfare support","Since June 2024",money(e.welfare.collectedSince||e.welfareStanding?.collectedSince||0),"Pending requests",e.welfare.pending,"executive-welfare","welfare"],
+    ["welfare","Welfare Department","Member welfare support","Since June 2024",money(e.welfareStanding?.collectedSince||e.welfareStanding?.grossCollectedSince||e.welfare?.collectedSince||0),"Members on standing",e.welfareStanding?.membersContributing||e.welfare?.membersContributing||0,"executive-welfare","welfare"],
     ["legal","Legal Department","Contracts and compliance","Active cases",e.legal.open_cases,"Contracts under review",e.legal.contracts,"executive-legal","legal"],
     ["audit","Audit Department","Financial integrity","Open audit issues",e.audit.open,"Resolved issues",e.audit.resolved,"executive-audit","audit"],
     ["supervisory","Supervisory Department","Oversight and accountability","Pending follow-ups",e.supervisory.followups,"Recommendations",e.supervisory.recommendations,"executive-supervisory","supervisory"]
@@ -1230,18 +1223,27 @@ function executiveModuleView(module) {
   if(module==="welfare") {
     const standing=e.welfareStanding||e.welfare||{};
     const pool=standing.standingMembers||standing.byMember||e.welfare?.standingMembers||e.welfare?.byMember||[];
-    const standingList=pool.filter(x=>!x.excluded&&!x.isVicent&&Number(x.collected)>0);
-    const sinceTotal=Number(standing.collectedSince||e.welfare?.collectedSince||0)||standingList.reduce((sum,x)=>sum+Number(x.collected||0),0);
+    const standingList=pool.filter(x=>!x.excluded&&!x.isVicent&&Number(x.currentBalance||x.collected)>0);
+    const sinceTotal=Number(standing.collectedSince||standing.grossCollectedSince||e.welfare?.collectedSince||0)
+      ||standingList.reduce((sum,x)=>sum+Number(x.currentBalance||x.collected||0),0);
+    const assistancePaid=Number(standing.assistancePaid||standing.historicalAssistancePaid||e.welfare?.assistancePaid||0)
+      ||(e.welfareRequests||[]).filter(x=>["closed","paid","processed","approved"].includes(String(x.status||"").toLowerCase()))
+        .reduce((sum,x)=>sum+Number(x.amount||0),0);
+    const currentStanding=Number(standing.currentStandingAfterAssistance);
+    const currentTotal=Number.isFinite(currentStanding)&&currentStanding>=0
+      ?currentStanding
+      :Math.max(0,sinceTotal-assistancePaid);
+    const pending=Number(e.welfare?.pending||e.welfareProgress?.pendingRequests||0);
     const newPool=standing.newMembers||e.welfare?.newMembers||[];
-    const newRows=newPool.map(x=>[x.member,x.memberNumber||"",x.joinedAt?new Date(x.joinedAt).toLocaleDateString("en-GB"):"—",money(x.collected),money(x.savingsBalance||0),escapeHtml(x.sinceLabel||(x.isVicent?"July 2026":"June 2024"))]);
-    const standingRows=standingList.slice(0,20).map(x=>[x.member,x.memberNumber||"",money(x.collected),escapeHtml(x.sinceLabel||"June 2024")]);
-    const note=standing.note||e.welfare?.note||"Member welfare standing is the remaining balance after historical burial and wedding payouts. Vicent holds UGX 50,000 since July 2026. Oketcho and Baraza are excluded.";
+    const newRows=newPool.map(x=>[x.member,x.memberNumber||"",x.joinedAt?new Date(x.joinedAt).toLocaleDateString("en-GB"):"—",money(x.contributedSince||x.currentBalance||x.collected||0),money(x.savingsBalance||0),escapeHtml(x.sinceLabel||(x.isVicent?"July 2026":"June 2024"))]);
+    const standingRows=standingList.slice(0,20).map(x=>[x.member,x.memberNumber||"",money(x.contributedSince||x.collected),escapeHtml(x.sinceLabel||"June 2024")]);
+    const note=standing.note||e.welfare?.note||"Welfare standing since June 2024. Summary view — operational entry remains with the responsible department.";
     const open=Boolean(state.welfareStandingOpen?.executive);
-    const body=`<div class="exec-module-metrics">${executiveModuleMetric("Since June 2024",money(sinceTotal),"violet")}${executiveModuleMetric("Members on standing",standing.membersContributing||standingList.length,"blue")}${executiveModuleMetric("Pending requests",e.welfare?.pending||0,"orange")}${executiveModuleMetric(`${e.welfare?.contributionMonthLabel||"This month"} contributions`,money(e.welfare?.monthlyContributions||0),"blue","payers")}</div>
-      ${executiveRecordTable("Welfare standing since June 2024 (15 members)",["Member","Number","Welfare","Since"],standingRows)}
-      ${executiveRecordTable("New / recent members — welfare vs personal savings",["Member","Number","Joined","Welfare collected","Personal savings","Since"],newRows)}
-      ${executiveRecordTable("Welfare request summary",["Reference","Member","Request","Amount","Status"],(e.welfareRequests||[]).map(x=>[x.reference,x.member,x.requestType,money(x.amount),status(x.status)]))}`;
-    return welfareStandingReveal("executive","Welfare standing",note,body,open);
+    const body=`<div class="exec-module-metrics">${executiveModuleMetric("Since June 2024",money(sinceTotal),"violet")}${executiveModuleMetric("Current welfare standing",money(currentTotal),"green")}${executiveModuleMetric("Members on standing",standing.membersContributing||standingList.length,"blue")}${executiveModuleMetric("Pending requests",pending,"orange")}</div>
+      ${executiveRecordTable(`Welfare standing since June 2024 (${standing.membersContributing||standingList.length} members)`,["Member","Number","Welfare","Since"],standingRows)}
+      ${executiveRecordTable("New / recent members — welfare vs personal savings",["Member","Number","Joined","Welfare","Personal savings","Since"],newRows)}
+      ${executiveRecordTable("Welfare assistance history",["Reference","Member","Request","Amount","Status"],(e.welfareRequests||[]).map(x=>[x.reference,x.member,x.requestType,money(x.amount),status(x.status)]))}`;
+    return welfareStandingReveal("executive","Welfare overview",note,body,open);
   }
   if(["legal","audit","supervisory"].includes(module)) {
     const rows=e.governance.filter(x=>module==="legal"?x.departmentCode==="legal":x.departmentCode==="supervisory"&&(module==="audit"?x.recordType==="audit":true));
@@ -1273,7 +1275,7 @@ function executiveFinanceSummary(e) {
   </section>${executiveFinancialWidget(e)}${executiveRecordTable("Major finance entries",["Reference","Category","Description","Amount","Status"],e.financeEntries.filter(x=>!/management accounts import/i.test(x.paymentMethod||"")).map(x=>[x.reference,x.category,x.description,money(x.amount),status(x.status)]))}`;
 }
 function executiveModuleMetric(label,value,color,action) {
-  const hint=action==="payers"?"Tap to see who paid":"Executive summary";
+  const hint=action==="payers"?"Tap to see who paid":"Summary";
   if(action==="payers")return `<button type="button" class="exec-module-metric ${color} is-action" data-welfare-month-payers="1"><small>${label}</small><strong>${value}</strong><span>${hint}</span></button>`;
   return `<div class="exec-module-metric ${color}"><small>${label}</small><strong>${value}</strong><span>${hint}</span></div>`;
 }
@@ -1411,91 +1413,95 @@ function financeDashboardView() {
   const f=state.finance;if(!f)return `<div class="executive-loading">Loading Finance workspace?</div>`;
   const s=f.stats;
   const historical=f.historicalPeriod;
-  // Operational cards only — live UAP/bank/loans live in the positions strip above (not report links).
   const cards=historical?[
-    ["Cash & bank at period end",money(s.currentBankBalance),"wallet","finance-bank",`Statement ${escapeHtml(f.selectedFiscalLabel||("FY "+f.selectedFiscalYear))}`],
-    ["UAP account",money(s.uapBalance||0),"building","finance-unit-trust","Old Mutual unit trust"],
-    ["Total assets",money(s.totalAssets),"building","finance-assets","Statement assets"],
-    ["Total liabilities",money(s.totalLiabilities),"file","finance-invoices","Statement liabilities"]
+    ["Cash & bank at period end",money(s.currentBankBalance),"wallet","finance-bank",""],
+    ["UAP account",money(s.uapBalance||0),"building","finance-unit-trust",""],
+    ["Total assets",money(s.totalAssets),"building","finance-assets",""],
+    ["Total liabilities",money(s.totalLiabilities),"file","finance-invoices",""]
   ]:[
-    ["Income this month",money(s.monthlyReceipts??s.monthlyIncome),"arrowDown","finance-income","All Centenary receipts this month, including welfare share"],
-    ["Expenses this month",money(s.monthlyExpenses),"arrowUp","finance-expenses","Live organization payments"],
-    ["Pending payment requests",String(s.pendingPaymentRequests||0),"approvals","finance-approvals","Awaiting Finance / Executive"],
-    ["Centenary bank account",money(s.currentBankBalance),"wallet","finance-bank","Company bank live balance"]
+    ["Income this month",money(s.monthlyReceipts??s.monthlyIncome),"arrowDown","finance-income",""],
+    ["Expenses this month",money(s.monthlyExpenses),"arrowUp","finance-expenses",""],
+    ["Pending payment requests",String(s.pendingPaymentRequests||0),"approvals","finance-approvals",""],
+    ["Centenary bank account",money(s.currentBankBalance),"wallet","finance-bank",""]
   ];
-  const yearOptions=(f.availableFiscalYears||[]).map(y=>{
+  const liveYears=(f.availableFiscalYears||[]).filter(y=>String(y.mode||"live")==="live"||!/FY ended/i.test(String(y.label||"")));
+  const yearOptions=(liveYears.length?liveYears:[{key:f.selectedFiscalKey||"live:2027",label:"FY 26/27",year:2027,mode:"live"}]).map(y=>{
     const value=y.key||y.year;
     const selected=(f.selectedFiscalKey||String(f.selectedFiscalYear))===String(value)?"selected":"";
-    return `<option value="${escapeHtml(String(value))}" ${selected}>${escapeHtml(y.label||`FY ending ${y.year}`)}</option>`;
+    const label=/26\/27|2026\/27|2027/i.test(String(y.label||""))?"FY 26/27":(y.label||"FY 26/27");
+    return `<option value="${escapeHtml(String(value))}" ${selected}>${escapeHtml(label)}</option>`;
   }).join("");
-  return `<div class="finance-title-strip"><div><p class="eyebrow">Finance Department</p><h2>Financial control center</h2><p>Organization money only - SACCO savings and loans remain in Credits.</p></div><div class="dashboard-year-control"><label>Financial year</label><select data-finance-fy>${yearOptions}</select></div></div>
+  const hour=new Date().getHours();
+  const greeting=hour<12?"morning":hour<17?"afternoon":"evening";
+  const firstName=escapeHtml((actor()||"there").split(" ")[0]);
+  return `<div class="finance-title-strip finance-welcome-strip"><div><h2>Good ${greeting}, ${firstName}</h2></div><div class="dashboard-year-control"><label>Financial year</label><select data-finance-fy>${yearOptions}</select></div></div>
     ${financeHistoricalSnapshot(f)}
-    <div class="finance-period-heading"><div><strong>${historical?"Statement period accounts":"Current operations"}</strong><span>${historical?`Balances and lines from ${escapeHtml(f.selectedFiscalLabel||("FY "+f.selectedFiscalYear))}`:"Live receipts, payments and registered cash accounts for the current period"}</span></div><small>${new Date().toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"})}</small></div>
     <div class="finance-stat-grid finance-current-grid">${cards.map((card,index)=>financeStatCard(...card,index)).join("")}</div>
     ${financeSavingsApprovalQueue(f)}
     ${financePendingEntriesWidget(f)}
     ${financeSubscriptionProgressWidget(f)}
     ${financeWelfareStandingSection(f)}
     <div class="finance-dashboard-grid">
-      ${financeRevenueGraph(f)}
       ${financeApprovalWidget(f)}
-      ${financeCashPositionWidget(f)}
       ${financeIncomeWidget(f)}
       ${financeExpenseWidget(f)}
     </div>
-    <div class="finance-lower-grid">${financeRecentTransactionsWidget(f)}${financeNotificationsWidget(f)}</div>
+    <div class="finance-lower-grid finance-lower-notifications">${financeNotificationsWidget(f)}${financeCashPositionWidget(f)}</div>
     ${financeQuickPanel()}`;
 }
 function financeWelfareStandingSection(f){
   const standing=f.welfareStanding||{};
   const pool=standing.standingMembers||standing.byMember||[];
-  const standingList=pool.filter(x=>!x.excluded&&!x.isVicent&&Number(x.collected)>0);
-  const sinceTotal=Number(standing.collectedSince||0)||standingList.reduce((sum,x)=>sum+Number(x.collected||0),0);
+  const standingList=pool.filter(x=>!x.excluded&&!x.isVicent&&Number(x.currentBalance||x.collected)>0);
+  const sinceTotal=Number(standing.collectedSince||standing.grossCollectedSince||0)||standingList.reduce((sum,x)=>sum+Number(x.currentBalance||x.collected||0),0);
+  const assistancePaid=Number(standing.assistancePaid||standing.historicalAssistancePaid||0);
+  const currentStanding=Number(standing.currentStandingAfterAssistance);
+  const currentTotal=Number.isFinite(currentStanding)&&currentStanding>=0
+    ?currentStanding
+    :Math.max(0,sinceTotal-assistancePaid);
   const newPool=standing.newMembers||[];
-  const standingRows=standingList.slice(0,20).map(x=>[x.member,x.memberNumber||"",money(x.collected),escapeHtml(x.sinceLabel||"June 2024")]);
-  const newRows=newPool.map(x=>[x.member,x.memberNumber||"",x.joinedAt?new Date(x.joinedAt).toLocaleDateString("en-GB"):"—",money(x.collected),money(x.savingsBalance||0),escapeHtml(x.sinceLabel||"July 2026")]);
+  const standingRows=standingList.slice(0,20).map(x=>[x.member,x.memberNumber||"",money(x.contributedSince||x.collected),escapeHtml(x.sinceLabel||"June 2024")]);
+  const newRows=newPool.map(x=>[x.member,x.memberNumber||"",x.joinedAt?new Date(x.joinedAt).toLocaleDateString("en-GB"):"—",money(x.contributedSince||x.currentBalance||x.collected||0),money(x.savingsBalance||0),escapeHtml(x.sinceLabel||"July 2026")]);
   const pending=Number(f.welfareProgress?.pendingRequests??0);
-  const monthly=Number(f.welfareProgress?.collected??0);
   const open=Boolean(state.welfareStandingOpen?.finance);
-  const note=standing.note||"Member welfare standing is the remaining balance after historical burial and wedding payouts. Vicent holds UGX 50,000 since July 2026. Oketcho and Baraza are excluded.";
+  const note=standing.note||"";
   const body=`<div class="exec-module-metrics" style="margin-bottom:14px">
       ${executiveModuleMetric("Since June 2024",money(sinceTotal),"violet")}
+      ${executiveModuleMetric("Current welfare standing",money(currentTotal),"green")}
       ${executiveModuleMetric("Members on standing",standing.membersContributing||standingList.length,"blue")}
       ${executiveModuleMetric("Pending requests",pending,"orange")}
-      ${executiveModuleMetric(`${f.welfareProgress?.periodLabel||"This month"} contributions`,money(monthly),"blue","payers")}
     </div>
-    ${executiveRecordTable("Welfare standing since June 2024 (15 members)",["Member","Number","Welfare","Since"],standingRows)}
-    ${executiveRecordTable("New / recent members — welfare vs personal savings",["Member","Number","Joined","Welfare collected","Personal savings","Since"],newRows)}`;
-  return welfareStandingReveal("finance","Welfare standing",note,body,open);
+    ${executiveRecordTable(`Welfare standing since June 2024 (${standing.membersContributing||standingList.length} members)`,["Member","Number","Welfare","Since"],standingRows)}
+    ${executiveRecordTable("New / recent members — welfare vs personal savings",["Member","Number","Joined","Welfare","Personal savings","Since"],newRows)}`;
+  return welfareStandingReveal("finance","Welfare overview",note,body,open);
 }
 function welfareStandingReveal(key,title,subtitle,body,open){
   return `<section class="welfare-standing-reveal${open?" open":""}">
     <button type="button" class="welfare-standing-toggle${open?" open":""}" data-welfare-standing-toggle="${escapeHtml(key)}" aria-expanded="${open?"true":"false"}">
       <span>${icons.shield||icons.users}</span>
-      <div><strong>${escapeHtml(title)}</strong><small>${escapeHtml(subtitle)}</small></div>
+      <div><strong>${escapeHtml(title)}</strong>${subtitle?`<small>${escapeHtml(subtitle)}</small>`:""}</div>
       <em>${open?"Hide":"Show"}</em>
     </button>
     ${open?`<div class="welfare-standing-panel" data-welfare-standing-panel="${escapeHtml(key)}">${body}</div>`:""}
   </section>`;
 }
 function financeHistoricalSnapshot(f) {
-  // Live company positions — not imported FY draft statements.
   const s=f.stats||{},org=f.organizationStanding||{};
   const uap=Number(s.uapBalance??org.uapBalance??0);
   const bank=Number(s.currentBankBalance??org.bankBalance??0);
   const loans=Number(s.loansOutstanding??org.loansOutstanding??0);
   const total=Number(s.companyFunds??org.companyFunds??(uap+bank+loans));
   const cards=[
-    ["UAP account",uap,"building","finance-unit-trust","Old Mutual unit trust live balance"],
-    ["Centenary bank account",bank,"wallet","finance-bank","Includes welfare share from member deposits"],
-    ["Money in loans",loans,"loans","finance-bank","Outstanding loan principal (company funds)"],
-    ["Total Company Funds",total,"reports","finance-bank","UAP + Centenary + loans"]
+    ["UAP account",uap,"building","finance-unit-trust",""],
+    ["Centenary bank account",bank,"wallet","finance-bank",""],
+    ["Money in loans",loans,"loans","finance-bank",""],
+    ["Total Company Funds",total,"reports","finance-bank",""]
   ];
-  return `<section class="finance-snapshot-block"><div class="finance-period-heading"><div><strong>Live company positions</strong><span>Current money at UAP, at the company bank, and in loans — click a card to open its source</span></div><div class="head-actions"><button class="button secondary small" data-finance-page="finance-unit-trust">${icons.reports}Unit Trust</button><button class="button secondary small" data-finance-page="finance-bank">${icons.building}Bank accounts</button></div></div><div class="finance-snapshot-grid">${cards.map(([label,value,icon,target,note],index)=>`<button class="finance-snapshot-card" data-finance-page="${target}"><span class="${["blue","green","violet","orange"][index]}">${icons[icon]||icons.file}</span><div><small>${label}</small><strong>${money(value)}</strong><em>${note}</em></div></button>`).join("")}</div></section>`;
+  return `<section class="finance-snapshot-block"><div class="finance-period-heading"><div><strong>Company positions</strong></div><div class="head-actions"><button class="button secondary small" data-finance-page="finance-unit-trust">${icons.reports}Unit Trust</button><button class="button secondary small" data-finance-page="finance-bank">${icons.building}Bank accounts</button></div></div><div class="finance-snapshot-grid">${cards.map(([label,value,icon,target,note],index)=>`<button class="finance-snapshot-card" data-finance-page="${target}"><span class="${["blue","green","violet","orange"][index]}">${icons[icon]||icons.file}</span><div><small>${label}</small><strong>${money(value)}</strong>${note?`<em>${note}</em>`:""}</div></button>`).join("")}</div></section>`;
 }
 function financeStatCard(label,value,icon,target,note,index) {
   const colors=["blue","green","violet","red","teal","purple","orange","red","blue","green","violet","orange"];
-  return `<button class="finance-stat-card" data-finance-page="${target}"><span class="${colors[index]}">${icons[icon]}</span><div><small>${label}</small><strong>${value}</strong><em>${note}</em></div><b>View details ></b></button>`;
+  return `<button class="finance-stat-card" data-finance-page="${target}"><span class="${colors[index]}">${icons[icon]}</span><div><small>${label}</small><strong>${value}</strong>${note?`<em>${note}</em>`:""}</div><b>View details ></b></button>`;
 }
 function financeCanApproveSavings(f=state.finance){
   return f?.access?.canApproveSavings!==false&&state.role!=="Auditor"&&state.user?.role!=="Auditor";
@@ -1655,7 +1661,7 @@ function financeApprovalActions(v,compact=false) {
 }
 function financeApprovalWidget(f) {
   const items=f.vouchers.filter(v=>v.status==="finance_review").slice(0,5);
-  return `<section class="finance-panel finance-approvals-panel"><div class="finance-panel-head"><div><h3>Payment Approvals</h3><p>Routine finance review queue</p></div><button data-finance-page="finance-approvals">View all ></button></div>
+  return `<section class="finance-panel finance-approvals-panel"><div class="finance-panel-head"><div><h3>Payment Approvals</h3></div><button data-finance-page="finance-approvals">View all ></button></div>
     <div class="finance-approval-list">${items.map(item=>`<div><span>${icons.file}</span><div><strong>${item.voucherNumber}</strong><small>${item.supplier} - ${item.category}</small></div><b>${money(item.amount)}</b>${financeApprovalActions(item,true)}</div>`).join("")||`<div class="exec-empty">No vouchers await Finance review.</div>`}</div></section>`;
 }
 function financeCashPositionWidget(f) {
@@ -1668,33 +1674,33 @@ function financeCashPositionWidget(f) {
     ["Total company funds",c.companyFunds||((Number(c.bankBalance||0)+Number(c.uapBalance||0)+Number(c.loansOutstanding||0)))],
     ["Available bank/cash",c.availableFunds]
   ];
-  return `<section class="finance-panel finance-cash-strip"><div class="finance-panel-head"><div><h3>Company funds position</h3><p>Bank, Unit Trust (UAP) and loans outstanding</p></div><button data-finance-page="finance-unit-trust">Unit Trust ></button></div>
+  return `<section class="finance-panel finance-cash-strip"><div class="finance-panel-head"><div><h3>Company funds position</h3></div><button data-finance-page="finance-unit-trust">Unit Trust ></button></div>
     <div class="finance-position-grid finance-position-strip">${items.map(([label,value])=>`<div><span>${label}</span><strong>${money(value)}</strong></div>`).join("")}</div>
     ${progress("Available liquidity",`${liquidity}%`,liquidity,"lime")}</section>`;
 }
 function financeIncomeWidget(f) {
   const sources=[...(f.incomeBySource||[])].sort((a,b)=>Number(b.amount||0)-Number(a.amount||0));
   const max=Math.max(...sources.map(x=>Number(x.amount||0)),1);
-  return `<section class="finance-panel finance-income-panel"><div class="finance-panel-head"><div><h3>Income by Source</h3><p>Receipts posted in the Finance ledger</p></div><button data-finance-page="finance-income">Income ledger ></button></div>
+  return `<section class="finance-panel finance-income-panel"><div class="finance-panel-head"><div><h3>Income by Source</h3></div><button data-finance-page="finance-income">Income ledger ></button></div>
     <div class="finance-category-list">${sources.length?sources.map(x=>`<div><span title="${escapeHtml(x.label)}">${escapeHtml(x.label)}</span><i><b style="width:${Number(x.amount||0)/max*100}%"></b></i><strong>${money(x.amount)}</strong></div>`).join(""):`<div class="exec-empty">No income posted yet.</div>`}</div></section>`;
 }
 function financeExpenseWidget(f) {
   const cats=[...(f.expensesByCategory||[])].sort((a,b)=>Number(b.amount||0)-Number(a.amount||0));
   const max=Math.max(...cats.map(x=>Number(x.amount||0)),1);
-  return `<section class="finance-panel finance-expense-panel"><div class="finance-panel-head"><div><h3>Expenses by Category</h3><p>Where organization funds are spent</p></div><button data-finance-page="finance-expenses">Expense ledger ></button></div>
+  return `<section class="finance-panel finance-expense-panel"><div class="finance-panel-head"><div><h3>Expenses by Category</h3></div><button data-finance-page="finance-expenses">Expense ledger ></button></div>
     <div class="finance-category-list expenses">${cats.length?cats.map(x=>`<div><span title="${escapeHtml(x.label)}">${escapeHtml(x.label)}</span><i><b style="width:${Number(x.amount||0)/max*100}%"></b></i><strong>${money(x.amount)}</strong></div>`).join(""):`<div class="exec-empty">No expenses posted yet.</div>`}</div></section>`;
 }
 function financeRecentTransactionsWidget(f) {
   const rows=(f.entries||[]).slice(0,8);
-  return `<section class="finance-panel finance-recent-panel"><div class="finance-panel-head"><div><h3>Recent Transactions</h3><p>Latest receipts, payments and journal records</p></div><button data-finance-page="finance-cashbook">View all ></button></div>
+  return `<section class="finance-panel finance-recent-panel"><div class="finance-panel-head"><div><h3>Recent Transactions</h3></div><button data-finance-page="finance-cashbook">View all ></button></div>
     <div class="table-scroll"><table class="finance-compact-table"><thead><tr><th>Date</th><th>Type</th><th>Description</th><th>Category</th><th>Amount</th><th>Status</th></tr></thead><tbody>${rows.length?rows.map(x=>`<tr><td>${formatLedgerDate(x.transactionDate)}</td><td>${status(x.entryType==="income"?"receipt":x.entryType==="transfer"?"transfer":"payment")}</td><td title="${escapeHtml(x.description||"")}"><span class="finance-desc-clip">${financeShortText(x.description,64)}</span></td><td>${escapeHtml(x.category||"—")}</td><td class="cell-main">${money(x.amount)}</td><td>${status(x.status)}</td></tr>`).join(""):`<tr><td colspan="6"><div class="exec-empty">No transactions yet.</div></td></tr>`}</tbody></table></div></section>`;
 }
 function financeDepartmentSpendingWidget(f) {
-  return `<section class="finance-panel"><div class="finance-panel-head"><div><h3>Department Spending</h3><p>Utilization and overspending alerts</p></div><button data-finance-page="finance-budgets">Budgets &gt;</button></div><div class="finance-spending-list">${[...f.budgets].sort((a,b)=>b.used-a.used).map(b=>`<div><div><span>${b.department}</span><strong>${money(b.used)}</strong></div><div class="exec-track"><i class="${b.utilization>=100?"low":b.utilization>=80?"watch":""}" style="width:${Math.min(100,b.utilization)}%"></i></div><small>${b.utilization}% of ${money(b.allocated)}</small></div>`).join("")}</div></section>`;
+  return `<section class="finance-panel"><div class="finance-panel-head"><div><h3>Department Spending</h3></div><button data-finance-page="finance-budgets">Budgets &gt;</button></div><div class="finance-spending-list">${[...f.budgets].sort((a,b)=>b.used-a.used).map(b=>`<div><div><span>${b.department}</span><strong>${money(b.used)}</strong></div><div class="exec-track"><i class="${b.utilization>=100?"low":b.utilization>=80?"watch":""}" style="width:${Math.min(100,b.utilization)}%"></i></div><small>${b.utilization}% of ${money(b.allocated)}</small></div>`).join("")}</div></section>`;
 }
 function financeNotificationsWidget(f) {
   const notes=f.notifications||[];
-  return `<section class="finance-panel finance-notes-panel"><div class="finance-panel-head"><div><h3>Notifications</h3><p>Financial alerts requiring attention</p></div></div><div class="finance-notifications">${notes.length?notes.map(n=>`<div class="${n.level}"><span>${n.level==="success"?icons.check:icons.info}</span><strong>${escapeHtml(n.title)}</strong><time>${relativeTime(n.createdAt||n.time)}</time></div>`).join(""):`<div class="exec-empty">No finance alerts right now.</div>`}</div></section>`;
+  return `<section class="finance-panel finance-notes-panel"><div class="finance-panel-head"><div><h3>Notifications</h3></div></div><div class="finance-notifications">${notes.length?notes.map(n=>`<div class="${n.level}"><span>${n.level==="success"?icons.check:icons.info}</span><strong>${escapeHtml(n.title)}</strong><time>${relativeTime(n.createdAt||n.time)}</time></div>`).join(""):`<div class="exec-empty">No finance alerts right now.</div>`}</div></section>`;
 }
 function financeQuickPanel() {
   return `<div class="exec-floating"><button class="exec-fab finance-fab" data-action="finance-quick">${icons.plus}<span>Quick Actions</span></button>${state.financeQuickOpen?`<div class="exec-quick-menu">
@@ -4106,14 +4112,15 @@ async function handleAction(action, element) {
 }
 
 async function deleteOrganizationDocument(id,title="this document") {
-  const confirmed=await confirmDialog(`Delete "${title}" from active documents? The record and audit history will be retained securely for recovery.`);
+  const confirmed=await confirmDialog(`Delete "${title}" from active documents? Everyone will stop seeing it immediately. The record remains in audit history for recovery.`);
   if(!confirmed)return;
   try {
     await api(`/api/documents/${id}`,{method:"DELETE"});
+    closeDocumentViewer();
     if(state.role==="Executive Officer")state.executive=await api("/api/executive/command-center");
     else if(state.role==="Legal Officer")state.legal=await api("/api/legal/command-center");
     else await refreshData();
-    render();toast("Document deleted from active records.");
+    render();toast("Document deleted. It is no longer visible to anyone.");
   } catch(error) { toast(error.message); }
 }
 
@@ -4170,22 +4177,33 @@ function openModal(type) {
 }
 function closeModal() { document.getElementById("modal-backdrop")?.remove(); }
 function closeDocumentViewer(){ document.querySelector(".document-viewer-backdrop")?.remove(); }
+function canManageOrganizationDocuments(){
+  return ["Legal Officer","Executive Officer","System Admin"].includes(state.role)
+    ||Boolean(state.legal?.access?.canEdit||state.legal?.access?.canCreate);
+}
 function openDocumentViewer(link) {
   const href=link.getAttribute("href")||"";
   if(!/^\/api\/documents\/\d+\/view$/.test(href))return;
-  const row=link.closest("tr"),card=link.closest("article,.exec-document-row");
-  const title=(row?.querySelector("td:nth-child(2)")?.childNodes?.[0]?.textContent||card?.querySelector("h3,strong")?.textContent||"Organization document").trim();
+  const row=link.closest("tr,article,.exec-document-row,.legal-document-card");
+  const title=(row?.querySelector("td:nth-child(2)")?.childNodes?.[0]?.textContent
+    ||row?.querySelector("h3,strong")?.textContent
+    ||"Organization document").trim();
   const downloadHref=href.replace(/\/view$/,"/download");
-  openSecureContentViewer(href.replace(/\/view$/,"/content"),title,{downloadHref,replaceModal:true});
+  const documentId=href.match(/\/api\/documents\/(\d+)\/view/)?.[1]||"";
+  openSecureContentViewer(href.replace(/\/view$/,"/content"),title,{downloadHref,replaceModal:true,documentId,documentTitle:title});
 }
-function openSecureContentViewer(contentHref,title,{downloadHref=null,replaceModal=false}={}) {
+function openSecureContentViewer(contentHref,title,{downloadHref=null,replaceModal=false,documentId="",documentTitle=""}={}) {
   if(!contentHref)return;
   if(replaceModal)closeModal();
   closeDocumentViewer();
   const safeTitle=escapeHtml(title||"Document");
   const dl=downloadHref?`<a class="button secondary" href="${downloadHref}" download>${icons.download}Download</a>`:`<a class="button secondary" href="${contentHref}" target="_blank" rel="noopener">${icons.download}Open / Download</a>`;
-  document.body.insertAdjacentHTML("beforeend",`<div class="modal-backdrop document-viewer-backdrop" id="document-viewer-backdrop"><div class="modal document-viewer-modal" role="dialog" aria-modal="true" aria-labelledby="document-viewer-title"><div class="modal-head"><div><h2 id="document-viewer-title">${safeTitle}</h2><p>In-app document preview</p></div><button class="modal-close" data-document-viewer-close aria-label="Close preview">${icons.x}</button></div><div class="document-viewer-frame" aria-live="polite"><div class="document-viewer-loading"><span></span><strong>Loading document…</strong></div></div><div class="document-viewer-actions"><span>${icons.shield} Viewing stays inside the system</span>${dl}<button class="button primary" data-document-viewer-close>Close</button></div></div></div>`);
+  const del=documentId&&canManageOrganizationDocuments()
+    ?`<button class="button secondary document-viewer-delete" data-viewer-delete-document="${escapeHtml(documentId)}" data-document-title="${escapeHtml(documentTitle||title||"this document")}">${icons.trash}Delete</button>`
+    :"";
+  document.body.insertAdjacentHTML("beforeend",`<div class="modal-backdrop document-viewer-backdrop" id="document-viewer-backdrop"><div class="modal document-viewer-modal" role="dialog" aria-modal="true" aria-labelledby="document-viewer-title"><div class="modal-head"><div><h2 id="document-viewer-title">${safeTitle}</h2><p>In-app document preview</p></div><button class="modal-close" data-document-viewer-close aria-label="Close preview">${icons.x}</button></div><div class="document-viewer-frame" aria-live="polite"><div class="document-viewer-loading"><span></span><strong>Loading document…</strong></div></div><div class="document-viewer-actions"><span>${icons.shield} Viewing stays inside the system</span>${dl}${del}<button class="button primary" data-document-viewer-close>Close</button></div></div></div>`);
   document.querySelectorAll("[data-document-viewer-close]").forEach(button=>button.addEventListener("click",closeDocumentViewer));
+  document.querySelectorAll("[data-viewer-delete-document]").forEach(button=>button.addEventListener("click",()=>deleteOrganizationDocument(button.dataset.viewerDeleteDocument,button.dataset.documentTitle)));
   document.getElementById("document-viewer-backdrop")?.addEventListener("click",event=>{if(event.target.id==="document-viewer-backdrop")closeDocumentViewer();});
   renderSecurePreview(contentHref,title||"Document");
 }
@@ -4193,7 +4211,13 @@ function renderDocumentPreview(href,title) { return renderSecurePreview(href.rep
 async function renderSecurePreview(contentHref,title) {
   const host=document.querySelector(".document-viewer-frame");if(!host)return;
   try {
-    const response=await fetch(contentHref,{credentials:"same-origin"});if(!response.ok)throw new Error(`Preview failed (${response.status})`);
+    const response=await fetch(contentHref,{credentials:"same-origin"});
+    if(!response.ok){
+      let detail="";
+      try{detail=(await response.json()).error||"";}catch(_){/* ignore */}
+      if(response.status===410)throw new Error(detail||"This file is missing from storage. Re-upload it from Legal documents.");
+      throw new Error(detail||`Preview failed (${response.status})`);
+    }
     const type=String(response.headers.get("x-document-mime-type")||response.headers.get("content-type")||"").split(";")[0].toLowerCase();
     if(type==="application/pdf") {
       const pdfjs=await import("/vendor/pdfjs/pdf.min.mjs?v=28");

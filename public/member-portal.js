@@ -15,7 +15,7 @@
   const readOnlyMember=()=>Boolean(state.memberOversight||state.memberCenter?.readOnly);
   const canActOnMember=()=>!readOnlyMember()||(state.memberOversight&&["Executive Officer","Credits Officer","System Admin"].includes(state.role));
   const gridTable=(heads,rows)=>`<div class="table-scroll"><table><thead><tr>${heads.map(x=>`<th>${x}</th>`).join("")}</tr></thead><tbody>${rows||`<tr><td colspan="${heads.length}"><div class="member-empty">No records yet.</div></td></tr>`}</tbody></table></div>`;
-  const metric=(name,value,icon,target,sub="")=>`<button class="member-summary-card" data-member-page="${target}"><span>${icons[icon]}</span><div><small>${name}</small><strong>${value}</strong><em>${sub}</em></div></button>`;
+  const metric=(name,value,icon,target,sub="")=>`<button class="member-summary-card" data-member-page="${target}"><span>${icons[icon]}</span><div><small>${name}</small><strong>${value}</strong>${sub?`<em>${sub}</em>`:""}</div></button>`;
   const panel=(title,sub,body)=>`<section class="card member-panel"><div class="card-head"><div><h2 class="card-title">${title}</h2><p class="card-subtitle">${sub}</p></div></div>${body}</section>`;
   const targetLine=(label,paid,target,options={})=>{const p=Number(paid),t=Number(target),percent=t?Math.min(100,Math.round(p/t*100)):0,variance=p-t,surplusLabel=options.surplusLabel||"Ahead by";let statusClass="met",statusText="Target met";if(variance<-0.005){statusClass="behind";statusText=`Short by ${money(Math.abs(variance))}`;}else if(variance>0.005){statusClass="ahead";statusText=`${surplusLabel} ${money(variance)}`;}const barTone=statusClass==="met"?"met":statusClass;return `<div class="member-target-line ${statusClass}"><div><strong>${label}</strong><span>${money(paid)} paid of ${money(t)}</span></div><b>${percent}%</b><i class="${barTone}"><em style="width:${percent}%"></em></i><small class="${statusClass}">${statusText}</small></div>`;};
   function currentContributionBody(){
@@ -53,6 +53,52 @@
     return `<p class="member-reveal-sub">${esc(x.fiscalYear)} closed ${date(x.periodEnd)}</p>
       ${targetLine("Adjusted past-year savings",x.totalPaid,x.expected)}
       <div class="member-closing-grid"><div><span>Paid by 30 June</span><strong>${money(x.paidAtClose)}</strong></div><div><span>Arrears cleared later</span><strong>${money(x.arrearsPaid)}</strong></div><div><span>Expected target</span><strong>${money(x.expected)}</strong></div><div><span>Progress</span><strong>${percent}%</strong></div><div class="${variance<0?"behind":"ahead"}"><span>Remaining position</span><strong>${variance<0?`Still owing ${money(Math.abs(variance))}`:`Surplus ${money(variance)}`}</strong></div></div>${carryNote}`;
+  }
+  function welfareContributionsReveal(){
+    const fund=C()?.welfareFund||{};
+    const org=C()?.orgWelfareStanding||{};
+    const execStanding=state.executive?.welfareStanding||state.executive?.welfare||{};
+    const financeStanding=state.finance?.welfareStanding||{};
+    const deptStanding=state.welfare?.welfareStanding||state.welfare?.fund||{};
+    const history=C()?.welfare?.assistanceHistory||[];
+    const pick=(...vals)=>{for(const v of vals){const n=Number(v);if(Number.isFinite(n)&&n>0)return n;}return 0;};
+    const sinceLabel=org.sinceLabel||fund.sinceLabel||execStanding.sinceLabel||"June 2024";
+    const orgSince=pick(
+      org.collectedSince,fund.collectedSince,fund.contributedTotal,
+      execStanding.grossCollectedSince,execStanding.collectedSince,
+      financeStanding.grossCollectedSince,financeStanding.collectedSince,
+      deptStanding.grossCollectedSince,deptStanding.collectedSince
+    );
+    const orgAssistance=pick(
+      org.assistancePaid,fund.assistancePaid,
+      execStanding.assistancePaid,financeStanding.assistancePaid,deptStanding.assistancePaid,
+      history.reduce((sum,x)=>sum+Number(x.amount||0),0)
+    );
+    const orgCurrent=pick(
+      org.currentBalance,fund.currentBalance,
+      execStanding.currentStandingAfterAssistance,execStanding.currentFundBalance,
+      financeStanding.currentStandingAfterAssistance,financeStanding.currentFundBalance,
+      deptStanding.currentStandingAfterAssistance,deptStanding.currentFundBalance,
+      orgSince>0?Math.max(0,orgSince-orgAssistance):0
+    );
+    return `<section class="member-reveal-card">
+      <button type="button" class="member-reveal-toggle" data-member-reveal="welfare" aria-expanded="false">
+        <span>${icons.shield}</span>
+        <div><strong>Welfare contributions</strong><small>Organization welfare standing and members who have been supported</small></div>
+        <em data-member-reveal-chevron>Show</em>
+      </button>
+      <div class="member-reveal-panel" data-member-reveal-panel="welfare" hidden>
+        <div class="member-summary-grid compact member-welfare-fund-cards">
+          ${metric("Welfare since "+sinceLabel,money(orgSince),"users","member-welfare","")}
+          ${metric("Current welfare balance",money(orgCurrent),"wallet","member-welfare","")}
+        </div>
+        <div class="member-welfare-history-block">
+          <h3>Welfare history</h3>
+          <p>Members who have received welfare contributions so far</p>
+          <div class="member-list">${history.length?history.map(x=>`<article><span>${icons.shield}</span><div><strong>${esc(x.beneficiary)}</strong><p>${esc(x.category||"Assistance")} · ${money(x.amount)}</p></div><time>${date(x.paidAt)}</time></article>`).join(""):`<div class="member-empty">No welfare assistance has been paid yet.</div>`}</div>
+        </div>
+      </div>
+    </section>`;
   }
   function contributionProgressReveal(){
     const current=C()?.financialYearProgress,past=C()?.pastYearProgress;
@@ -156,12 +202,13 @@
     const welfareSinceLabel=welfareExcluded?null:welfareVicent?"July 2026":(s.welfareSinceLabel||"June 2024");
     const welfareCardNote=welfareExcluded
       ?"Not on the welfare standing register"
-      :`Welfare since ${welfareSinceLabel}`;
+      :"";
+    const welfareAmount=money(s.welfareContributedSince??s.welfare??0);
     return `${oversightBanner()}<div class="member-portal"><section class="member-welcome member-hero-card"><div class="member-welcome-top"><span>${g}</span><h2>${esc(m.fullName)}</h2></div>${loanNeedCta(c)}</section>
-      <div class="member-summary-grid">${metric("My Savings",money(s.savings),"savings","member-savings","Current carried-forward balance")}${metric("Share Capital",money(s.shares),"building","member-savings","Current share balance")}${metric("Personal Total Funds",money(s.personalTotalFunds??s.totalMemberFunds),"wallet","member-savings","Savings plus share capital")}${metric("Welfare",money(s.welfare??s.welfareContributions??0),"shield","member-welfare",welfareCardNote)}${metric("Active Loan Balance",money(s.activeLoanBalance),"loans","member-loans","Remaining total repayment including interest")}</div>
+      <div class="member-summary-grid">${metric("My Savings",money(s.savings),"savings","member-savings","Current carried-forward balance")}${metric("Share Capital",money(s.shares),"building","member-savings","Current share balance")}${metric("Personal Total Funds",money(s.personalTotalFunds??s.totalMemberFunds),"wallet","member-savings","Savings plus share capital")}${metric("Welfare",welfareAmount,"shield","member-welfare",welfareCardNote)}${metric("Active Loan Balance",money(s.activeLoanBalance),"loans","member-loans","Remaining total repayment including interest")}</div>
       <div class="member-summary-grid member-org-standing">${metric("UAP account",money(uap),"building","member-dashboard","Old Mutual unit trust standing amount")}${metric("Centenary bank account",money(bank),"wallet","member-dashboard","Company Centenary account")}${metric("Money in loans",money(loansOut),"loans","member-loans","Outstanding loan principal across members")}${metric("Total Company Funds",money(company),"reports","member-dashboard","UAP + Centenary + money in loans")}</div>
       ${dashboardNextUp(c)}
-      <div class="member-dashboard-reveals">${contributionProgressReveal()}${recentActivityReveal()}</div></div>`;
+      <div class="member-dashboard-reveals">${contributionProgressReveal()}${welfareContributionsReveal()}${recentActivityReveal()}</div></div>`;
   }
   function profile(){
     const m=C().member,items=[["Member ID",m.memberNumber],["Membership status",m.status],["National ID",m.nationalId],["Phone",m.phone],["Email",m.email||"Not recorded"],["Joined",date(m.joinedAt)],["Date of birth",date(m.dateOfBirth)],["Gender",m.gender||"Not recorded"],["Nationality",m.nationality||"Not recorded"],["Address",m.address||"Not recorded"],["Occupation",m.occupation||"Not recorded"],["Employer",m.employer||"Not recorded"],["Next of kin",m.nextOfKin||"Not recorded"],["Emergency contact",`${m.emergencyContactName||"Not recorded"} ${m.emergencyContactPhone||""}`]];
@@ -278,11 +325,15 @@
     return `<div class="member-stack"><div class="member-opportunity-grid">${opportunities}</div>${panel("My investment requests","Investment review and Finance verification status",gridTable(["Reference","Project","Amount","Submitted","Status","Evidence"],applications))}${panel("My confirmed investments","Personal project capital, ownership and returns",gridTable(["Project","Invested","Ownership","Expected","Received","Date","Status"],portfolio))}</div>`;
   }
   function welfare(){
-    const w=C().welfare||{};
+    const w=C().welfare||{},s=C().summary||{},fund=C().welfareFund||{};
+    const since=Number(s.welfareContributedSince??s.welfare??0);
+    const share=Number(s.welfareHistoricalShare||fund.historicalSharePerMember||0)||Math.round(7000000/15);
+    const currentRaw=Number(s.welfareCurrentBalance);
+    const current=Number.isFinite(currentRaw)&&currentRaw>0?currentRaw:Math.max(0,since-share);
     const contributions=(w.contributions||[]).map(x=>`<tr><td><strong>${esc(x.receiptNumber||x.reference)}</strong><small>${x.receiptNumber?"Official receipt":esc(x.paymentReference||"Awaiting verification")}</small></td><td>${esc(x.type)}</td><td>${esc(x.period||"—")}</td><td>${money(x.expected)}</td><td>${money(x.amount)}</td><td>${date(x.contributionDate)}</td><td>${status(x.status)}</td><td>${x.hasEvidence?`<a class="button small secondary" href="/api/welfare/contributions/${x.id}/evidence" target="_blank">${icons.eye}Proof</a>`:"—"}</td></tr>`).join("");
     const requests=(w.requests||[]).map(x=>`<tr><td><strong>${esc(x.reference)}</strong></td><td>${esc(x.category)}</td><td>${money(x.amount)}</td><td>${status(x.urgency)}</td><td>${status(x.status)}</td><td>${status(x.paymentStatus)}</td><td>${x.hasEvidence?`<a class="button small secondary" href="/api/welfare/requests/${x.id}/evidence" target="_blank">${icons.eye}Document</a>`:"—"}</td></tr>`).join("");
     const history=(w.assistanceHistory||[]).map(x=>`<tr><td><strong>${esc(x.beneficiary)}</strong></td><td>${esc(x.category||"—")}</td><td>${money(x.amount)}</td><td>${date(x.paidAt)}</td><td>${status(x.status)}</td><td>${esc(x.description||"—")}</td></tr>`).join("");
-    return `<div class="member-stack"><div class="module-actions">${!readOnlyMember()?`<button class="button primary" data-member-action="welfare-contribution">${icons.plus}Make contribution</button><button class="button secondary" data-member-action="welfare-request">${icons.shield}Request support</button>`:""}</div>${panel("Members we supported","Burial and wedding assistance paid from the welfare fund members contributed to",gridTable(["Member supported","Category","Amount","Date","Status","Note"],history))}${panel("Welfare contributions","Submitted proof, Finance verification and official receipts",gridTable(["Reference / Receipt","Type","Period","Expected","Paid","Date","Status","Evidence"],contributions))}${panel("My welfare requests","Applications, evidence, decisions and payment status",gridTable(["Request","Category","Amount","Urgency","Decision","Payment","Document"],requests))}</div>`;
+    return `<div class="member-stack"><div class="member-summary-grid compact">${metric("Welfare since "+(s.welfareSinceLabel||"June 2024"),money(since),"receipt","member-welfare","")}${metric("Current welfare balance",money(current),"wallet","member-welfare","")}</div><div class="module-actions">${!readOnlyMember()?`<button class="button primary" data-member-action="welfare-contribution">${icons.plus}Make contribution</button><button class="button secondary" data-member-action="welfare-request">${icons.shield}Request support</button>`:""}</div>${panel("Members we supported","Burial and wedding assistance paid from the welfare fund members contributed to",gridTable(["Member supported","Category","Amount","Date","Status","Note"],history))}${panel("Welfare contributions","Submitted proof, Finance verification and official receipts",gridTable(["Reference / Receipt","Type","Period","Expected","Paid","Date","Status","Evidence"],contributions))}${panel("My welfare requests","Applications, evidence, decisions and payment status",gridTable(["Request","Category","Amount","Urgency","Decision","Payment","Document"],requests))}</div>`;
   }
   function documents(){return `<section class="member-document-grid">${C().documents.map(x=>`<article class="card"><span>${icons.file}</span><div><small>${esc(x.documentType)} - v${esc(x.version)}</small><h3>${esc(x.title)}</h3><p>Updated ${date(x.updatedAt)}</p></div>${x.hasFile?`<div class="document-actions"><a class="button primary" href="/api/documents/${x.id}/view" target="_blank">${icons.eye}View</a><a class="button secondary" href="/api/documents/${x.id}/download">${icons.download}Download</a></div>`:`<button class="button secondary" disabled>No file attached</button>`}</article>`).join("")||`<div class="card member-empty">No member-visible documents.</div>`}</section>`;}
   function meetings(){return `<section class="member-meeting-list">${C().meetings.map(x=>`<article class="card"><time><b>${new Date(x.scheduledAt).getDate()}</b><span>${new Date(x.scheduledAt).toLocaleString("en",{month:"short"})}</span></time><div><small>${esc(x.meetingType)}</small><h3>${esc(x.title)}</h3><p>${esc(x.agenda||"Agenda pending")} - ${esc(x.venue||"Venue pending")}</p></div>${status(x.status)}</article>`).join("")||`<div class="card member-empty">No member-visible meetings.</div>`}</section>`;}

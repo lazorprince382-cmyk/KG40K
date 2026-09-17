@@ -2,6 +2,7 @@ module.exports = function registerMemberAccountApi({
   app, auth, asyncRoute, query, one, transaction, audit, metadata, upload, fs, path, uploadsDir
 }) {
   const { notifyCreditsVerificationQueue } = require("./credits-queue");
+  const { loadWelfareStanding } = require("./welfare-standing");
   const imageTypes = new Set(["image/jpeg","image/png","image/webp","image/gif","image/jpg"]);
   const receiptTypes = new Set(["image/jpeg","image/png","image/webp","application/pdf"]);
   const removeStoredFile = storedName => {
@@ -428,14 +429,37 @@ module.exports = function registerMemberAccountApi({
     const welfareExcluded=/oketcho/i.test(memberName)||(/baraza/i.test(memberName)&&/nakayiza|olivia/i.test(memberName));
     const welfareVicent=(/vicent|vincent/i.test(memberName)&&/gumisiriza/i.test(memberName))||memberNumber==="G40-2026-0002";
     const welfareSinceLabel=welfareExcluded?null:welfareVicent?"July 2026":"June 2024";
-    const welfareCardNote=welfareExcluded
-      ?"Not on the welfare standing register"
-      :`Remaining welfare since ${welfareSinceLabel}`;
+    const welfareStanding=await loadWelfareStanding();
+    const standingRow=(welfareStanding.byMember||[]).find(row=>Number(row.memberId)===Number(memberId))
+      ||(welfareStanding.byMember||[]).find(row=>String(row.memberNumber||"")===String(memberNumber));
+    const historicalShare=welfareExcluded||welfareVicent
+      ?0
+      :Number(
+        standingRow?.historicalShare
+          ||welfareStanding.historicalSharePerMember
+          ||Math.round(Number(welfareStanding.assistancePaid||7000000)/Math.max(1,Number(welfareStanding.membersContributing||15)))
+      );
+    const welfareContributedSince=welfareExcluded
+      ?0
+      :Number(standingRow?.contributedSince ?? standingRow?.standingBalance ?? welfarePaid ?? 0);
+    const fromStanding=Number(standingRow?.currentBalance);
+    const welfareCurrentBalance=welfareExcluded
+      ?0
+      :welfareVicent
+        ?welfareContributedSince
+        :(Number.isFinite(fromStanding)&&fromStanding>0
+          ?fromStanding
+          :Math.max(0,welfareContributedSince-historicalShare));
+    const welfareHistoricalShare=historicalShare;
+    const welfareCardNote="";
     return {
       member, summary: {
         savings: member.savings, totalMemberFunds: Number(member.savings) + Number(member.shares),
         personalTotalFunds: Number(member.savings) + Number(member.shares),
-        welfare: welfarePaid,
+        welfare: welfareContributedSince,
+        welfareContributedSince,
+        welfareCurrentBalance,
+        welfareHistoricalShare,
         welfareSinceLabel,
         welfareCardNote,
         activeLoanBalance: activeLoans.reduce((sum, item) => {
@@ -449,6 +473,22 @@ module.exports = function registerMemberAccountApi({
         uapBalance, bankBalance, loansOutstanding, companyFunds
       },
       organizationStanding:{uapBalance,bankBalance,loansOutstanding,companyFunds},
+      welfareFund:{
+        sinceLabel:welfareStanding.sinceLabel||"June 2024",
+        collectedSince:Number(welfareStanding.grossCollectedSince||welfareStanding.collectedSince||0),
+        contributedTotal:Number(welfareStanding.grossCollectedSince||welfareStanding.collectedSince||0),
+        currentBalance:Number(welfareStanding.currentStandingAfterAssistance ?? welfareStanding.currentFundBalance ?? 0),
+        membersContributing:Number(welfareStanding.membersContributing||0),
+        assistancePaid:Number(welfareStanding.assistancePaid||0),
+        historicalSharePerMember:Number(welfareStanding.historicalSharePerMember||0)
+      },
+      orgWelfareStanding:{
+        sinceLabel:welfareStanding.sinceLabel||"June 2024",
+        collectedSince:Number(welfareStanding.grossCollectedSince||welfareStanding.collectedSince||0),
+        currentBalance:Number(welfareStanding.currentStandingAfterAssistance ?? welfareStanding.currentFundBalance ?? 0),
+        assistancePaid:Number(welfareStanding.assistancePaid||0),
+        membersContributing:Number(welfareStanding.membersContributing||0)
+      },
       transactions: transactions.rows, loans: loans.rows, guarantees: guarantees.rows, investments: investments.rows,
       welfare: {
         requests: welfareRequests.rows,

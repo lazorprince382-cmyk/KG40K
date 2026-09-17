@@ -310,7 +310,35 @@ const isPastDueDate = (dueValue, todayKey = kampalaTodayKey()) => {
 };
 const publicDir=path.join(projectRoot,"public");
 const uploadsDir=path.join(projectRoot,"storage","uploads");
+const officialTextDir=path.join(projectRoot,"storage","official-text");
 fs.mkdirSync(uploadsDir,{recursive:true});
+function resolveOrganizationDocumentFile(version){
+  const stored=path.basename(String(version?.stored_name||""));
+  const original=path.basename(String(version?.original_name||""));
+  const originalStem=original?path.parse(original).name.toLowerCase():"";
+  const candidates=[
+    stored?path.join(uploadsDir,stored):null,
+    original?path.join(officialTextDir,original):null,
+    original?path.join(uploadsDir,original):null
+  ].filter(Boolean);
+  let file=candidates.find(candidate=>fs.existsSync(candidate));
+  if(!file&&originalStem&&fs.existsSync(officialTextDir)){
+    const match=fs.readdirSync(officialTextDir).find(name=>path.parse(name).name.toLowerCase()===originalStem);
+    if(match)file=path.join(officialTextDir,match);
+  }
+  if(!file)return null;
+  if(stored){
+    const uploadTarget=path.join(uploadsDir,stored);
+    if(file!==uploadTarget){
+      try{
+        fs.mkdirSync(uploadsDir,{recursive:true});
+        if(!fs.existsSync(uploadTarget))fs.copyFileSync(file,uploadTarget);
+        file=uploadTarget;
+      }catch(_){/* serve from official-text fallback */}
+    }
+  }
+  return file;
+}
 const allowedFileTypes=new Set([
   "image/jpeg","image/png","image/gif","image/webp","video/mp4","audio/mpeg","audio/ogg","audio/wav",
   "application/pdf","application/zip","application/x-zip-compressed","text/plain","text/csv",
@@ -1035,9 +1063,14 @@ app.get("/api/executive/command-center",auth,requireExecutive("view"),asyncRoute
     welfare:{...welfare.rows[0],fundBalance:welfareBalance,monthlyContributions:welfareMonth.total,
       contributionMonthLabel:welfareMonth.label,contributionMonth:welfareMonth.period,
       monthPayers:welfareMonth.rows,
-      collectedSince:welfareStanding.collectedSince,sinceLabel:welfareStanding.sinceLabel||"June 2024",
+      collectedSince:welfareStanding.grossCollectedSince||welfareStanding.collectedSince,
+      grossCollectedSince:welfareStanding.grossCollectedSince||welfareStanding.collectedSince,
+      remainingStanding:welfareStanding.collectedSince,
+      currentFundBalance:welfareStanding.currentFundBalance||welfareStanding.closingBalance,
+      sinceLabel:welfareStanding.sinceLabel||"June 2024",
       membersContributing:welfareStanding.membersContributing,newMembers:welfareStanding.newMembers,
       standingMembers:welfareStanding.standingMembers,byMember:welfareStanding.byMember,
+      assistancePaid:welfareStanding.assistancePaid,
       note:welfareStanding.note},
     welfareStanding,
     legal:legal.rows[0],audit:{...auditIssues.rows[0],open:auditSummary.open,departmentsUnderReview:auditSummary.departments,compliance:auditSummary.compliance},
@@ -1255,26 +1288,22 @@ app.get("/api/finance/command-center",auth,requireFinance("view"),asyncRoute(asy
   const fiscalYearRows=(await query(`
     SELECT 'live:'||EXTRACT(YEAR FROM ends_on)::text AS key,
       EXTRACT(YEAR FROM ends_on)::int AS year,
-      fiscal_year_label AS label,
+      COALESCE(NULLIF(fiscal_year_label,''),'FY 26/27') AS label,
       NULL::bigint AS period_id,
       'live' AS mode,
       ends_on AS sort_date
       FROM member_financial_year_policies WHERE status='active'
-    UNION ALL
-    SELECT 'period:'||id::text, fiscal_year,
-      'FY ended '||to_char(period_end,'DD Mon YYYY'), id, 'historical', period_end
-      FROM financial_reporting_periods
     ORDER BY sort_date DESC`)).rows;
   const availableFiscalYears=fiscalYearRows.map(row=>({
-    key:row.key,year:Number(row.year),label:row.label,periodId:row.period_id?Number(row.period_id):null,mode:row.mode
+    key:row.key,year:Number(row.year),label:/26\/27|2026\/27/i.test(String(row.label||""))?row.label:"FY 26/27",periodId:null,mode:"live"
   }));
-  const liveDefault=availableFiscalYears.find(row=>row.mode==="live")||availableFiscalYears[0];
-  const defaultFiscalKey=liveDefault?.key||`live:${new Date().getFullYear()}`;
+  const liveDefault=availableFiscalYears[0]||{key:`live:${new Date().getFullYear()+1}`,year:new Date().getFullYear()+1,label:"FY 26/27",mode:"live",periodId:null};
+  const defaultFiscalKey=liveDefault?.key||`live:${new Date().getFullYear()+1}`;
   const requestedFy=String(req.query.fy||"").trim();
   const selectedOption=availableFiscalYears.find(row=>row.key===requestedFy)
     ||availableFiscalYears.find(row=>String(row.year)===requestedFy)
     ||liveDefault
-    ||{key:defaultFiscalKey,year:new Date().getFullYear(),label:`FY ${new Date().getFullYear()}`,mode:"live",periodId:null};
+    ||{key:defaultFiscalKey,year:new Date().getFullYear()+1,label:"FY 26/27",mode:"live",periodId:null};
   const selectedFiscalYear=Number(selectedOption.year);
   const selectedFiscalKey=selectedOption.key||defaultFiscalKey;
   const selectedFiscalLabel=selectedOption.label||`FY ${selectedFiscalYear}`;
@@ -3251,13 +3280,19 @@ app.get("/api/welfare/command-center",auth,requireWelfare("view"),asyncRoute(asy
       emergencyCases:emergencies.length,activeBeneficiaries:beneficiaries.size,membersInArrears:arrears,
       upcomingEvents:activities.rows.filter(a=>new Date(a.activityDate)>new Date()).length,averageApprovalTime:averageApproval,
       remainingBalance:closingBalance,
-      collectedSince:welfareStanding.collectedSince,sinceLabel:welfareStanding.sinceLabel,
+      collectedSince:welfareStanding.grossCollectedSince||welfareStanding.collectedSince,
+      grossCollectedSince:welfareStanding.grossCollectedSince||welfareStanding.collectedSince,
+      remainingStanding:welfareStanding.collectedSince,
+      sinceLabel:welfareStanding.sinceLabel,
       membersContributing:welfareStanding.membersContributing,
       contributionMonthLabel:welfareMonth.label,contributionMonth:welfareMonth.period,
       monthPayers:welfareMonth.rows},
     fund:{openingBalance,contributions:contributed,assistancePaid,otherExpenses,closingBalance,
       growth:openingBalance?Number(((closingBalance-openingBalance)/openingBalance*100).toFixed(2)):0,
-      collectedSince:welfareStanding.collectedSince,sinceLabel:welfareStanding.sinceLabel,sinceDate:welfareStanding.sinceDate,
+      collectedSince:welfareStanding.grossCollectedSince||welfareStanding.collectedSince,
+      grossCollectedSince:welfareStanding.grossCollectedSince||welfareStanding.collectedSince,
+      remainingStanding:welfareStanding.collectedSince,
+      sinceLabel:welfareStanding.sinceLabel,sinceDate:welfareStanding.sinceDate,
       note:welfareStanding.note},
     contributionStatus:{fullyPaid,partiallyPaid,arrears,expected,collected,
       collectionPercentage:expected?Number((collected/expected*100).toFixed(1)):0,
@@ -3420,7 +3455,7 @@ app.get("/api/legal/command-center",auth,requireLegal("view"),asyncRoute(async(r
       m.court_order AS "courtOrder",m.judgement,m.appeal_status AS "appealStatus",m.legal_expenses::float AS "legalExpenses",
       m.status,m.created_at AS "createdAt" FROM legal_court_matters m ORDER BY m.next_hearing_at NULLS LAST`),
     query(`SELECT doc.id,doc.reference,doc.document_type AS "documentType",doc.title,doc.version,doc.status,
-      doc.file_name AS "fileName",doc.updated_at AS "updatedAt",
+      doc.visibility_level AS "visibilityLevel",doc.file_name AS "fileName",doc.updated_at AS "updatedAt",
       EXISTS(SELECT 1 FROM organization_document_versions v WHERE v.document_id=doc.id) AS "hasFile" FROM organization_documents doc
       LEFT JOIN departments d ON d.id=doc.department_id
       WHERE doc.status<>'archived' AND (d.code='legal' OR (doc.status='published' AND doc.visibility_level<=2 AND doc.document_type IN ('Constitution','Policies','Signed Contracts','Legal Documents')))
@@ -4655,8 +4690,7 @@ app.post("/api/documents",auth,asyncRoute(async(req,res)=>{
   if(!access)return res.status(403).json({error:"Document creation access denied"});
   if(!b.title||!b.documentType)return res.status(400).json({error:"Document title and type are required"});
   let status=["draft","published","pending_executive","archived"].includes(b.status)?b.status:"draft";
-  let visibility=Math.max(1,Math.min(5,Number(b.visibilityLevel||2)));
-  if(code==="legal"&&status==="published"&&visibility<4)status="pending_executive";
+  const visibility=Math.max(1,Math.min(5,Number(b.visibilityLevel||2)));
   const row=await one(`INSERT INTO organization_documents
     (reference,department_id,document_type,title,version,status,visibility_level,created_by)
     VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id,reference`,
@@ -4666,11 +4700,10 @@ app.post("/api/documents",auth,asyncRoute(async(req,res)=>{
   res.status(201).json(row);
 }));
 app.patch("/api/documents/:id",auth,loadDocumentAccess("edit"),asyncRoute(async(req,res)=>{
-  const b=req.body;let status=["draft","published","pending_executive","archived"].includes(b.status)?b.status:req.organizationDocument.status;
+  const b=req.body;const status=["draft","published","pending_executive","archived"].includes(b.status)?b.status:req.organizationDocument.status;
   const title=String(b.title||req.organizationDocument.title).trim(),
     documentType=String(b.documentType||req.organizationDocument.document_type).trim(),
     visibility=Math.max(1,Math.min(5,Number(b.visibilityLevel||req.organizationDocument.visibility_level)));
-  if(req.organizationDocument.department_code==="legal"&&status==="published"&&visibility<4)status="pending_executive";
   if(!title||!documentType)return res.status(400).json({error:"Document title and type are required"});
   await query(`UPDATE organization_documents SET title=$1,document_type=$2,status=$3,visibility_level=$4,updated_at=NOW()
     WHERE id=$5`,[title,documentType,status,visibility,req.organizationDocument.id]);
@@ -4725,8 +4758,8 @@ app.get("/api/documents/:id/download",auth,loadDocumentAccess("view"),asyncRoute
   const version=await one(`SELECT * FROM organization_document_versions WHERE document_id=$1
     ORDER BY created_at DESC LIMIT 1`,[req.organizationDocument.id]);
   if(!version)return res.status(404).json({error:"No file has been uploaded for this document"});
-  const filePath=path.join(uploadsDir,path.basename(version.stored_name));
-  if(!fs.existsSync(filePath))return res.status(410).json({error:"Document file is no longer available"});
+  const filePath=resolveOrganizationDocumentFile(version);
+  if(!filePath)return res.status(410).json({error:"Document file is no longer available. Re-upload the file from Legal documents."});
   await audit({userId:req.user.id,action:"DOCUMENT_DOWNLOADED",entityType:"organization_document",entityId:String(req.organizationDocument.id),details:`version=${version.version}`,...metadata(req)});
   res.type(version.mime_type);res.download(filePath,version.original_name);
 }));
@@ -4734,8 +4767,8 @@ app.get("/api/documents/:id/content",auth,loadDocumentAccess("view"),asyncRoute(
   const version=await one(`SELECT * FROM organization_document_versions WHERE document_id=$1
     ORDER BY created_at DESC LIMIT 1`,[req.organizationDocument.id]);
   if(!version)return res.status(404).json({error:"No file has been uploaded for this document"});
-  const filePath=path.join(uploadsDir,path.basename(version.stored_name));
-  if(!fs.existsSync(filePath))return res.status(410).json({error:"Document file is no longer available"});
+  const filePath=resolveOrganizationDocumentFile(version);
+  if(!filePath)return res.status(410).json({error:"Document file is no longer available. Re-upload the file from Legal documents."});
   const content=await fs.promises.readFile(filePath);
   await audit({userId:req.user.id,action:"DOCUMENT_VIEWED_IN_APP",entityType:"organization_document",
     entityId:String(req.organizationDocument.id),details:`version=${version.version}`,...metadata(req)});
@@ -4746,8 +4779,8 @@ app.get("/api/documents/:id/view",auth,loadDocumentAccess("view"),asyncRoute(asy
   const version=await one(`SELECT * FROM organization_document_versions WHERE document_id=$1
     ORDER BY created_at DESC LIMIT 1`,[req.organizationDocument.id]);
   if(!version)return res.status(404).json({error:"No file has been uploaded for this document"});
-  const filePath=path.join(uploadsDir,path.basename(version.stored_name));
-  if(!fs.existsSync(filePath))return res.status(410).json({error:"Document file is no longer available"});
+  const filePath=resolveOrganizationDocumentFile(version);
+  if(!filePath)return res.status(410).json({error:"Document file is no longer available. Re-upload the file from Legal documents."});
   res.set({
     "X-Frame-Options":"SAMEORIGIN",
     "Content-Security-Policy":"default-src 'self' data: blob:; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; frame-ancestors 'self'; object-src 'self' blob:"
@@ -4755,7 +4788,7 @@ app.get("/api/documents/:id/view",auth,loadDocumentAccess("view"),asyncRoute(asy
   await audit({userId:req.user.id,action:"DOCUMENT_VIEWED",entityType:"organization_document",
     entityId:String(req.organizationDocument.id),details:`version=${version.version}`,...metadata(req)});
   res.setHeader("Content-Disposition",`inline; filename="${path.basename(version.original_name).replaceAll('"',"")}"`);
-  res.type(version.mime_type).sendFile(filePath);
+  res.type(version.mime_type).sendFile(path.resolve(filePath));
 }));
 async function conversationForUser(conversationId,userId) {
   return one(`SELECT c.*,cm.member_role,cm.archived,cm.muted_until FROM conversations c

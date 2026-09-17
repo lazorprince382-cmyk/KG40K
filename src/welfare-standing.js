@@ -43,7 +43,18 @@ async function loadWelfareStanding() {
     await query(
       `SELECT m.id AS "memberId", m.full_name AS member, m.member_number AS "memberNumber",
          m.joined_at AS "joinedAt", m.savings_balance::float AS "savingsBalance",
-         COUNT(c.id)::int AS "contributionCount",
+         COUNT(c.id) FILTER (
+           WHERE c.contribution_type ILIKE '%standing%'
+              OR COALESCE(c.reference,'') LIKE 'WEL-STANDING-%'
+         )::int AS "contributionCount",
+         COALESCE(SUM(c.amount) FILTER (
+           WHERE c.contribution_type ILIKE '%standing%'
+              OR COALESCE(c.reference,'') LIKE 'WEL-STANDING-%'
+         ),0)::float AS "standingBalance",
+         COALESCE(SUM(c.amount) FILTER (
+           WHERE c.contribution_type NOT ILIKE '%standing%'
+             AND COALESCE(c.reference,'') NOT LIKE 'WEL-STANDING-%'
+         ),0)::float AS "monthlyContributed",
          COALESCE(SUM(c.amount),0)::float AS collected,
          MAX(c.contribution_date) AS "lastContributionDate"
        FROM members m
@@ -52,7 +63,7 @@ async function loadWelfareStanding() {
         AND c.status IN ('verified','completed','recorded')
        WHERE m.deleted_at IS NULL AND m.status = 'active'
        GROUP BY m.id
-       ORDER BY collected DESC, m.full_name`
+       ORDER BY "standingBalance" DESC, m.full_name`
     )
   ).rows.map((row) => {
     const excluded = isExcluded(row.member);
@@ -66,20 +77,46 @@ async function loadWelfareStanding() {
       isNewMember: vicent || (row.joinedAt && new Date(row.joinedAt) >= new Date(Date.now() - 60 * 86400000)),
       sinceDate: memberSinceDate,
       sinceLabel: memberSinceLabel,
-      cardNote: excluded
-        ? "Not on welfare standing register"
-        : vicent
-          ? "Welfare since July 2026 (part of personal savings)"
-          : "Welfare since June 2024 (part of personal savings)",
     };
   });
 
-  const standingMembers = byMember.filter((row) => !row.excluded && !row.isVicent && Number(row.collected) > 0);
-  const allContributing = byMember.filter((row) => !row.excluded && Number(row.collected) > 0);
-  const collectedSince = standingMembers.reduce((sum, row) => sum + Number(row.collected || 0), 0);
-  const collectedAllTime = allContributing.reduce((sum, row) => sum + Number(row.collected || 0), 0);
+  const standingMembers = byMember.filter((row) => !row.excluded && !row.isVicent && Number(row.standingBalance) > 0);
+  const allOnRegister = byMember.filter((row) => !row.excluded && Number(row.standingBalance) > 0);
+  const collectedSince = allOnRegister.reduce((sum, row) => sum + Number(row.standingBalance || 0), 0);
+  const collectedAllTime = collectedSince;
   const newMembers = byMember.filter((row) => row.isVicent || row.isNewMember);
-  const closingBalance = Math.max(0, collectedAllTime);
+  const closingBalance = Math.max(0, collectedSince);
+  const standardGrossTarget = 650000;
+  const historicalAssistancePaid = Math.max(0, Number(assistancePaid) || 0);
+  const historicalSharePerMember =
+    standingMembers.length > 0 ? Math.round(historicalAssistancePaid / standingMembers.length) : 0;
+  const enrichedMembers = byMember.map((row) => {
+    const standing = Number(row.standingBalance || 0);
+    const monthly = Number(row.monthlyContributed || 0);
+    // Gross since start = standing + later verified welfare deposits (monthly tops up)
+    const contributedSince = row.excluded ? 0 : standing + monthly;
+    const currentBalance = row.excluded
+      ? 0
+      : row.isVicent
+        ? contributedSince
+        : Math.max(0, contributedSince - historicalSharePerMember);
+    return {
+      ...row,
+      collected: standing,
+      contributedSince,
+      currentBalance,
+      historicalShare: row.excluded || row.isVicent ? 0 : historicalSharePerMember,
+      cardNote: row.excluded
+        ? "Not on welfare standing register"
+        : row.isVicent
+          ? "Welfare since July 2026"
+          : "Welfare since June 2024",
+    };
+  });
+  const grossCollectedSince = enrichedMembers
+    .filter((row) => !row.excluded)
+    .reduce((sum, row) => sum + Number(row.contributedSince || 0), 0);
+  const currentStandingAfterAssistance = Math.max(0, grossCollectedSince - historicalAssistancePaid);
 
   return {
     sinceDate,
@@ -87,18 +124,24 @@ async function loadWelfareStanding() {
     monthlyShare,
     monthlyCombined: 425000,
     openingBalance,
-    collectedSince,
-    collectedAllTime,
-    contributionRows: allContributing.length,
+    collectedSince: grossCollectedSince,
+    collectedAllTime: grossCollectedSince,
+    grossCollectedSince,
+    currentStandingAfterAssistance,
+    contributionRows: allOnRegister.length,
     membersContributing: standingMembers.length,
-    assistancePaid,
-    closingBalance,
-    standardMemberTarget: Number((await one(`SELECT value FROM settings WHERE key='welfareStandingAfterHistorical'`))?.value || 650000),
+    assistancePaid: historicalAssistancePaid,
+    historicalAssistancePaid,
+    closingBalance: currentStandingAfterAssistance,
+    currentFundBalance: currentStandingAfterAssistance,
+    standardMemberTarget: standardGrossTarget,
+    standardGrossTarget,
+    historicalSharePerMember,
     note:
-      "Member welfare standing is the remaining balance after historical burial and wedding payouts. Vicent holds UGX 50,000 since July 2026. Oketcho and Baraza are excluded. Joshua Ssewanyana appears only in assistance history.",
-    byMember,
-    standingMembers,
-    newMembers,
+      "Welfare standing since June 2024. Oketcho and Baraza are excluded. Joshua Ssewanyana appears only in assistance history.",
+    byMember: enrichedMembers,
+    standingMembers: enrichedMembers.filter((row) => !row.excluded && !row.isVicent && Number(row.contributedSince) > 0),
+    newMembers: enrichedMembers.filter((row) => row.isVicent || row.isNewMember),
   };
 }
 
