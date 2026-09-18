@@ -103,7 +103,19 @@ Object.assign(pageMeta,{
   "investment-search":["Investment search","Search results"]
 });
 
-let state = { user: null, role: null, page: "dashboard", permissions: [], members: [], transactions: [], loans: [], withdrawals: [], audit: [], products: [], settings: {}, announcements: [], notifications: [] };
+let state = { user: null, role: null, page: "dashboard", permissions: [], members: [], transactions: [], loans: [], withdrawals: [], audit: [], products: [], settings: {}, announcements: [], notifications: [], execHealthHidden:false, execHealthPickerOpen:false, execHealthVisible:null };
+function loadExecHealthVisible(){
+  try{
+    const raw=localStorage.getItem("kg40k_exec_health");
+    if(raw){const parsed=JSON.parse(raw);if(parsed&&typeof parsed==="object")return parsed;}
+  }catch(_){/* ignore */}
+  return {loans:true,investment:true,audit:true,membership:true,supervisory:true};
+}
+function saveExecHealthVisible(){
+  try{localStorage.setItem("kg40k_exec_health",JSON.stringify(state.execHealthVisible||loadExecHealthVisible()));}catch(_){/* ignore */}
+}
+if(state.execHealthVisible==null)state.execHealthVisible=loadExecHealthVisible();
+try{state.execHealthHidden=localStorage.getItem("kg40k_exec_health_hidden")==="1";}catch(_){/* ignore */}
 let searchTerm = "";
 let messagePoll = null;
 let typingTimer = null;
@@ -142,7 +154,7 @@ function enhanceDepartmentRecordForm(form,{department,attachment=true,photo=fals
   if(attachment){
     const current=form.querySelector('input[name="supportingDocument"],input[name="documentReference"]');
     if(current){current.type="file";current.accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,image/*";current.dataset.fileTarget=current.name;current.name="attachment";current.closest(".field")?.classList.add("record-file-field");}
-    else form.querySelector(".form-grid")?.insertAdjacentHTML("beforeend",`<div class="field full record-file-field"><label>Supporting file</label><input name="attachment" type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,image/*" data-file-target="supportingDocument"><small>PDF, Office document, image, text or CSV; maximum 15 MB.</small></div>`);
+    else form.querySelector(".form-grid")?.insertAdjacentHTML("beforeend",`<div class="field full record-file-field"><label>Supporting file</label><input name="attachment" type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,image/*" data-file-target="supportingDocument"><small>PDF, Office document, image, text or CSV; maximum 15 MB. Word (.docx) files are converted to PDF for clear in-app viewing.</small></div>`);
   }
   if(photo)form.querySelector(".form-grid")?.insertAdjacentHTML("beforeend",`<div class="field full record-file-field"><label>Photo</label><input name="photo" type="file" accept="image/jpeg,image/png,image/webp,image/gif"><small>Upload a clear asset or project photo.</small></div>`);
 }
@@ -1111,25 +1123,37 @@ function executiveDashboardView() {
       ${executiveApprovalWidget(e.approvals.slice(0,5))}
       ${executiveActivityWidget(e.activities.slice(0,7))}
     </div>
-    <div class="exec-health-grid">
-      ${executiveHealthCard("Loan overview","executive-credits","loans",[
+    <div class="exec-health-controls">
+      <div class="exec-health-controls-main">
+        <div><h3>Department cards</h3><p>Show or hide Loan, Investment, Audit, Membership and Supervisory.</p></div>
+        <div class="exec-health-controls-actions">
+          <button type="button" class="button secondary" data-action="toggle-exec-health-picker">${state.execHealthPickerOpen?"Close picker":"Choose departments"}</button>
+          <button type="button" class="button primary" data-action="toggle-exec-health">${state.execHealthHidden?"Show departments":"Hide departments"}</button>
+        </div>
+      </div>
+      ${state.execHealthPickerOpen?`<div class="exec-health-picker">${[
+        ["loans","Loan overview"],["investment","Investment"],["audit","Audit"],["membership","Membership"],["supervisory","Supervisory"]
+      ].map(([key,label])=>`<button type="button" class="exec-health-chip ${(state.execHealthVisible||{})[key]!==false?"active":""}" data-exec-health-toggle="${key}">${label}</button>`).join("")}</div>`:""}
+    </div>
+    ${state.execHealthHidden?"":`<div class="exec-health-grid">
+      ${(state.execHealthVisible||{}).loans===false?"":executiveHealthCard("Loan overview","executive-credits","loans",[
         ["Total savings",money(s.totalSavings)],["Active loans",e.loans.active],["Loans due today",e.loans.due_today],
         ["Loans in default",e.loans.defaults],["Money in loans",money(loansOut)]])}
-      ${executiveHealthCard("Investment","executive-investments","reports",[
+      ${(state.execHealthVisible||{}).investment===false?"":executiveHealthCard("Investment","executive-investments","reports",[
         ["UAP account",money(e.investment.unitTrust?.balance??e.investment.current_value)],
         ["Profit so far",money(e.investment.unitTrust?.profitThisMonth||0)],
         ["Profit by month end",money(e.investment.unitTrust?.profitByMonthEnd||0)],
         ["Still to accrue",money(e.investment.unitTrust?.projectedProfit||0)]])}
-      ${executiveHealthCard("Audit","executive-audit","audit",[
+      ${(state.execHealthVisible||{}).audit===false?"":executiveHealthCard("Audit","executive-audit","audit",[
         ["Open audit issues",e.audit.open],["Resolved issues",e.audit.resolved],["Departments under review",e.audit.departmentsUnderReview],
         ["Compliance",`${e.audit.compliance}%`]])}
-      ${executiveHealthCard("Legal","executive-legal","file",[
-        ["Contracts awaiting review",e.legal.contracts],["Cases open",e.legal.open_cases],["Policies pending",e.legal.policies],
-        ["Compliance alerts",e.legal.alerts]])}
-      ${executiveHealthCard("Supervisory","executive-supervisory","shield",[
+      ${(state.execHealthVisible||{}).membership===false?"":executiveHealthCard("Membership","members","users",[
+        ["Total members",s.activeMembers||s.totalMembers||18],
+        ["Active members",s.activeMembers||18]])}
+      ${(state.execHealthVisible||{}).supervisory===false?"":executiveHealthCard("Supervisory","executive-supervisory","shield",[
         ["Recommendations",e.supervisory.recommendations],
         ["Pending follow-ups",e.supervisory.followups],["Departments below target",e.supervisory.departmentsBelowTarget]])}
-    </div>
+    </div>`}
     <div class="exec-bottom-grid">${executiveNotificationsWidget(e.notifications.slice(0,6))}${executiveCalendarWidget(e.meetings.slice(0,7))}</div>
     ${executiveQuickPanel()}`;
 }
@@ -1203,7 +1227,7 @@ function executiveDepartmentsView() {
     ["credits","Credits Department (SACCO)","Savings, loans and credit","Total savings",money(e.stats.totalSavings),"Outstanding loans",money(e.stats.outstandingLoans),"executive-credits","credits"],
     ["investment","Investment Department","Old Mutual unit trust","UAP account",money(e.investment.unitTrust?.balance??e.investment.current_value),"Profit so far",money(e.investment.unitTrust?.profitThisMonth||0),"executive-investments","investment"],
     ["welfare","Welfare Department","Member welfare support","Since June 2024",money(e.welfareStanding?.collectedSince||e.welfareStanding?.grossCollectedSince||e.welfare?.collectedSince||0),"Members on standing",e.welfareStanding?.membersContributing||e.welfare?.membersContributing||0,"executive-welfare","welfare"],
-    ["legal","Legal Department","Contracts and compliance","Active cases",e.legal.open_cases,"Contracts under review",e.legal.contracts,"executive-legal","legal"],
+    ["legal","Documents Department","Organization document registry","Documents filed",e.legal.open_cases,"Departments covered",e.legal.contracts,"executive-legal","legal"],
     ["audit","Audit Department","Financial integrity","Open audit issues",e.audit.open,"Resolved issues",e.audit.resolved,"executive-audit","audit"],
     ["supervisory","Supervisory Department","Oversight and accountability","Pending follow-ups",e.supervisory.followups,"Recommendations",e.supervisory.recommendations,"executive-supervisory","supervisory"]
   ];
@@ -3826,6 +3850,16 @@ function bind() {
     render();window.scrollTo(0,0);
     if(target==="executive-credits") ensureExecutiveCreditsDesk();
   }));
+  document.querySelectorAll("[data-exec-health-toggle]").forEach(el=>el.addEventListener("click",event=>{
+    event.preventDefault();
+    event.stopPropagation();
+    const key=el.dataset.execHealthToggle;
+    if(!key)return;
+    state.execHealthVisible=state.execHealthVisible||loadExecHealthVisible();
+    state.execHealthVisible[key]=state.execHealthVisible[key]===false;
+    saveExecHealthVisible();
+    render();
+  }));
   document.querySelectorAll("[data-executive-workspace]").forEach(el=>el.addEventListener("click",()=>openExecutiveWorkspace(el.dataset.executiveWorkspace)));
   document.querySelectorAll("[data-executive-workspace-exit]").forEach(el=>el.addEventListener("click",exitExecutiveWorkspace));
   document.querySelectorAll("[data-open-member-dashboard]").forEach(el=>el.addEventListener("click",()=>openMemberDashboard(el.dataset.openMemberDashboard)));
@@ -4075,6 +4109,12 @@ async function handleAction(action, element) {
     return loginView();
   }
   if (action==="executive-quick") { state.execQuickOpen=!state.execQuickOpen;render();return; }
+  if (action==="toggle-exec-health") {
+    state.execHealthHidden=!state.execHealthHidden;
+    try{localStorage.setItem("kg40k_exec_health_hidden",state.execHealthHidden?"1":"0");}catch(_){/* ignore */}
+    render();return;
+  }
+  if (action==="toggle-exec-health-picker") { state.execHealthPickerOpen=!state.execHealthPickerOpen;render();return; }
   if (action==="finance-quick") { state.financeQuickOpen=!state.financeQuickOpen;render();return; }
   if (action==="credits-quick") { state.creditsQuickOpen=!state.creditsQuickOpen;render();return; }
   if (action==="investment-quick") { state.investmentQuickOpen=!state.investmentQuickOpen;render();return; }

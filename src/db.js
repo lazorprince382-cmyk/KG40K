@@ -786,10 +786,10 @@ async function seed() {
     ["DOC-POLICY",executiveDepartment.id,"Policies","Organization Policy Manual","2.4"],
     ["DOC-BOARD",executiveDepartment.id,"Board Minutes","Board Meeting Minutes - July 2026","1.0"],
     ["DOC-MEETING",executiveDepartment.id,"Meeting Minutes","General Assembly Minutes","1.0"],
-    ["DOC-CONTRACT",legalDepartment.id,"Signed Contracts","Commercial Centre Partnership Agreement","1.1"],
+    ["DOC-CONTRACT",executiveDepartment.id,"Signed Contracts","Commercial Centre Partnership Agreement","1.1"],
     ["DOC-ANNUAL",financeDepartment.id,"Annual Reports","Annual Organization Report 2025/26","1.0"],
     ["DOC-AUDIT",auditDepartment.id,"Audit Reports","Quarterly Internal Audit Report","1.0"],
-    ["DOC-LEGAL",legalDepartment.id,"Legal Documents","Statutory Compliance Register","2.0"]
+    ["DOC-CREDIT",creditsDepartment.id,"Credit Reports","Credits Policy and Lending Framework","1.0"]
   ];
   for(const [ref,departmentId,type,title,version] of documentRows) await query(`INSERT INTO organization_documents
     (reference,department_id,document_type,title,version,status,visibility_level,created_by,approved_by,file_name)

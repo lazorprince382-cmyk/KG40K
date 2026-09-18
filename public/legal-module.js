@@ -1,26 +1,88 @@
-/* Confidential Legal case, contract, policy and compliance workspace. */
+/* Documents Department — central registry for operating departments plus General. */
 (() => {
   const D=window.DepartmentUi,{esc,date,badge,risk,panel,empty,table,options,modal,reload,download}=D;
+  const VIEW_DEPTS=[
+    {code:"credits",page:"docs-credits",name:"Credits",tone:"orange",icon:"wallet",note:"Loan and credit records"},
+    {code:"investment",page:"docs-investment",name:"Investment",tone:"teal",icon:"reports",note:"Projects and proposals"},
+    {code:"finance",page:"docs-finance",name:"Finance",tone:"green",icon:"receipt",note:"Accounts and reports"},
+    {code:"welfare",page:"docs-welfare",name:"Welfare",tone:"violet",icon:"users",note:"Support and contributions"},
+    {code:"supervisory",page:"docs-supervisory",name:"Supervisory",tone:"blue",icon:"shield",note:"Oversight records"},
+    {code:"audit",page:"docs-audit",name:"Audit",tone:"red",icon:"audit",note:"Assurance evidence"},
+    {code:"executive",page:"docs-executive",name:"Executive",tone:"blue",icon:"building",note:"Governance and minutes"}
+  ];
+  const LIBRARY_DEPTS=[
+    ...VIEW_DEPTS,
+    {code:"general",page:"docs-general",name:"General",tone:"violet",icon:"file",note:"Shared organization documents"}
+  ];
+  const TYPE_BY_DEPT={
+    credits:["Policies","Credit Reports","Loan Supporting Documents","Agreements","Minutes","Annual Reports"],
+    investment:["Policies","Investment Proposals","Signed Contracts","Performance Reports","Agreements","Minutes"],
+    finance:["Annual Reports","Financial Statements","Bank Reconciliations","Payment Support","Policies","Minutes"],
+    welfare:["Policies","Welfare Reports","Contribution Records","Support Decisions","Minutes","Agreements"],
+    supervisory:["Policies","Supervisory Reports","Inspection Notes","Minutes","Agreements"],
+    audit:["Audit Reports","Findings","Working Papers","Policies","Minutes"],
+    executive:["Constitution","Bylaws","Policies","Minutes","Board Minutes","Meeting Minutes","Signed Contracts","Agreements"],
+    general:["Policies","Minutes","Agreements","Annual Reports","Legal Documents"]
+  };
   const emptyLegal={
     stats:{activeCases:0,contractsUnderReview:0,contractsApproved:0,policiesAwaitingReview:0,disciplinaryCases:0,legalNotices:0,pendingLegalOpinions:0,complianceScore:0,courtCases:0,upcomingDeadlines:0,resolvedCases:0,legalDocuments:0,documentRecords:0},
-    cases:[],contracts:[],policies:[],complaints:[],opinions:[],compliance:[],courtMatters:[],documents:[],departments:[],deadlines:[],notifications:[],
+    cases:[],contracts:[],policies:[],complaints:[],opinions:[],compliance:[],courtMatters:[],documents:[],documentLibrary:[],departments:[],deadlines:[],notifications:[],
     access:{authorityLevel:1,canCreate:false,canEdit:false,canApprove:false}
   };
   const L=()=>state.legal||emptyLegal;
   const formEnd=label=>`<div class="form-actions"><button type="button" class="button secondary" data-close-modal>Cancel</button><button type="submit" class="button primary">${label}</button></div>`;
-  const departments=()=>`<option value="">Organization-wide</option>${options(L().departments)}`;
-  const stat=(label,value,iconName,tone,note,target)=>`<button class="legal-stat ${tone}" data-dept-target="${target}"><span>${icons[iconName]}</span><div><small>${label}</small><strong>${value}</strong><em>${note}</em></div></button>`;
-  function caseTable(rows,action=true){return table(["Case","Subject / category","Department","Risk","Officer","Hearing","Status","Action"],rows.map(x=>`<tr><td><strong>${esc(x.caseNumber)}</strong></td><td class="wide-cell"><b>${esc(x.subject)}</b><small>${esc(x.category)}  -  ${esc(x.description)}</small></td><td>${esc(x.department||"Organization")}</td><td>${risk(x.riskLevel)}</td><td>${esc(x.assignedOfficer||"Unassigned")}</td><td>${date(x.nextHearingAt,true)}</td><td>${badge(x.status)}</td><td>${action?`<button class="mini-btn" data-legal-case="${x.id}">${icons.refresh}</button>`:" - "}</td></tr>`).join(""));}
-  function contractTable(rows,action=true){return table(["Contract","Parties / department","Value","Start / end","Responsible","Status","Action"],rows.map(x=>`<tr><td class="wide-cell"><strong>${esc(x.contractNumber)}  -  ${esc(x.title)}</strong><small>${esc(x.contractType)}</small></td><td>${esc(x.parties)}<small>${esc(x.department||"Organization")}</small></td><td><strong>${money(x.contractValue)}</strong></td><td>${date(x.startsOn)}<small>Ends ${date(x.endsOn)}</small></td><td>${esc(x.responsibleOfficer||"Unassigned")}</td><td>${badge(x.status)}</td><td>${action&&["draft","submitted","under_review","information_requested"].includes(x.status)?`<button class="mini-btn" data-legal-contract="${x.id}">${icons.eye}</button>`:" - "}</td></tr>`).join(""));}
-  function contractSummary(rows){return `<div class="legal-contract-summary">${rows.map(x=>`<button data-dept-target="legal-contracts"><div><strong>${esc(x.contractNumber)}</strong><span>${esc(x.title)}</span></div><div><span>${esc(x.department||"Organization")}</span><small>${esc(x.parties)}</small></div><b>${money(x.contractValue)}</b></button>`).join("")||empty("No contracts registered.")}</div>`;}
-  const audienceLabel=level=>{const n=Number(level||2);return n<=1?"Everyone":n===2?"All departments":n===3?"Leadership":"Legal & Executive";};
+  const parseAudience=value=>{
+    if(Array.isArray(value))return value.map(x=>String(x||"").toLowerCase()).filter(Boolean);
+    if(!value)return [];
+    try{const parsed=JSON.parse(value);if(Array.isArray(parsed))return parsed.map(x=>String(x||"").toLowerCase()).filter(Boolean);}catch(_){/* ignore */}
+    return String(value).split(/[,;]+/).map(x=>x.trim().toLowerCase()).filter(Boolean);
+  };
+  const audienceModeFromDoc=doc=>{
+    const level=Number(doc?.visibilityLevel||2);
+    if(level<=1)return "members";
+    if(level===3)return "departments";
+    return "all";
+  };
+  const audienceLabel=doc=>{
+    const mode=audienceModeFromDoc(doc);
+    if(mode==="members")return "Members";
+    if(mode==="all")return "All departments";
+    const codes=parseAudience(doc?.audienceDepartments);
+    if(!codes.length)return "Selected departments";
+    const names=codes.map(code=>VIEW_DEPTS.find(x=>x.code===code)?.name||code);
+    return names.length<=2?names.join(", "):`${names.slice(0,2).join(", ")} +${names.length-2}`;
+  };
   const canManageDocuments=()=>["Legal Officer","System Admin"].includes(state.role)||L().access.canEdit||L().access.canCreate;
+  const libraryMeta=code=>LIBRARY_DEPTS.find(x=>x.code===code)||{code,page:`docs-${code}`,name:code,tone:"blue",icon:"file",note:"Department documents"};
+  const libraryRows=()=>{
+    const fromApi=L().documentLibrary;
+    const base=Array.isArray(fromApi)&&fromApi.length?fromApi:LIBRARY_DEPTS.map(meta=>{
+      const docs=(L().documents||[]).filter(d=>String(d.departmentCode||d.department||"").toLowerCase()===meta.code);
+      return {...meta,documentCount:docs.length,documents:docs};
+    });
+    const byCode=new Map(base.map(row=>[String(row.code||"").toLowerCase(),row]));
+    return LIBRARY_DEPTS.map(meta=>{
+      const hit=byCode.get(meta.code);
+      if(hit)return {...meta,...hit,name:hit.name||meta.name,page:hit.page||meta.page};
+      return {...meta,documentCount:0,documents:[]};
+    });
+  };
+  const docsForPage=page=>{
+    const meta=LIBRARY_DEPTS.find(x=>x.page===page);
+    if(!meta)return L().documents||[];
+    const bucket=libraryRows().find(x=>x.code===meta.code);
+    return bucket?.documents||(L().documents||[]).filter(d=>String(d.departmentCode||"").toLowerCase()===meta.code);
+  };
+  const pageDeptCode=()=>{
+    const hit=LIBRARY_DEPTS.find(x=>x.page===state.page);
+    return hit?.code||"";
+  };
   function documentTable(rows){
-    if(!rows.length)return empty("No legal documents uploaded yet.");
+    if(!rows.length)return empty("No documents uploaded for this department yet.");
     return `<div class="legal-document-list">${rows.map(x=>`<article class="legal-document-card">
-      <div class="legal-document-copy"><small>${esc(x.reference)} · ${esc(x.documentType)} · v${esc(x.version||"1.0")}</small>
+      <div class="legal-document-copy"><small>${esc(x.reference)} · ${esc(x.documentType)} · v${esc(x.version||"1.0")}${x.departmentName?` · ${esc(x.departmentName)}`:""}</small>
         <strong>${esc(x.title)}</strong>
-        <span>${badge(x.status)}<em>${esc(audienceLabel(x.visibilityLevel))}</em><i>Updated ${date(x.updatedAt,true)}</i></span>
+        <span>${badge(x.status)}<i>Updated ${date(x.updatedAt,true)}</i></span>
         <p>${esc(x.fileName||"No file uploaded")}</p>
       </div>
       <div class="document-actions legal-document-actions">
@@ -31,72 +93,129 @@
       </div>
     </article>`).join("")}</div>`;
   }
+  function departmentShelf(meta){
+    const count=Number(meta.documentCount||meta.documents?.length||0);
+    return `<button class="legal-stat ${meta.tone}" data-dept-target="${meta.page}">
+      <span>${icons[meta.icon]||icons.file}</span>
+      <div><small>${esc(meta.name)}</small><strong>${count}</strong><em>${count===1?"document on file":"documents on file"}</em></div>
+    </button>`;
+  }
   D.dashboards.legal=()=>{
-    const l=L(),s=l.stats,cards=[
-      ["Active Legal Cases",s.activeCases,"shield","blue","Open case files","legal-cases"],["Contracts Under Review",s.contractsUnderReview,"file","orange","Legal clearance","legal-contracts"],
-      ["Contracts Approved",s.contractsApproved,"check","green","Cleared or active","legal-contracts"],["Policies Awaiting Review",s.policiesAwaitingReview,"reports","violet","Review or amendment","legal-policies"],
-      ["Disciplinary Cases",s.disciplinaryCases,"users","red","Member discipline","legal-disciplinary"],["Legal Notices",s.legalNotices,"bell","orange","Compliance action","legal-compliance"],
-      ["Pending Legal Opinions",s.pendingLegalOpinions,"info","teal","Advice requested","legal-opinions"],["Compliance Score",`${s.complianceScore}%`,"audit","green","Organization average","legal-compliance"],
-      ["Court Cases",s.courtCases,"building","red","Active litigation","legal-court"],["Upcoming Deadlines",s.upcomingDeadlines,"clock","orange","Next 30 days","legal-calendar"],
-      ["Resolved Cases",s.resolvedCases,"check","teal","Decisions recorded","legal-cases"],["Uploaded Legal Documents",s.legalDocuments,"file","blue","Files available to view","legal-documents"]];
-    return `<div class="legal-command"><div class="legal-confidential">${icons.lock}<div><strong>Confidential Legal workspace</strong><span>Case, contract and policy access follows department authority and leaves a traceable review history.</span></div><b>PROTECTED</b></div><div class="legal-stats">${cards.slice(0,8).map(x=>stat(...x)).join("")}</div><div class="legal-dashboard-grid">
-      ${panel("Legal case overview","Open, resolved, appeal and hearing activity",`<div class="legal-overview-kpis"><div><strong>${s.activeCases}</strong><span>Open</span></div><div><strong>${l.cases.filter(x=>x.status==="investigation").length}</strong><span>Investigations</span></div><div><strong>${l.cases.filter(x=>x.status==="appeal").length}</strong><span>Appeals</span></div><div><strong>${s.resolvedCases}</strong><span>Resolved</span></div></div><div class="legal-case-list">${l.cases.slice(0,4).map(x=>`<button data-dept-target="legal-cases"><span>${risk(x.riskLevel)}</span><div><strong>${esc(x.caseNumber)}  -  ${esc(x.subject)}</strong><small>${esc(x.category)}  -  ${esc(x.assignedOfficer||"Unassigned")}</small></div>${badge(x.status)}</button>`).join("")}</div>`,"legal-overview-widget")}
-      ${panel("Contract management","Lifecycle, value, expiry and legal clearance",contractSummary(l.contracts.slice(0,5)),"legal-contract-widget")}
-      ${panel("Compliance","Department legal assurance",`<div class="audit-gauge legal-gauge" style="--score:${s.complianceScore}"><div><strong>${s.complianceScore}%</strong><span>Compliance</span></div></div><div class="compliance-bars">${l.compliance.map(x=>`<button data-dept-target="legal-compliance"><span><b>${esc(x.department||x.requirement)}</b><em>${x.complianceScore}%</em></span><i><u style="width:${x.complianceScore}%"></u></i></button>`).join("")}</div>`,"legal-compliance-widget")}
-      ${panel("Policy management","New, review, approved and amendment status",`<div class="legal-policy-list">${l.policies.slice(0,5).map(x=>`<button data-dept-target="legal-policies"><span>${icons.reports}</span><div><strong>${esc(x.policyName)}</strong><small>v${esc(x.version)}  -  Review ${date(x.reviewDate)}</small></div>${badge(x.status)}</button>`).join("")||empty("No policies registered.")}</div>`,"legal-policy-widget")}
-      ${panel("Legal calendar","Court dates, expiries and policy reviews",`<div class="dept-calendar-list">${l.deadlines.slice(0,6).map(x=>`<button data-dept-target="${esc(x.target)}"><time><b>${new Date(x.date).getDate()}</b><span>${new Date(x.date).toLocaleString("en",{month:"short"})}</span></time><div><strong>${esc(x.type)}  -  ${esc(x.reference)}</strong><p>${esc(x.title)}</p></div>${risk(x.risk)}</button>`).join("")||empty("No deadlines recorded.")}</div>`,"legal-calendar-widget")}
-      ${panel("Legal notifications","Contracts, policies, complaints and deadlines",`<div class="dept-notification-list">${l.notifications.map(x=>`<button data-dept-target="${esc(x.target)}"><span class="${esc(x.level)}">${icons[x.level==="success"?"check":x.level==="info"?"info":"bell"]}</span><div><strong>${esc(x.title)}</strong><small>${esc(relativeTime(x.createdAt||x.time))}</small></div></button>`).join("")}</div>`,"legal-notifications-widget")}
-    </div></div>`;
+    const shelves=libraryRows();
+    return `<div class="legal-command">
+      <div class="legal-confidential">${icons.file}<div><strong>Organization document registry</strong><span>Open a department card to browse or add its documents. Choose who can see each file when you upload.</span></div><b>REGISTRY</b></div>
+      <div class="legal-stats">${shelves.map(departmentShelf).join("")}</div>
+    </div>`;
   };
-  D.subtitles.legal=()=>state.page==="dashboard"?"Confidential cases, contracts, policies, compliance and legal deadlines with a traceable history.":"Protected legal records with controlled review, decision and document access.";
-  D.views["legal-cases"]=()=>panel("Legal case register","Description, evidence, assigned officer, hearings, decisions and timeline",caseTable(L().cases,true));
-  D.views["legal-disciplinary"]=()=>panel("Disciplinary case register","Member violations, evidence, assigned officers and decisions",caseTable(L().cases.filter(x=>String(x.category||"").toLowerCase().includes("disciplinary")),true));
-  D.views["legal-contracts"]=()=>panel("Contract lifecycle register","Employment, supplier, partnership, land, lease, service, MoU, loan and investment agreements",contractTable(L().contracts,true));
-  D.views["legal-agreements"]=()=>panel("Agreement register","MoUs, partnerships, leases and formal organization agreements",contractTable(L().contracts.filter(x=>/agreement|mou|partnership|lease/i.test(x.contractType)),true));
-  D.views["legal-policies"]=()=>panel("Policy register","Constitution, bylaws, HR, financial, welfare, investment, procurement and credit policies",table(["Policy","Category","Version","Effective","Review","Approval history","Document","Status"],L().policies.map(x=>`<tr><td><strong>${esc(x.reference)}  -  ${esc(x.policyName)}</strong></td><td>${esc(x.policyCategory)}</td><td>${esc(x.version)}</td><td>${date(x.effectiveDate)}</td><td>${date(x.reviewDate)}</td><td class="wide-cell">${esc(x.approvalHistory||"Legal review opened")}</td><td>${esc(x.documentReference||"Pending upload")}</td><td>${badge(x.status)}</td></tr>`).join("")));
-  D.views["legal-constitution"]=()=>panel("Organization Constitution","The current constitution and every uploaded version can be viewed or replaced here",documentTable(L().documents.filter(x=>x.documentType==="Constitution")));
-  D.views["legal-complaints"]=()=>panel("Complaint register","Intake, legal review, investigation, recommendation, decision and closure",table(["Complaint","Complainant / type","Department","Description / evidence","Officer","Confidential","Status","Action"],L().complaints.map(x=>`<tr><td><strong>${esc(x.complaintNumber)}</strong></td><td>${esc(x.complainant)}<small>${esc(x.complaintType)}</small></td><td>${esc(x.department||"Organization")}</td><td class="wide-cell">${esc(x.description)}<small>${esc(x.evidence||"Evidence pending")}</small></td><td>${esc(x.assignedOfficer||"Unassigned")}</td><td>${x.confidential?badge("Protected","risk-high"):badge("Standard")}</td><td>${badge(x.status)}</td><td><button class="mini-btn" data-legal-complaint="${x.id}">${icons.refresh}</button></td></tr>`).join("")));
-  D.views["legal-opinions"]=()=>panel("Legal opinion register","Questions, due dates, assigned counsel and completed advice",table(["Opinion","Department","Question","Assigned officer","Due","Advice","Status"],L().opinions.map(x=>`<tr><td><strong>${esc(x.reference)}  -  ${esc(x.title)}</strong></td><td>${esc(x.department||"Organization")}</td><td class="wide-cell">${esc(x.question)}</td><td>${esc(x.assignedOfficer||"Unassigned")}</td><td>${date(x.dueDate)}</td><td class="wide-cell">${esc(x.opinion||"Opinion pending")}</td><td>${badge(x.status)}</td></tr>`).join("")));
-  D.views["legal-compliance"]=()=>`<div class="dept-page"><div class="audit-compliance-cards">${L().compliance.map(x=>`<article class="${x.complianceScore<75?"attention":""}"><div class="audit-score-ring" style="--score:${x.complianceScore}"><strong>${x.complianceScore}%</strong></div><h3>${esc(x.department||"Organization")}</h3><p>${esc(x.requirement)}</p>${risk(x.riskLevel)}<dl><div><dt>Finding</dt><dd>${esc(x.finding||"No material exception")}</dd></div><div><dt>Corrective action</dt><dd>${esc(x.correctiveAction||"Maintain compliance")}</dd></div><div><dt>Due date</dt><dd>${date(x.dueDate)}</dd></div></dl></article>`).join("")}</div></div>`;
-  D.views["legal-court"]=()=>panel("Court matters","Hearing dates, representatives, orders, judgements, appeals and legal expenses",table(["Court file","Matter","Court / opposing party","Representative","Next hearing","Orders / judgement","Appeal","Expenses","Status"],L().courtMatters.map(x=>`<tr><td><strong>${esc(x.courtFile)}</strong></td><td>${esc(x.title)}</td><td>${esc(x.courtName)}<small>${esc(x.opposingParty)}</small></td><td>${esc(x.legalRepresentative||"Unassigned")}</td><td>${date(x.nextHearingAt,true)}</td><td class="wide-cell">${esc(x.courtOrder||x.judgement||"Pending")}</td><td>${esc(x.appealStatus||" - ")}</td><td>${money(x.legalExpenses||0)}</td><td>${badge(x.status)}</td></tr>`).join("")));
-  D.views["legal-reports"]=()=>{const reports=["Legal Case Report","Contract Report","Compliance Report","Complaint Report","Policy Report","Court Report","Disciplinary Report","Legal Opinion Report","Annual Legal Report"];return `<div class="exec-report-grid">${reports.map((x,i)=>`<article><span class="${["blue","green","violet","orange","teal"][i%5]}">${icons.file}</span><div><h3>${x}</h3><p>Protected legal data with review history and current status.</p></div><button data-dept-report="${x}">${icons.download}Download</button></article>`).join("")}</div>`;};
-  D.views["legal-documents"]=()=>panel("Secure Legal documents","Upload, publish, view and version constitutions, policies, contracts, agreements and legal records",documentTable(L().documents));
-  D.views["legal-calendar"]=()=>panel("Legal calendar","Court dates, contract expiries, policy reviews and opinion deadlines",`<div class="audit-full-calendar">${L().deadlines.map(x=>`<article><time><b>${new Date(x.date).getDate()}</b><span>${new Date(x.date).toLocaleString("en",{month:"short",year:"numeric"})}</span></time><div><small>${esc(x.type)}  -  ${esc(x.reference)}</small><h3>${esc(x.title)}</h3></div>${risk(x.risk)}<button data-dept-target="${esc(x.target)}">Open</button></article>`).join("")||empty("No deadlines recorded.")}</div>`);
-  D.views["legal-notifications"]=()=>panel("Legal notifications","Contracts, cases, policies, complaints and compliance alerts",`<div class="dept-notification-list large">${L().notifications.map(x=>`<button data-dept-target="${esc(x.target)}"><span class="${esc(x.level)}">${icons[x.level==="success"?"check":x.level==="info"?"info":"bell"]}</span><div><strong>${esc(x.title)}</strong><small>${esc(relativeTime(x.createdAt||x.time))}</small></div></button>`).join("")}</div>`);
-  D.views["legal-search"]=()=>panel("Legal search results",`${(state.legalSearchResults||[]).length} protected records found`,table(["Type","Reference","Record","Detail","Open"],(state.legalSearchResults||[]).map(x=>`<tr><td>${badge(x.type)}</td><td><strong>${esc(x.reference)}</strong></td><td>${esc(x.title)}</td><td>${esc(x.detail)}</td><td><button class="mini-btn" data-dept-target="${esc(x.target)}">${icons.eye}</button></td></tr>`).join("")));
-  D.settings.legal=()=>`<div class="audit-settings-grid">${panel("Legal authority","Controlled case and document access",`<div class="audit-permission-list"><div>${icons.check}<span><b>Register cases, contracts, complaints and policies</b><small>Authority level ${L().access.authorityLevel}</small></span></div><div>${icons.check}<span><b>Review and legally clear agreements</b><small>Executive approval remains separate for major contracts</small></span></div></div>`)}${panel("Confidentiality","Protected legal records",`<div class="audit-readonly-note">${icons.lock}<div><strong>Need-to-know access</strong><p>Legal cannot approve payments, manage member savings or loans, change Audit findings, process welfare support or supervise departments.</p></div></div>`)}</div>`;
+  D.subtitles.legal=()=>{
+    const code=pageDeptCode();
+    if(code){const meta=libraryMeta(code);return `${meta.name} documents — choose All departments, selected departments, or members for visibility.`;}
+    if(state.page==="dashboard")return "Central document registry for Credits, Investment, Finance, Welfare, Supervisory, Audit, Executive and General.";
+    return "Protected organization documents with controlled department visibility.";
+  };
+  function departmentDocumentsView(code){
+    const meta=libraryMeta(code);
+    const rows=docsForPage(meta.page);
+    return panel(`${meta.name} documents`,`${rows.length} document${rows.length===1?"":"s"} · ${esc(meta.note||"Department documents")}`,documentTable(rows));
+  }
+  LIBRARY_DEPTS.forEach(meta=>{D.views[meta.page]=()=>departmentDocumentsView(meta.code);});
+  D.views["legal-documents"]=()=>panel("All department documents","Every file held in the organization document registry",documentTable(L().documents||[]));
+  D.views["legal-notifications"]=()=>panel("Document notifications","Uploads, publication and registry alerts",`<div class="dept-notification-list large">${(L().notifications||[]).map(x=>`<button data-dept-target="${esc(x.target||"dashboard")}"><span class="${esc(x.level)}">${icons[x.level==="success"?"check":x.level==="info"?"info":"bell"]}</span><div><strong>${esc(x.title)}</strong><small>${esc(relativeTime(x.createdAt||x.time))}</small></div></button>`).join("")||empty("No alerts yet.")}</div>`);
+  D.views["legal-search"]=()=>panel("Document search results",`${(state.legalSearchResults||[]).length} records found`,table(["Type","Reference","Record","Detail","Open"],(state.legalSearchResults||[]).map(x=>`<tr><td>${badge(x.type)}</td><td><strong>${esc(x.reference)}</strong></td><td>${esc(x.title)}</td><td>${esc(x.detail)}</td><td><button class="mini-btn" data-dept-target="${esc(x.target)}">${icons.eye}</button></td></tr>`).join("")));
+  function caseTable(rows,action=true){return table(["Case","Subject / category","Department","Risk","Officer","Hearing","Status","Action"],rows.map(x=>`<tr><td><strong>${esc(x.caseNumber)}</strong></td><td class="wide-cell"><b>${esc(x.subject)}</b><small>${esc(x.category)}  -  ${esc(x.description)}</small></td><td>${esc(x.department||"Organization")}</td><td>${risk(x.riskLevel)}</td><td>${esc(x.assignedOfficer||"Unassigned")}</td><td>${date(x.nextHearingAt,true)}</td><td>${badge(x.status)}</td><td>${action?`<button class="mini-btn" data-legal-case="${x.id}">${icons.refresh}</button>`:" - "}</td></tr>`).join(""));}
+  function contractTable(rows,action=true){return table(["Contract","Parties / department","Value","Start / end","Responsible","Status","Action"],rows.map(x=>`<tr><td class="wide-cell"><strong>${esc(x.contractNumber)}  -  ${esc(x.title)}</strong><small>${esc(x.contractType)}</small></td><td>${esc(x.parties)}<small>${esc(x.department||"Organization")}</small></td><td><strong>${money(x.contractValue)}</strong></td><td>${date(x.startsOn)}<small>Ends ${date(x.endsOn)}</small></td><td>${esc(x.responsibleOfficer||"Unassigned")}</td><td>${badge(x.status)}</td><td>${action&&["draft","submitted","under_review","information_requested"].includes(x.status)?`<button class="mini-btn" data-legal-contract="${x.id}">${icons.eye}</button>`:" - "}</td></tr>`).join(""));}
+  D.views["legal-cases"]=()=>panel("Legal case register","Legacy case register",caseTable(L().cases,true));
+  D.views["legal-disciplinary"]=()=>panel("Disciplinary case register","Member violations",caseTable(L().cases.filter(x=>String(x.category||"").toLowerCase().includes("disciplinary")),true));
+  D.views["legal-contracts"]=()=>panel("Contract lifecycle register","Contracts and agreements",contractTable(L().contracts,true));
+  D.views["legal-agreements"]=()=>panel("Agreement register","MoUs and agreements",contractTable(L().contracts.filter(x=>/agreement|mou|partnership|lease/i.test(x.contractType)),true));
+  D.views["legal-policies"]=()=>panel("Policy register","Policy versions",table(["Policy","Category","Version","Effective","Review","Status"],L().policies.map(x=>`<tr><td><strong>${esc(x.reference)}  -  ${esc(x.policyName)}</strong></td><td>${esc(x.policyCategory)}</td><td>${esc(x.version)}</td><td>${date(x.effectiveDate)}</td><td>${date(x.reviewDate)}</td><td>${badge(x.status)}</td></tr>`).join("")));
+  D.views["legal-constitution"]=()=>panel("Organization Constitution","Constitution files held under Executive",documentTable((L().documents||[]).filter(x=>x.documentType==="Constitution")));
+  D.views["legal-complaints"]=()=>panel("Complaint register","Complaint intake",table(["Complaint","Complainant","Department","Status"],L().complaints.map(x=>`<tr><td><strong>${esc(x.complaintNumber)}</strong></td><td>${esc(x.complainant)}</td><td>${esc(x.department||"Organization")}</td><td>${badge(x.status)}</td></tr>`).join("")));
+  D.views["legal-opinions"]=()=>panel("Legal opinion register","Opinion requests",table(["Opinion","Department","Due","Status"],L().opinions.map(x=>`<tr><td><strong>${esc(x.reference)}  -  ${esc(x.title)}</strong></td><td>${esc(x.department||"Organization")}</td><td>${date(x.dueDate)}</td><td>${badge(x.status)}</td></tr>`).join("")));
+  D.views["legal-compliance"]=()=>`<div class="dept-page"><div class="audit-compliance-cards">${L().compliance.map(x=>`<article><h3>${esc(x.department||"Organization")}</h3><p>${esc(x.requirement)}</p>${badge(x.status)}</article>`).join("")}</div></div>`;
+  D.views["legal-court"]=()=>panel("Court matters","Litigation register",table(["Court file","Matter","Status"],L().courtMatters.map(x=>`<tr><td><strong>${esc(x.courtFile)}</strong></td><td>${esc(x.title)}</td><td>${badge(x.status)}</td></tr>`).join("")));
+  D.views["legal-reports"]=()=>{const reports=["Department Document Report","Credits Document Report","Finance Document Report","Audit Document Report"];return `<div class="exec-report-grid">${reports.map((x,i)=>`<article><span class="${["blue","green","violet","orange"][i%4]}">${icons.file}</span><div><h3>${x}</h3><p>Registry extract by department.</p></div><button data-dept-report="${x}">${icons.download}Download</button></article>`).join("")}</div>`;};
+  D.views["legal-calendar"]=()=>panel("Document calendar","Review dates and deadlines",`<div class="audit-full-calendar">${(L().deadlines||[]).map(x=>`<article><time><b>${new Date(x.date).getDate()}</b><span>${new Date(x.date).toLocaleString("en",{month:"short",year:"numeric"})}</span></time><div><small>${esc(x.type)}  -  ${esc(x.reference)}</small><h3>${esc(x.title)}</h3></div>${risk(x.risk)}<button data-dept-target="${esc(x.target)}">Open</button></article>`).join("")||empty("No deadlines recorded.")}</div>`);
+  D.settings.legal=()=>`<div class="audit-settings-grid">${panel("Document authority","Central registry for all departments",`<div class="audit-permission-list"><div>${icons.check}<span><b>Upload documents for any department</b><small>Authority level ${L().access.authorityLevel}</small></span></div><div>${icons.check}<span><b>Set visibility</b><small>All departments, selected departments, or members</small></span></div></div>`)}${panel("Bio-data & settings","Member records stay available here",`<div class="audit-readonly-note">${icons.users}<div><strong>Bio Data remains in this workspace</strong><p>Member registration and bio-data stay under Documents Department administration.</p></div></div>`)}</div>`;
   D.actions.legal=()=>{
-    const add=(type,label,secondary=false)=>`<button class="button ${secondary?"secondary":"primary"}" data-dept-modal="${type}">${icons.plus}${label}</button>`;
-    if(state.page==="legal-cases")return `<div class="head-actions">${add("case","Register case")}</div>`;
-    if(state.page==="legal-contracts")return `<div class="head-actions">${add("contract","Add contract")}${add("document-contract","Upload contract",true)}</div>`;
-    if(state.page==="legal-agreements")return `<div class="head-actions">${add("contract","Add agreement")}${add("document-agreement","Upload agreement",true)}</div>`;
-    if(state.page==="legal-policies")return `<div class="head-actions">${add("policy","Add policy")}${add("document-policy","Upload policy",true)}</div>`;
-    if(state.page==="legal-constitution")return `<div class="head-actions">${add("document-constitution","Upload / update constitution")}</div>`;
-    if(state.page==="legal-complaints")return `<div class="head-actions">${add("complaint","Register complaint")}</div>`;
-    if(state.page==="legal-opinions")return `<div class="head-actions">${add("opinion","New legal opinion")}</div>`;
-    if(["legal-documents","legal-reports"].includes(state.page))return `<div class="head-actions">${add("document","Upload legal document")}</div>`;
+    const code=pageDeptCode();
+    if(state.page==="dashboard"||state.page==="legal-documents"||code){
+      return `<div class="head-actions"><button class="button primary" data-dept-modal="document">${icons.plus}${code?`Add ${libraryMeta(code).name} document`:"Upload document"}</button></div>`;
+    }
     return "";
   };
-  D.actions.legalReport=name=>download(name,name.includes("Contract")?L().contracts:name.includes("Policy")?L().policies:name.includes("Complaint")?L().complaints:L().cases);
+  D.actions.legalReport=name=>download(name,L().documents||[]);
+  function syncAudiencePicker(form){
+    const mode=form.querySelector('[name="audienceMode"]')?.value||"all";
+    const picker=form.querySelector("[data-audience-departments]");
+    if(picker)picker.hidden=mode!=="departments";
+  }
   function documentForm(existing=null,preset={}){
-    const current=existing||preset||{},types=["Constitution","Bylaws","Policies","Signed Contracts","Agreements","Minutes","Legal Opinions","Court Documents","Legal Documents","Annual Reports","Audit Reports"];
-    const level=Number(current.visibilityLevel||1);
-    modal(existing?"Update Legal document":"Upload Legal document","Choose who can see this document. Publishing to an audience makes it visible immediately.",`<form class="form" data-legal-document-form="${current.id||""}"><div class="form-grid"><div class="field full"><label>Document title</label><input name="title" value="${esc(current.title||"")}" required></div><div class="field"><label>Document type</label><select name="documentType">${types.map(x=>`<option ${current.documentType===x||x==="Minutes"&&["Board Minutes","Meeting Minutes"].includes(current.documentType)?"selected":""}>${x}</option>`).join("")}</select></div><div class="field"><label>Version</label><input name="version" value="${esc(current.version||"1.0")}" required></div><div class="field"><label>Who can see it</label><select name="visibilityLevel"><option value="1" ${level===1?"selected":""}>Everyone (members and all staff)</option><option value="2" ${level===2?"selected":""}>All departments</option><option value="3" ${level===3?"selected":""}>Leadership</option><option value="4" ${level>=4?"selected":""}>Legal and Executive only</option></select><small>This audience is applied as soon as the document is published.</small></div><div class="field"><label>Publication</label><select name="status"><option value="published" ${!current.status||current.status==="published"?"selected":""}>Publish now</option><option value="pending_executive" ${current.status==="pending_executive"?"selected":""}>Request Executive publication</option><option value="draft" ${current.status==="draft"?"selected":""}>Save draft</option></select></div><div class="field full"><label>${existing?"Upload a new file version":"Choose document file"}</label><input name="file" type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,image/*" ${existing?"":"required"}></div></div>${formEnd(existing?"Save document":"Upload document")}</form>`);
-    document.querySelector("[data-legal-document-form]")?.addEventListener("submit",async event=>{event.preventDefault();const form=event.currentTarget,data=new FormData(form),file=data.get("file"),body={title:data.get("title"),documentType:data.get("documentType"),version:data.get("version"),status:data.get("status"),visibilityLevel:Number(data.get("visibilityLevel")||1),department:"legal"};try{let id=form.dataset.legalDocumentForm;if(id){await api(`/api/documents/${id}`,{method:"PATCH",body:JSON.stringify(body)});}else{id=(await api("/api/documents",{method:"POST",body:JSON.stringify(body)})).id;}if(file?.size){const upload=new FormData();upload.append("file",file);upload.append("version",body.version);const response=await fetch(`/api/documents/${id}/versions`,{method:"POST",credentials:"same-origin",body:upload});const result=await response.json();if(!response.ok)throw new Error(result.error||"Document upload failed");}closeModal();await reload(body.status==="pending_executive"?"Document sent to Executive for publication approval.":body.status==="published"?`Document published for ${audienceLabel(body.visibilityLevel).toLowerCase()}.`:"Legal document saved as draft.");}catch(error){toast(error.message);}});
+    const current=existing||preset||{};
+    const preferred=String(current.departmentCode||pageDeptCode()||"credits");
+    const types=TYPE_BY_DEPT[preferred]||TYPE_BY_DEPT.executive;
+    const allTypes=[...new Set([...types,"Policies","Minutes","Agreements","Signed Contracts","Annual Reports","Audit Reports","Legal Documents","Constitution","Bylaws"])];
+    const mode=audienceModeFromDoc(current);
+    const selected=new Set(parseAudience(current.audienceDepartments));
+    if(mode==="departments"&&!selected.size)selected.add(preferred);
+    const deptOptions=LIBRARY_DEPTS.map(x=>`<option value="${x.code}" ${preferred===x.code?"selected":""}>${esc(x.name)}</option>`).join("");
+    const deptChecks=VIEW_DEPTS.map(x=>`<label class="doc-audience-option"><input type="checkbox" name="audienceDepartments" value="${x.code}" ${selected.has(x.code)?"checked":""}><span>${esc(x.name)}</span></label>`).join("");
+    modal(existing?"Update document":"Upload document","File under a department library, then choose who can see it.",`<form class="form" data-legal-document-form="${current.id||""}"><div class="form-grid">
+      <div class="field full"><label>Document title</label><input name="title" value="${esc(current.title||"")}" required></div>
+      <div class="field"><label>Department library</label><select name="department" required>${deptOptions}</select><small>Document is stored under this department.</small></div>
+      <div class="field"><label>Document type</label><select name="documentType">${allTypes.map(x=>`<option ${current.documentType===x||(x==="Minutes"&&["Board Minutes","Meeting Minutes"].includes(current.documentType))?"selected":""}>${x}</option>`).join("")}</select></div>
+      <div class="field"><label>Version</label><input name="version" value="${esc(current.version||"1.0")}" required></div>
+      <div class="field"><label>Who can see it</label><select name="audienceMode">
+        <option value="all" ${mode==="all"?"selected":""}>All departments</option>
+        <option value="departments" ${mode==="departments"?"selected":""}>Departments</option>
+        <option value="members" ${mode==="members"?"selected":""}>Members</option>
+      </select><small>Choose Departments to pick one or more departments.</small></div>
+      <div class="field"><label>Publication</label><select name="status">
+        <option value="published" ${!current.status||current.status==="published"?"selected":""}>Publish now</option>
+        <option value="draft" ${current.status==="draft"?"selected":""}>Save draft</option>
+        <option value="pending_executive" ${current.status==="pending_executive"?"selected":""}>Request Executive publication</option>
+      </select></div>
+      <div class="field full doc-audience-picker" data-audience-departments ${mode==="departments"?"":"hidden"}><label>Select departments</label><div class="doc-audience-grid">${deptChecks}</div></div>
+      <div class="field full"><label>${existing?"Upload a new file version":"Choose document file"}</label><input name="file" type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,image/*" ${existing?"":"required"}><small>Word (.docx) files are converted to PDF for clear in-app viewing.</small></div>
+    </div>${formEnd(existing?"Save document":"Upload document")}</form>`);
+    const form=document.querySelector("[data-legal-document-form]");
+    form?.querySelector('[name="audienceMode"]')?.addEventListener("change",()=>syncAudiencePicker(form));
+    syncAudiencePicker(form);
+    form?.addEventListener("submit",async event=>{
+      event.preventDefault();
+      const data=new FormData(form),file=data.get("file");
+      const audienceMode=String(data.get("audienceMode")||"all");
+      const audienceDepartments=data.getAll("audienceDepartments").map(value=>String(value).toLowerCase());
+      if(audienceMode==="departments"&&!audienceDepartments.length){toast("Select at least one department that can see this document.");return;}
+      const body={
+        title:data.get("title"),
+        documentType:data.get("documentType"),
+        version:data.get("version"),
+        status:data.get("status"),
+        audienceMode:audienceMode==="all"?"general":audienceMode,
+        audienceDepartments,
+        visibilityLevel:audienceMode==="members"?1:audienceMode==="departments"?3:2,
+        department:String(data.get("department")||preferred).toLowerCase()
+      };
+      try{
+        let id=form.dataset.legalDocumentForm;
+        if(id){await api(`/api/documents/${id}`,{method:"PATCH",body:JSON.stringify(body)});}
+        else{id=(await api("/api/documents",{method:"POST",body:JSON.stringify(body)})).id;}
+        if(file?.size){
+          const upload=new FormData();upload.append("file",file);upload.append("version",body.version);
+          const response=await fetch(`/api/documents/${id}/versions`,{method:"POST",credentials:"same-origin",body:upload});
+          const result=await response.json();
+          if(!response.ok)throw new Error(result.error||"Document upload failed");
+        }
+        closeModal();
+        await reload(body.status==="published"?`Document published (${audienceLabel(body)}).`:"Document saved.");
+      }catch(error){toast(error.message);}
+    });
   }
   function quick(type){
-    if(type==="menu")return modal("Legal quick actions","Open a protected Legal record",`<div class="dept-quick-grid"><button data-dept-modal="case">${icons.shield}<b>Register case</b></button><button data-dept-modal="contract">${icons.file}<b>Add contract</b></button><button data-dept-modal="complaint">${icons.messages}<b>Complaint</b></button><button data-dept-modal="opinion">${icons.info}<b>Legal opinion</b></button><button data-dept-modal="document">${icons.download}<b>Upload document</b></button></div>`);
-    if(type==="document")return documentForm();
-    const documentPresets={"document-contract":{documentType:"Signed Contracts"},"document-agreement":{documentType:"Agreements"},"document-policy":{documentType:"Policies"},"document-constitution":{documentType:"Constitution",title:"Kasangati G40 Kwagalana Constitution"}};
-    if(type==="document-constitution")return documentForm(L().documents.find(x=>x.documentType==="Constitution")||null,documentPresets[type]);
-    if(documentPresets[type])return documentForm(null,documentPresets[type]);
-    const forms={
-      case:["Register legal case","Create a confidential case file and initial timeline",`<form class="form" data-legal-form="case"><div class="form-grid"><div class="field"><label>Category</label><input name="category" required></div><div class="field"><label>Risk</label><select name="riskLevel"><option>low</option><option>medium</option><option>high</option><option>critical</option></select></div><div class="field full"><label>Subject / parties</label><input name="subject" required></div><div class="field"><label>Department</label><select name="departmentId">${departments()}</select></div><div class="field"><label>Assigned officer</label><input name="assignedOfficer"></div><div class="field"><label>Next hearing</label><input name="nextHearingAt" type="datetime-local"></div><div class="field"><label>Evidence reference</label><input name="evidence"></div><div class="field full"><label>Description</label><textarea name="description" required></textarea></div></div>${formEnd("Register case")}</form>`],
-      contract:["Add contract for Legal review","Store lifecycle, parties, value and supporting reference",`<form class="form" data-legal-form="contract"><div class="form-grid"><div class="field full"><label>Title</label><input name="title" required></div><div class="field"><label>Type</label><input name="contractType" required></div><div class="field"><label>Department</label><select name="departmentId">${departments()}</select></div><div class="field full"><label>Parties involved</label><input name="parties" required></div><div class="field"><label>Value</label><input name="contractValue" type="number" min="0" value="0"></div><div class="field"><label>Responsible officer</label><input name="responsibleOfficer"></div><div class="field"><label>Start</label><input name="startsOn" type="date"></div><div class="field"><label>End</label><input name="endsOn" type="date"></div><div class="field"><label>Renewal</label><input name="renewalDate" type="date"></div><div class="field"><label>Supporting document</label><input name="supportingDocument"></div><div class="field full"><label>Review notes</label><textarea name="reviewNotes"></textarea></div></div>${formEnd("Submit for review")}</form>`],
-      complaint:["Register complaint","Protected intake for member, staff or department complaints",`<form class="form" data-legal-form="complaint"><div class="form-grid"><div class="field"><label>Complainant</label><input name="complainant" required></div><div class="field"><label>Type</label><input name="complaintType" required></div><div class="field"><label>Department</label><select name="departmentId">${departments()}</select></div><div class="field"><label>Assigned officer</label><input name="assignedOfficer"></div><div class="field full"><label>Description</label><textarea name="description" required></textarea></div><div class="field full"><label>Evidence</label><textarea name="evidence"></textarea></div></div>${formEnd("Register complaint")}</form>`],
-      policy:["Register policy","Open legal review and version tracking",`<form class="form" data-legal-form="policy"><div class="form-grid"><div class="field full"><label>Policy name</label><input name="policyName" required></div><div class="field"><label>Category</label><input name="policyCategory" required></div><div class="field"><label>Version</label><input name="version" value="1.0" required></div><div class="field"><label>Effective date</label><input name="effectiveDate" type="date"></div><div class="field"><label>Review date</label><input name="reviewDate" type="date"></div><div class="field full"><label>Document reference</label><input name="documentReference"></div></div>${formEnd("Open policy review")}</form>`],
-      opinion:["New legal opinion request","Track the question, counsel and due date",`<form class="form" data-legal-form="opinion"><div class="form-grid"><div class="field full"><label>Title</label><input name="title" required></div><div class="field"><label>Department</label><select name="departmentId">${departments()}</select></div><div class="field"><label>Assigned officer</label><input name="assignedOfficer"></div><div class="field"><label>Due date</label><input name="dueDate" type="date" required></div><div class="field full"><label>Legal question</label><textarea name="question" required></textarea></div></div>${formEnd("Create opinion request")}</form>`]
-    },item=forms[type];if(!item)return;modal(item[0],item[1],item[2]);document.querySelector("[data-legal-form]")?.addEventListener("submit",async event=>{event.preventDefault();const form=event.currentTarget,data=Object.fromEntries(new FormData(form));if(data.departmentId)data.departmentId=Number(data.departmentId);else delete data.departmentId;try{const endpoint={case:"cases",contract:"contracts",complaint:"complaints",policy:"policies",opinion:"opinions"}[form.dataset.legalForm];await api(`/api/legal/${endpoint}`,{method:"POST",body:JSON.stringify(data)});closeModal();await reload("Legal record saved.");}catch(error){toast(error.message);}});}
+    if(type==="menu")return modal("Document quick actions","Add to a department library",`<div class="dept-quick-grid">${LIBRARY_DEPTS.map(x=>`<button data-dept-target="${x.page}">${icons[x.icon]||icons.file}<b>${esc(x.name)}</b></button>`).join("")}<button data-dept-modal="document">${icons.plus}<b>Upload document</b></button></div>`);
+    if(type==="document")return documentForm(null,{departmentCode:pageDeptCode()||"credits",visibilityLevel:2});
+  }
   D.quick.legal=quick;
   D.binders.push(cfg=>{if(cfg.key!=="legal")return;document.querySelectorAll("[data-legal-document]").forEach(x=>x.addEventListener("click",()=>documentForm(L().documents.find(d=>String(d.id)===x.dataset.legalDocument))));});
   D.binders.push(cfg=>{if(cfg.key!=="legal")return;document.querySelectorAll("[data-legal-contract]").forEach(x=>x.addEventListener("click",async()=>{const decision=prompt("Decision: approve, reject, more_information","approve");if(!decision)return;const comment=prompt("Legal review note:","Legal requirements verified.")||"";try{await api(`/api/legal/contracts/${x.dataset.legalContract}/decision`,{method:"POST",body:JSON.stringify({decision,comment})});await reload("Contract review recorded.");}catch(error){toast(error.message);}}));document.querySelectorAll("[data-legal-case]").forEach(x=>x.addEventListener("click",async()=>{const status=prompt("Case status: open, investigation, hearing, appeal, resolved, closed","investigation");if(!status)return;const note=prompt("Timeline note or decision:","")||"";try{await api(`/api/legal/cases/${x.dataset.legalCase}/update`,{method:"POST",body:JSON.stringify({status,note})});await reload("Case timeline updated.");}catch(error){toast(error.message);}}));document.querySelectorAll("[data-legal-complaint]").forEach(x=>x.addEventListener("click",async()=>{const status=prompt("Complaint stage: submitted, legal_review, investigation, recommendation, decision, closed","legal_review");if(!status)return;const comment=prompt("Recommendation or decision note:","")||"";try{await api(`/api/legal/complaints/${x.dataset.legalComplaint}/advance`,{method:"POST",body:JSON.stringify({status,comment})});await reload("Complaint stage updated.");}catch(error){toast(error.message);}}));});

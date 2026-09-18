@@ -17,18 +17,22 @@
         "welfare-reports":"reports","welfare-analytics":"reports","welfare-documents":"file","welfare-notifications":"bell"}
     },
     "Legal Officer": {
-      key:"legal", title:"Legal Department", dashboardTitle:"Legal Department Dashboard",
-      pages:["dashboard","messages","legal-cases","legal-contracts","legal-agreements","legal-policies","legal-constitution","legal-documents","legal-disciplinary","legal-complaints",
+      key:"legal", title:"Documents Department", dashboardTitle:"Documents Department Dashboard",
+      pages:["dashboard","messages","docs-credits","docs-investment","docs-finance","docs-welfare","docs-supervisory","docs-audit","docs-executive","docs-general",
+        "legal-documents","legal-cases","legal-contracts","legal-agreements","legal-policies","legal-constitution","legal-disciplinary","legal-complaints",
         "legal-opinions","legal-compliance","legal-court","legal-reports","legal-calendar",
         "legal-notifications","settings","legal-search"],
-      sidebarPages:["dashboard","legal-bio-data","messages","legal-cases","legal-contracts","legal-policies","legal-documents","legal-complaints","legal-compliance","legal-reports","legal-notifications","settings"],
-      labels:{dashboard:"Dashboard",messages:"Messages","legal-cases":"Legal Cases","legal-contracts":"Contracts","legal-agreements":"Agreements",
+      sidebarPages:["dashboard","legal-bio-data","messages","docs-credits","docs-investment","docs-finance","docs-welfare","docs-supervisory","docs-audit","docs-executive","docs-general","legal-notifications","settings"],
+      labels:{dashboard:"Dashboard",messages:"Messages","docs-credits":"Credits","docs-investment":"Investment","docs-finance":"Finance",
+        "docs-welfare":"Welfare","docs-supervisory":"Supervisory","docs-audit":"Audit","docs-executive":"Executive","docs-general":"General",
+        "legal-cases":"Legal Cases","legal-contracts":"Contracts","legal-agreements":"Agreements",
         "legal-policies":"Policies","legal-constitution":"Constitution","legal-disciplinary":"Disciplinary Cases","legal-complaints":"Complaints",
         "legal-opinions":"Legal Opinions","legal-compliance":"Compliance","legal-court":"Court Matters","legal-reports":"Reports",
-        "legal-documents":"Documents","legal-calendar":"Calendar","legal-notifications":"Notifications",settings:"Settings"},
-      icons:{"legal-cases":"shield","legal-contracts":"file","legal-agreements":"file","legal-policies":"reports","legal-constitution":"file",
-        "legal-disciplinary":"users","legal-complaints":"messages","legal-opinions":"info","legal-compliance":"audit",
-        "legal-court":"building","legal-reports":"reports","legal-documents":"file","legal-calendar":"clock",
+        "legal-documents":"All documents","legal-calendar":"Calendar","legal-notifications":"Notifications",settings:"Settings"},
+      icons:{"docs-credits":"wallet","docs-investment":"reports","docs-finance":"receipt","docs-welfare":"users","docs-supervisory":"shield",
+        "docs-audit":"audit","docs-executive":"building","docs-general":"file","legal-cases":"shield","legal-contracts":"file","legal-agreements":"file",
+        "legal-policies":"reports","legal-constitution":"file","legal-disciplinary":"users","legal-complaints":"messages","legal-opinions":"info",
+        "legal-compliance":"audit","legal-court":"building","legal-reports":"reports","legal-documents":"file","legal-calendar":"clock",
         "legal-notifications":"bell"}
     },
     Auditor: {
@@ -56,13 +60,17 @@
     "welfare-reports":["Welfare reporting","Reports"],"welfare-analytics":["Support intelligence","Analytics"],
     "welfare-documents":["Welfare evidence","Documents"],"welfare-notifications":["Welfare alerts","Notifications"],
     "welfare-search":["Welfare search","Search results"],
+    "docs-credits":["Credits records","Credits documents"],"docs-investment":["Investment records","Investment documents"],
+    "docs-finance":["Finance records","Finance documents"],"docs-welfare":["Welfare records","Welfare documents"],
+    "docs-supervisory":["Supervisory records","Supervisory documents"],"docs-audit":["Audit records","Audit documents"],
+    "docs-executive":["Executive records","Executive documents"],"docs-general":["Shared records","General documents"],
     "legal-cases":["Confidential matters","Legal Cases"],"legal-contracts":["Lifecycle control","Contracts"],
     "legal-agreements":["Official agreements","Agreements"],"legal-policies":["Governance documents","Policies"],"legal-constitution":["Founding document","Organization Constitution"],
     "legal-disciplinary":["Member discipline","Disciplinary Cases"],"legal-complaints":["Case intake","Complaints"],
     "legal-opinions":["Legal advice","Legal Opinions"],"legal-compliance":["Legal assurance","Compliance"],
     "legal-court":["Litigation","Court Matters"],"legal-reports":["Legal reporting","Reports"],
-    "legal-documents":["Secure records","Documents"],"legal-calendar":["Deadlines","Calendar"],
-    "legal-notifications":["Legal alerts","Notifications"],"legal-search":["Legal search","Search results"],
+    "legal-documents":["Organization library","All documents"],"legal-calendar":["Deadlines","Calendar"],
+    "legal-notifications":["Document alerts","Notifications"],"legal-search":["Document search","Search results"],
     "audit-plans":["Assurance planning","Audit Plans"],audits:["Engagement management","Audits"],
     "audit-findings":["Evidence and exceptions","Audit Findings"],"audit-investigations":["Independent review","Investigations"],
     "audit-recommendations":["Remediation control","Recommendations"],"audit-compliance":["Control assurance","Compliance Monitoring"],
@@ -103,7 +111,7 @@
     const data=state[cfg.key==="audit"?"auditCenter":cfg.key];
     const badgeValue=cfg.key==="audit"?data?.stats?.highRiskFindings:cfg.key==="legal"?data?.stats?.upcomingDeadlines:data?.stats?.emergencyCases;
     const badgePage=cfg.key==="audit"?"audit-findings":cfg.key==="legal"?"legal-calendar":"welfare-emergencies";
-    return `<aside class="sidebar executive-sidebar ${cfg.key}-sidebar" id="sidebar"><div class="executive-brand"><div class="executive-crest ${cfg.key}-crest">${icons[cfg.key==="welfare"?"users":cfg.key==="legal"?"shield":"audit"]}</div><div><strong>KASANGATI G40<br>KWAGALANA</strong><span>${cfg.title.toUpperCase()}</span></div></div>
+    return `<aside class="sidebar executive-sidebar ${cfg.key}-sidebar" id="sidebar"><div class="executive-brand"><div class="executive-crest ${cfg.key}-crest">${icons[cfg.key==="welfare"?"users":cfg.key==="legal"?"file":"audit"]}</div><div><strong>KASANGATI G40<br>KWAGALANA</strong><span>${cfg.title.toUpperCase()}</span></div></div>
       <nav class="nav executive-nav">${(cfg.sidebarPages||cfg.pages).filter(x=>!x.endsWith("-search")&&cfg.pages.includes(x)).map(page=>`<button class="nav-item ${state.page===page?"active":""}" data-page="${page}">${icons[cfg.icons[page]||page]||icons.dashboard}<span>${cfg.labels[page]}</span>${page===badgePage&&badgeValue?`<span class="nav-alert-dot" aria-hidden="true"></span>`:page==="messages"&&state.unreadMessages?`<span class="nav-alert-dot" aria-hidden="true"></span>`:""}</button>`).join("")}</nav>
       <div class="sidebar-bottom">${state.executiveWorkspace?`<button class="executive-quick" data-executive-workspace-exit>${icons.arrowUp}<span>Back to Executive</span></button>`:`<button class="executive-quick" data-dept-quick="${cfg.key}">${icons.arrowUp}<span>Quick Actions</span><b>^</b></button>`}<div class="sidebar-user"><div class="avatar blue">${profileImage(state.user.id,actor(),state.user.has_profile_photo)}</div><div><div class="user-name">${esc(actor())}</div><div class="user-role">${state.executiveWorkspace?"Executive read-only view":cfg.title}</div></div></div></div></aside>`;
   }
@@ -123,7 +131,7 @@
   view=function(){const cfg=effectiveConfig();if(cfg){if(state.page==="settings"&&ui.settings[cfg.key])return ui.settings[cfg.key]();if(ui.views[state.page])return ui.views[state.page]();}return baseView();};
 
   const baseRender=render;
-  render=function(){baseRender();const cfg=effectiveConfig();if(!cfg)return;const eyebrow=document.querySelector(".page-head .eyebrow");const title=document.querySelector(".page-head h1");if(state.page==="dashboard"){if(eyebrow)eyebrow.textContent=cfg.title;if(title)title.textContent=cfg.dashboardTitle;}const search=document.getElementById("global-search");if(search)search.placeholder=cfg.key==="audit"?"Search audit, finding, risk, investigation, recommendation...":cfg.key==="legal"?"Search case, contract, policy, complaint, court file...":"Search member, request, receipt, beneficiary, activity...";};
+  render=function(){baseRender();const cfg=effectiveConfig();if(!cfg)return;const eyebrow=document.querySelector(".page-head .eyebrow");const title=document.querySelector(".page-head h1");if(state.page==="dashboard"){if(eyebrow)eyebrow.textContent=cfg.title;if(title)title.textContent=cfg.dashboardTitle;}const search=document.getElementById("global-search");if(search)search.placeholder=cfg.key==="audit"?"Search audit, finding, risk, investigation, recommendation...":cfg.key==="legal"?"Search document, department, title, policy...":"Search member, request, receipt, beneficiary, activity...";};
 
   function installSearch(){
     const cfg=effectiveConfig(),input=document.getElementById("global-search");if(!cfg||!input)return;

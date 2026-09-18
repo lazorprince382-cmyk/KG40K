@@ -85,6 +85,10 @@ if (!skipSync) {
     "scripts/reverse-welfare-historical-deduction.js",
     ...dry,
   ]);
+  run("Disperse Legal documents into department libraries", "node", [
+    "scripts/disperse-organization-documents.js",
+    ...dry,
+  ]);
   run("Pin Dan savings to UGX 8,900,000 (finance accounts unchanged)", "node", [
     "scripts/sync-dan-savings-8900000.js",
     ...dry,

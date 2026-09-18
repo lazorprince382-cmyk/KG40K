@@ -472,7 +472,7 @@
           }).join("")||`<div class="member-empty">No eligible guarantor accounts are currently available.</div>`}</div>
           <small>Select enough guarantors so 75% of their savings covers what your own 75% does not. Call them to accept from their dashboards.</small>
         </div>
-        <div class="field full record-file-field"><label>Supporting documents (optional)</label><input name="supportingDocument" type="file" multiple accept="image/jpeg,image/png,image/webp,application/pdf,.doc,.docx"><small>You can attach more than one file (land title, owner photo, logbook, quotation, etc.).</small></div>
+        <div class="field full record-file-field"><label>Supporting documents (optional)</label><input name="supportingDocument" type="file" multiple accept="image/jpeg,image/png,image/webp,application/pdf,.doc,.docx"><small>You can attach more than one file (land title, owner photo, logbook, quotation, etc.). Word (.docx) files are converted to PDF for clear in-app viewing.</small></div>
         <label class="field full check-field loan-overdue-check"><input type="checkbox" name="overdueDeclaration" value="accepted" required><span>I understand that from the day after the due date, unpaid principal attracts a 5% late-payment penalty (interest is not included in the penalty base), plus recovery costs and security enforcement.</span></label>
       </div><div class="member-form-message" data-loan-message aria-live="polite"></div><div class="form-actions"><button type="button" class="button secondary" data-close-modal>Cancel</button><button type="submit" class="button primary">Submit loan application</button></div></form>`);
       const form=document.querySelector("[data-member-loan-form]");

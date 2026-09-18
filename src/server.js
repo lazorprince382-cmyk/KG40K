@@ -21,6 +21,7 @@ const {
 } = require("./loan-security");
 const { getRunningLoan, getSavingsTargetStatus, getGuarantorEligibility } = require("./loan-eligibility");
 const { loadWelfareStanding, loadWelfareMonth, enforceOneMonthlyWelfareCharge } = require("./welfare-standing");
+const { isWordUpload, convertWordUploadToPdf } = require("./services/office-pdf");
 
 function isMemberSavingsFinanceCategory(category="") {
   return /member\s*savings|^savings$|savings\s*deposit/i.test(String(category || "").trim());
@@ -312,6 +313,39 @@ const publicDir=path.join(projectRoot,"public");
 const uploadsDir=path.join(projectRoot,"storage","uploads");
 const officialTextDir=path.join(projectRoot,"storage","official-text");
 fs.mkdirSync(uploadsDir,{recursive:true});
+/** Convert Word uploads to PDF so the in-app viewer can render them clearly. */
+async function maybeConvertUploadToPdf(file){
+  if(!file?.path||!isWordUpload(file))return file;
+  const pdf=await convertWordUploadToPdf(file,uploadsDir);
+  if(!pdf)return file;
+  try{fs.unlinkSync(file.path);}catch(_){/* keep original if unlink fails */}
+  file.filename=pdf.filename;
+  file.originalname=pdf.originalname;
+  file.mimetype=pdf.mimetype;
+  file.size=pdf.size;
+  file.path=pdf.path;
+  file.convertedFrom=pdf.convertedFrom;
+  return file;
+}
+async function ensureOrganizationVersionIsPdf(version){
+  if(!version||!isWordUpload({mimetype:version.mime_type,originalname:version.original_name,filename:version.stored_name}))return version;
+  const sourcePath=resolveOrganizationDocumentFile(version);
+  if(!sourcePath)return version;
+  const pdf=await convertWordUploadToPdf({
+    path:sourcePath,originalname:version.original_name,filename:version.stored_name,mimetype:version.mime_type
+  },uploadsDir);
+  if(!pdf)return version;
+  const sha256=crypto.createHash("sha256").update(fs.readFileSync(pdf.path)).digest("hex");
+  await query(`UPDATE organization_document_versions
+    SET original_name=$1,stored_name=$2,mime_type=$3,file_size=$4,sha256=$5 WHERE id=$6`,
+    [pdf.originalname,pdf.filename,pdf.mimetype,pdf.size,sha256,version.id]);
+  await query("UPDATE organization_documents SET file_name=$1,updated_at=NOW() WHERE id=$2",
+    [pdf.originalname,version.document_id]);
+  if(path.resolve(sourcePath)!==path.resolve(pdf.path)){
+    try{fs.unlinkSync(sourcePath);}catch(_){/* ignore */}
+  }
+  return {...version,original_name:pdf.originalname,stored_name:pdf.filename,mime_type:pdf.mimetype,file_size:pdf.size,sha256};
+}
 function resolveOrganizationDocumentFile(version){
   const stored=path.basename(String(version?.stored_name||""));
   const original=path.basename(String(version?.original_name||""));
@@ -565,9 +599,11 @@ function requireDepartment(action) {
 
 app.post("/api/departments/:code/files",auth,requireDepartment("create"),upload.single("file"),asyncRoute(async(req,res)=>{
   if(!req.file)return res.status(400).json({error:"Choose a file to upload"});
+  await maybeConvertUploadToPdf(req.file);
   await audit({userId:req.user.id,action:"DEPARTMENT_FILE_UPLOADED",entityType:req.departmentAccess.code,
-    entityId:req.file.filename,details:req.file.originalname,...metadata(req)});
+    entityId:req.file.filename,details:req.file.convertedFrom?`${req.file.originalname} (from ${req.file.convertedFrom})`:req.file.originalname,...metadata(req)});
   res.status(201).json({fileName:req.file.originalname,storedName:req.file.filename,mimeType:req.file.mimetype,size:req.file.size,
+    convertedFrom:req.file.convertedFrom||null,
     url:`/api/departments/${encodeURIComponent(req.departmentAccess.code)}/files/${encodeURIComponent(req.file.filename)}`});
 }));
 app.get("/api/departments/:code/files/:storedName",auth,requireDepartment("view"),asyncRoute(async(req,res)=>{
@@ -575,7 +611,10 @@ app.get("/api/departments/:code/files/:storedName",auth,requireDepartment("view"
   if(!/^[a-zA-Z0-9._-]+$/.test(storedName))return res.status(400).json({error:"Invalid file name"});
   const filePath=path.join(uploadsDir,storedName);
   if(!fs.existsSync(filePath))return res.status(404).json({error:"File not found"});
+  const ext=path.extname(storedName).toLowerCase();
+  const mime=ext===".pdf"?"application/pdf":ext===".png"?"image/png":ext===".jpg"||ext===".jpeg"?"image/jpeg":ext===".webp"?"image/webp":undefined;
   res.set("Content-Disposition",`inline; filename="${storedName.replace(/["\\]/g,"")}"`);
+  if(mime){res.type(mime);res.set("X-Document-Mime-Type",mime);}
   res.sendFile(filePath);
 }));
 
@@ -775,9 +814,9 @@ app.get("/api/executive/command-center",auth,requireExecutive("view"),asyncRoute
   const selectedFiscalYear=availableFiscalYears.some(row=>row.year===requestedFiscalYear)?requestedFiscalYear:defaultFiscalYear;
   const [memberStats,departments,approvals,financeTotals,savings,loanStats,investments,welfare,legal,auditIssues,supervisory,meetings,
     activities,documents,financeEntries,welfareRequests,governanceRows,approvalHistory]=await Promise.all([
-    query(`SELECT COUNT(*)::int AS total,
+    query(`SELECT COUNT(*) FILTER (WHERE status='active')::int AS total,
       COUNT(*) FILTER (WHERE status='active')::int AS active,
-      COUNT(*) FILTER (WHERE joined_at>=date_trunc('month',CURRENT_DATE))::int AS new_this_month
+      COUNT(*) FILTER (WHERE status='active' AND joined_at>=date_trunc('month',CURRENT_DATE))::int AS new_this_month
       FROM members WHERE deleted_at IS NULL`),
     query(`SELECT d.id,d.code,d.name,d.description,d.sort_order AS "sortOrder",
       COUNT(da.id)::int AS staff FROM departments d LEFT JOIN department_assignments da ON da.department_id=d.id AND da.active=true
@@ -3473,13 +3512,42 @@ app.get("/api/legal/command-center",auth,requireLegal("view"),asyncRoute(async(r
       m.court_order AS "courtOrder",m.judgement,m.appeal_status AS "appealStatus",m.legal_expenses::float AS "legalExpenses",
       m.status,m.created_at AS "createdAt" FROM legal_court_matters m ORDER BY m.next_hearing_at NULLS LAST`),
     query(`SELECT doc.id,doc.reference,doc.document_type AS "documentType",doc.title,doc.version,doc.status,
-      doc.visibility_level AS "visibilityLevel",doc.file_name AS "fileName",doc.updated_at AS "updatedAt",
+      doc.visibility_level AS "visibilityLevel",doc.audience_departments AS "audienceDepartments",doc.file_name AS "fileName",doc.updated_at AS "updatedAt",
+      d.code AS "departmentCode",d.name AS "departmentName",
       EXISTS(SELECT 1 FROM organization_document_versions v WHERE v.document_id=doc.id) AS "hasFile" FROM organization_documents doc
       LEFT JOIN departments d ON d.id=doc.department_id
-      WHERE doc.status<>'archived' AND (d.code='legal' OR (doc.status='published' AND doc.visibility_level<=2 AND doc.document_type IN ('Constitution','Policies','Signed Contracts','Legal Documents')))
+      WHERE doc.status<>'archived' AND (d.code IS NULL OR d.code<>'legal' OR doc.document_type IS NOT NULL)
       ORDER BY doc.updated_at DESC`),
     query("SELECT id,code,name FROM departments WHERE active=true ORDER BY sort_order")
   ]);
+  const libraryOrder=["credits","investment","finance","welfare","supervisory","audit","executive","general"];
+  const libraryNotes={
+    credits:"Loan and credit records",investment:"Projects and proposals",finance:"Accounts and reports",
+    welfare:"Support and contributions",supervisory:"Oversight records",audit:"Assurance evidence",
+    executive:"Governance and minutes",general:"Shared organization documents"
+  };
+  const pageByCode={
+    credits:"docs-credits",investment:"docs-investment",finance:"docs-finance",welfare:"docs-welfare",
+    supervisory:"docs-supervisory",audit:"docs-audit",executive:"docs-executive",general:"docs-general"
+  };
+  const tones={credits:"orange",investment:"teal",finance:"green",welfare:"violet",supervisory:"blue",audit:"red",executive:"blue",general:"violet"};
+  const iconsBy={credits:"wallet",investment:"reports",finance:"receipt",welfare:"users",supervisory:"shield",audit:"audit",executive:"building",general:"file"};
+  const documentLibrary=libraryOrder.map(code=>{
+    const dept=departments.rows.find(d=>d.code===code)||{code,name:code==="general"?"General":code};
+    const docs=documents.rows.filter(x=>String(x.departmentCode||"").toLowerCase()===code).map(doc=>({
+      ...doc,
+      audienceDepartments:parseDocumentAudience(doc.audienceDepartments)
+    }));
+    return {
+      code,name:dept.name||code,page:pageByCode[code],note:libraryNotes[code],tone:tones[code],icon:iconsBy[code],
+      documentCount:docs.length,documents:docs
+    };
+  });
+  // Prefer library documents (exclude leftover legal/general-owned rows from the flat list after disperse)
+  const libraryDocuments=documents.rows.filter(x=>libraryOrder.includes(String(x.departmentCode||"").toLowerCase())).map(doc=>({
+    ...doc,
+    audienceDepartments:parseDocumentAudience(doc.audienceDepartments)
+  }));
   const openCases=cases.rows.filter(x=>!["resolved","closed"].includes(x.status)),resolvedCases=cases.rows.filter(x=>["resolved","closed"].includes(x.status));
   const disciplinary=cases.rows.filter(x=>String(x.category||"").toLowerCase().includes("disciplinary"));
   const contractsReview=contracts.rows.filter(x=>["draft","submitted","under_review","information_requested"].includes(x.status));
@@ -3503,39 +3571,32 @@ app.get("/api/legal/command-center",auth,requireLegal("view"),asyncRoute(async(r
       legalNotices:compliance.rows.filter(x=>["action_required","non_compliant"].includes(x.status)).length,
       pendingLegalOpinions:pendingOpinions.length,complianceScore,courtCases:courtMatters.rows.filter(x=>x.status!=="closed").length,
       upcomingDeadlines:deadlines.filter(x=>new Date(x.date).getTime()<days30).length,resolvedCases:resolvedCases.length,
-      legalDocuments:documents.rows.filter(x=>x.hasFile).length,documentRecords:documents.rows.length},
+      legalDocuments:libraryDocuments.filter(x=>x.hasFile).length,documentRecords:libraryDocuments.length},
     cases:cases.rows,contracts:contracts.rows,policies:policies.rows,complaints:complaints.rows,opinions:opinions.rows,
-    compliance:compliance.rows,courtMatters:courtMatters.rows,documents:documents.rows,departments:departments.rows,deadlines,
+    compliance:compliance.rows,courtMatters:courtMatters.rows,documents:libraryDocuments,documentLibrary,departments:departments.rows,deadlines,
     analytics:{caseCategories:Object.entries(caseCategories).map(([label,value])=>({label,value})),
       contractStatuses:Object.entries(contractStatuses).map(([label,value])=>({label,value})),
       complianceTrend:scores.length?[complianceScore]:[],
       complaintTrend:complaints.rows.length?[complaints.rows.filter(x=>new Date(x.createdAt).getMonth()===new Date().getMonth()).length]:[]},
     notifications:[
-      deadlines.some(x=>new Date(x.date).getTime()<now+7*86400000)&&{level:"danger",title:`${deadlines.filter(x=>new Date(x.date).getTime()<now+7*86400000).length} legal deadlines fall within seven days`,createdAt:deadlines.find(x=>new Date(x.date).getTime()<now+7*86400000)?.date,target:"legal-calendar"},
-      contractsReview.length&&{level:"info",title:`${contractsReview.length} contracts await Legal review`,createdAt:contractsReview[0]?.createdAt||contractsReview[0]?.updatedAt,target:"legal-contracts"},
-      policiesReview.length&&{level:"warning",title:`${policiesReview.length} policies require review or amendment`,createdAt:policiesReview[0]?.createdAt||policiesReview[0]?.updatedAt,target:"legal-policies"},
-      compliance.rows.some(x=>x.status==="non_compliant")&&{level:"danger",title:`${compliance.rows.filter(x=>x.status==="non_compliant").length} department has a high compliance risk`,createdAt:compliance.rows.find(x=>x.status==="non_compliant")?.updatedAt||compliance.rows.find(x=>x.status==="non_compliant")?.createdAt,target:"legal-compliance"},
-      resolvedCases.length&&{level:"success",title:`${resolvedCases.length} legal matters have recorded resolutions`,createdAt:resolvedCases[0]?.closedAt||resolvedCases[0]?.createdAt,target:"legal-cases"}
+      libraryDocuments.length&&{level:"info",title:`${libraryDocuments.length} documents across ${documentLibrary.filter(x=>x.documentCount>0).length} departments`,createdAt:libraryDocuments[0]?.updatedAt,target:"dashboard"},
+      documentLibrary.find(x=>x.documentCount===0)&&{level:"warning",title:`${documentLibrary.filter(x=>x.documentCount===0).map(x=>x.name).join(", ")} still need documents`,createdAt:new Date().toISOString(),target:"dashboard"},
+      deadlines.some(x=>new Date(x.date).getTime()<now+7*86400000)&&{level:"danger",title:`${deadlines.filter(x=>new Date(x.date).getTime()<now+7*86400000).length} deadlines fall within seven days`,createdAt:deadlines.find(x=>new Date(x.date).getTime()<now+7*86400000)?.date,target:"legal-calendar"}
     ].filter(Boolean),
-    access:{authorityLevel:req.legalAccess.authority_level,canCreate:Boolean(req.legalAccess.can_create),
-      canEdit:Boolean(req.legalAccess.can_edit),canApprove:Boolean(req.legalAccess.can_approve)}
+    access:{authorityLevel:req.legalAccess.authority_level,canCreate:Boolean(req.legalAccess.can_create)||req.user.role==="Legal Officer"||req.user.role==="System Admin",
+      canEdit:Boolean(req.legalAccess.can_edit)||req.user.role==="Legal Officer"||req.user.role==="System Admin",canApprove:Boolean(req.legalAccess.can_approve)}
   });
 }));
 app.get("/api/legal/search",auth,requireLegal("view"),asyncRoute(async(req,res)=>{
   const term=String(req.query.q||"").trim();if(term.length<2)return res.json({results:[]});const like=`%${term}%`;
   const results=await query(`SELECT * FROM (
-    SELECT 'Legal Case' AS type,case_number AS reference,subject_name AS title,case_category||' - '||status AS detail,'legal-cases' AS target
-      FROM legal_cases WHERE case_number ILIKE $1 OR subject_name ILIKE $1 OR case_category ILIKE $1 OR assigned_officer ILIKE $1
-    UNION ALL SELECT 'Contract',contract_number,title,parties||' - '||status,'legal-contracts'
-      FROM legal_contracts WHERE contract_number ILIKE $1 OR title ILIKE $1 OR parties ILIKE $1 OR contract_type ILIKE $1
-    UNION ALL SELECT 'Policy',reference,policy_name,policy_category||' - '||status,'legal-policies'
-      FROM legal_policies WHERE reference ILIKE $1 OR policy_name ILIKE $1 OR policy_category ILIKE $1
-    UNION ALL SELECT 'Complaint',complaint_number,complainant,complaint_type||' - '||status,'legal-complaints'
-      FROM legal_complaints WHERE complaint_number ILIKE $1 OR complainant ILIKE $1 OR complaint_type ILIKE $1
-    UNION ALL SELECT 'Court Matter',court_file,title,court_name||' - '||status,'legal-court'
-      FROM legal_court_matters WHERE court_file ILIKE $1 OR title ILIKE $1 OR court_name ILIKE $1
-    UNION ALL SELECT 'Legal Opinion',reference,title,status,'legal-opinions'
-      FROM legal_opinions WHERE reference ILIKE $1 OR title ILIKE $1 OR assigned_officer ILIKE $1
+    SELECT 'Document' AS type,doc.reference,doc.title,COALESCE(d.name,'Organization')||' - '||doc.document_type||' - '||doc.status AS detail,
+      CASE d.code
+        WHEN 'credits' THEN 'docs-credits' WHEN 'investment' THEN 'docs-investment' WHEN 'finance' THEN 'docs-finance'
+        WHEN 'welfare' THEN 'docs-welfare' WHEN 'supervisory' THEN 'docs-supervisory' WHEN 'audit' THEN 'docs-audit'
+        WHEN 'executive' THEN 'docs-executive' ELSE 'legal-documents' END AS target
+      FROM organization_documents doc LEFT JOIN departments d ON d.id=doc.department_id
+      WHERE doc.status<>'archived' AND (doc.reference ILIKE $1 OR doc.title ILIKE $1 OR doc.document_type ILIKE $1 OR COALESCE(doc.file_name,'') ILIKE $1 OR COALESCE(d.name,'') ILIKE $1)
     UNION ALL SELECT 'Member Bio' AS type,m.member_number,m.full_name,COALESCE(m.phone,'')||' - '||COALESCE(b.home_district,m.address,'')||' - '||COALESCE(b.bio_status,'pending'),'legal-bio-data'
       FROM members m LEFT JOIN member_bio_data b ON b.member_id=m.id
       WHERE m.member_number ILIKE $1 OR m.full_name ILIKE $1 OR m.national_id ILIKE $1 OR m.phone ILIKE $1
@@ -4063,6 +4124,7 @@ app.post("/api/loans",auth,upload.array("supportingDocument",10),(req,res,next)=
   const customProductName=String(b.customProductName||"").trim().slice(0,120);
   if(/^other loan$/i.test(product.name)&&!customProductName)return res.status(400).json({error:"Type the loan product name when selecting Other Loan"});
   const supportingFiles=[...(Array.isArray(req.files)?req.files:[]),req.file].filter(Boolean);
+  for(const file of supportingFiles)await maybeConvertUploadToPdf(file);
   const primaryDoc=supportingFiles[0]||null;
   const processingFeeRate=Number(product.processing_fee_rate||2);
   const processingFee=Math.round((amount*processingFeeRate/100+Number.EPSILON)*100)/100;
@@ -4500,6 +4562,23 @@ app.post("/api/loans/:id/disburse",auth,asyncRoute(async(req,res)=>{
   if(file!==uploadTarget){
     try{fs.mkdirSync(uploadsDir,{recursive:true});fs.copyFileSync(file,uploadTarget);file=uploadTarget;}catch(_){/* serve from seed path */}
   }
+  if(isWordUpload({mimetype:doc.mime,originalname:doc.original,filename:doc.stored})){
+    const pdf=await convertWordUploadToPdf({path:file,originalname:doc.original,filename:doc.stored,mimetype:doc.mime},uploadsDir);
+    if(pdf){
+      if(docId){
+        await query(`UPDATE loan_supporting_documents SET stored_name=$1,original_name=$2,mime_type=$3 WHERE id=$4`,
+          [pdf.filename,pdf.originalname,pdf.mimetype,docId]);
+      }else if(index===1&&loan.stored&&doc.stored===loan.stored){
+        await query(`UPDATE loans SET supporting_document_stored_name=$1,supporting_document_original_name=$2,supporting_document_mime_type=$3 WHERE id=$4`,
+          [pdf.filename,pdf.originalname,pdf.mimetype,loan.id]);
+      }else{
+        await query(`UPDATE loan_supporting_documents SET stored_name=$1,original_name=$2,mime_type=$3
+          WHERE loan_id=$4 AND stored_name=$5`,[pdf.filename,pdf.originalname,pdf.mimetype,loan.id,doc.stored]);
+      }
+      try{if(path.resolve(file)!==path.resolve(pdf.path))fs.unlinkSync(file);}catch(_){/* ignore */}
+      file=pdf.path;doc={stored:pdf.filename,original:pdf.originalname,mime:pdf.mimetype};
+    }
+  }
   res.type(doc.mime||"application/octet-stream");
   if(doc.mime)res.set("X-Document-Mime-Type",doc.mime);
   res.set("Content-Disposition",`inline; filename="${String(doc.original||"loan-document").replaceAll('"','')}"`);
@@ -4674,12 +4753,65 @@ app.post("/api/withdrawals/:id/process",auth,asyncRoute(async(req,res)=>{
 }));
 async function documentAccess(user,document,action="view") {
   if(user.role==="System Admin")return true;
+  if(["Legal Officer"].includes(user.role)&&["view","edit","delete"].includes(action))return true;
   if(action==="delete"&&["Executive Officer","Legal Officer"].includes(user.role))return true;
-  if(action==="view"&&["Auditor","Executive Officer","Supervisory Officer"].includes(user.role))return true;
-  if(action==="view"&&document.status==="published"&&user.role==="Member"&&Number(document.visibility_level)<=1)return true;
-  if(action==="view"&&document.status==="published"&&user.role!=="Member"&&Number(document.visibility_level)<=2)return true;
+  if(action==="view"&&["Auditor","Executive Officer","Supervisory Officer","Legal Officer"].includes(user.role))return true;
+  const level=Number(document.visibility_level||2);
   const code=document.department_code||"executive";
+  const audience=parseDocumentAudience(document.audience_departments);
+  if(action==="view"&&document.status==="published"){
+    if(level<=1){
+      return true; // members + staff
+    }
+    if(level===2){
+      if(user.role!=="Member")return true; // all departments
+      return false;
+    }
+    // Selected departments
+    if(["Legal Officer","System Admin","Executive Officer"].includes(user.role))return true;
+    const targets=audience.length?audience:[code];
+    for(const target of targets){
+      if(await departmentPermission(user,target,"view"))return true;
+    }
+    return false;
+  }
   return Boolean(await departmentPermission(user,code,action));
+}
+function parseDocumentAudience(raw){
+  if(!raw)return [];
+  try{
+    const parsed=JSON.parse(raw);
+    if(Array.isArray(parsed))return parsed.map(value=>String(value||"").trim().toLowerCase()).filter(Boolean);
+  }catch(_){/* fall through */}
+  return String(raw).split(/[,;]+/).map(value=>value.trim().toLowerCase()).filter(Boolean);
+}
+function normalizeDocumentAudience(body={},fallbackCode=""){
+  const mode=String(body.audienceMode||body.visibilityMode||"").trim().toLowerCase();
+  let visibility=Math.max(1,Math.min(5,Number(body.visibilityLevel||0)));
+  let audience=[];
+  if(mode==="members"||visibility===1){
+    visibility=1;audience=[];
+  }else if(mode==="departments"||visibility===3){
+    visibility=3;
+    const raw=body.audienceDepartments||body.audience_departments||[];
+    audience=(Array.isArray(raw)?raw:String(raw).split(/[,;]+/))
+      .map(value=>String(value||"").trim().toLowerCase())
+      .filter(code=>code&&code!=="legal"&&code!=="general");
+    if(!audience.length&&fallbackCode&&!["general","legal"].includes(fallbackCode))audience=[fallbackCode];
+  }else{
+    visibility=2;audience=[]; // all departments
+  }
+  return {visibility,audienceJson:audience.length?JSON.stringify(audience):null,audience};
+}
+async function documentCreateAccess(user,code){
+  const normalized=String(code||"").trim().toLowerCase();
+  if(!normalized)return null;
+  if(["Legal Officer","System Admin"].includes(user.role)){
+    const department=await one("SELECT id,code,name,description FROM departments WHERE code=$1 AND active=true",[normalized]);
+    if(!department)return null;
+    return {...department,position_title:"Document registry",authority_level:5,can_view:true,can_create:true,can_edit:true,can_approve:true,is_head:false};
+  }
+  return departmentPermission(user,normalized,"create");
 }
 const loadDocumentAccess=action=>asyncRoute(async(req,res,next)=>{
   const document=await one(`SELECT doc.*,d.code AS department_code,d.name AS department_name FROM organization_documents doc
@@ -4692,10 +4824,10 @@ const loadDocumentAccess=action=>asyncRoute(async(req,res,next)=>{
 app.get("/api/documents",auth,asyncRoute(async(req,res)=>{
   const code=String(req.query.department||"").trim().toLowerCase();
   if(!code)return res.status(400).json({error:"Choose a department"});
-  if(!await departmentPermission(req.user,code,"view")&&!["Auditor","Executive Officer","Supervisory Officer","System Admin"].includes(req.user.role))
+  if(!await departmentPermission(req.user,code,"view")&&!["Auditor","Executive Officer","Supervisory Officer","System Admin","Legal Officer"].includes(req.user.role))
     return res.status(403).json({error:"Document access denied"});
   const rows=(await query(`SELECT doc.id,doc.reference,doc.document_type AS "documentType",doc.title,doc.version,doc.status,
-    doc.visibility_level AS "visibilityLevel",doc.created_at AS "createdAt",d.code AS department,
+    doc.visibility_level AS "visibilityLevel",doc.audience_departments AS "audienceDepartments",doc.created_at AS "createdAt",d.code AS department,
     latest.id AS "versionId",latest.original_name AS "fileName",latest.mime_type AS "mimeType",latest.file_size AS "fileSize",latest.sha256
     FROM organization_documents doc JOIN departments d ON d.id=doc.department_id
     LEFT JOIN LATERAL (SELECT * FROM organization_document_versions v WHERE v.document_id=doc.id ORDER BY v.created_at DESC LIMIT 1) latest ON true
@@ -4704,27 +4836,40 @@ app.get("/api/documents",auth,asyncRoute(async(req,res)=>{
 }));
 app.post("/api/documents",auth,asyncRoute(async(req,res)=>{
   const b=req.body,code=String(b.department||"").trim().toLowerCase();
-  const access=await departmentPermission(req.user,code,"create");
+  const access=await documentCreateAccess(req.user,code);
   if(!access)return res.status(403).json({error:"Document creation access denied"});
   if(!b.title||!b.documentType)return res.status(400).json({error:"Document title and type are required"});
   let status=["draft","published","pending_executive","archived"].includes(b.status)?b.status:"draft";
-  const visibility=Math.max(1,Math.min(5,Number(b.visibilityLevel||2)));
+  const audience=normalizeDocumentAudience(b,code);
+  if(audience.visibility===3&&!audience.audience.length)return res.status(400).json({error:"Select at least one department that can see this document"});
   const row=await one(`INSERT INTO organization_documents
-    (reference,department_id,document_type,title,version,status,visibility_level,created_by)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id,reference`,
+    (reference,department_id,document_type,title,version,status,visibility_level,audience_departments,created_by)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id,reference`,
     [reference("DOC"),access.id,String(b.documentType).trim(),String(b.title).trim(),String(b.version||"1.0").trim(),
-      status,visibility,req.user.id]);
-  await audit({userId:req.user.id,action:"DOCUMENT_CREATED",entityType:"organization_document",entityId:String(row.id),details:row.reference,...metadata(req)});
+      status,audience.visibility,audience.audienceJson,req.user.id]);
+  await audit({userId:req.user.id,action:"DOCUMENT_CREATED",entityType:"organization_document",entityId:String(row.id),details:`${row.reference} → ${code}`,...metadata(req)});
   res.status(201).json(row);
 }));
 app.patch("/api/documents/:id",auth,loadDocumentAccess("edit"),asyncRoute(async(req,res)=>{
   const b=req.body;const status=["draft","published","pending_executive","archived"].includes(b.status)?b.status:req.organizationDocument.status;
   const title=String(b.title||req.organizationDocument.title).trim(),
-    documentType=String(b.documentType||req.organizationDocument.document_type).trim(),
-    visibility=Math.max(1,Math.min(5,Number(b.visibilityLevel||req.organizationDocument.visibility_level)));
+    documentType=String(b.documentType||req.organizationDocument.document_type).trim();
   if(!title||!documentType)return res.status(400).json({error:"Document title and type are required"});
-  await query(`UPDATE organization_documents SET title=$1,document_type=$2,status=$3,visibility_level=$4,updated_at=NOW()
-    WHERE id=$5`,[title,documentType,status,visibility,req.organizationDocument.id]);
+  let departmentId=req.organizationDocument.department_id;
+  let nextCode=String(b.department||req.organizationDocument.department_code||"").trim().toLowerCase();
+  if(b.department){
+    const access=await documentCreateAccess(req.user,nextCode);
+    if(!access)return res.status(403).json({error:"You cannot move documents into that department"});
+    departmentId=access.id;
+  }
+  const audience=normalizeDocumentAudience({
+    ...b,
+    visibilityLevel:b.visibilityLevel??req.organizationDocument.visibility_level,
+    audienceDepartments:b.audienceDepartments??parseDocumentAudience(req.organizationDocument.audience_departments)
+  },nextCode);
+  if(audience.visibility===3&&!audience.audience.length)return res.status(400).json({error:"Select at least one department that can see this document"});
+  await query(`UPDATE organization_documents SET title=$1,document_type=$2,status=$3,visibility_level=$4,audience_departments=$5,department_id=$6,updated_at=NOW()
+    WHERE id=$7`,[title,documentType,status,audience.visibility,audience.audienceJson,departmentId,req.organizationDocument.id]);
   await audit({userId:req.user.id,action:"DOCUMENT_METADATA_UPDATED",entityType:"organization_document",
     entityId:String(req.organizationDocument.id),details:`${documentType} - ${status}`,...metadata(req)});
   res.json({ok:true});
@@ -4738,6 +4883,7 @@ app.delete("/api/documents/:id",auth,loadDocumentAccess("delete"),asyncRoute(asy
 }));
 app.post("/api/documents/:id/versions",auth,loadDocumentAccess("edit"),upload.single("file"),asyncRoute(async(req,res)=>{
   if(!req.file)return res.status(400).json({error:"Choose a document file"});
+  await maybeConvertUploadToPdf(req.file);
   const version=String(req.body.version||req.organizationDocument.version||"1.0").trim().slice(0,30);
   const sha256=crypto.createHash("sha256").update(fs.readFileSync(req.file.path)).digest("hex");
   try {
@@ -4749,8 +4895,8 @@ app.post("/api/documents/:id/versions",auth,loadDocumentAccess("edit"),upload.si
       await client.query("UPDATE organization_documents SET version=$1,file_name=$2,updated_at=NOW() WHERE id=$3",[version,path.basename(req.file.originalname),req.organizationDocument.id]);
       return created;
     });
-    await audit({userId:req.user.id,action:"DOCUMENT_VERSION_UPLOADED",entityType:"organization_document",entityId:String(req.organizationDocument.id),details:`version=${version}; sha256=${sha256}`,...metadata(req)});
-    res.status(201).json({id:row.id,version,sha256});
+    await audit({userId:req.user.id,action:"DOCUMENT_VERSION_UPLOADED",entityType:"organization_document",entityId:String(req.organizationDocument.id),details:`version=${version}; sha256=${sha256}${req.file.convertedFrom?`; convertedFrom=${req.file.convertedFrom}`:""}`,...metadata(req)});
+    res.status(201).json({id:row.id,version,sha256,convertedFrom:req.file.convertedFrom||null,mimeType:req.file.mimetype,fileName:req.file.originalname});
   } catch(error) {
     fs.unlink(req.file.path,()=>{});
     if(error.code==="23505")return res.status(409).json({error:"That document version already exists"});
@@ -4773,18 +4919,20 @@ app.post("/api/documents/:id/publication-decision",auth,asyncRoute(async(req,res
   res.json({ok:true,status:next});
 }));
 app.get("/api/documents/:id/download",auth,loadDocumentAccess("view"),asyncRoute(async(req,res)=>{
-  const version=await one(`SELECT * FROM organization_document_versions WHERE document_id=$1
-    ORDER BY created_at DESC LIMIT 1`,[req.organizationDocument.id]);
+  let version=await one(`SELECT * FROM organization_document_versions WHERE document_id=$1
+    ORDER BY CASE WHEN mime_type='application/pdf' THEN 0 ELSE 1 END, created_at DESC LIMIT 1`,[req.organizationDocument.id]);
   if(!version)return res.status(404).json({error:"No file has been uploaded for this document"});
+  version=await ensureOrganizationVersionIsPdf(version);
   const filePath=resolveOrganizationDocumentFile(version);
   if(!filePath)return res.status(410).json({error:"Document file is no longer available. Re-upload the file from Legal documents."});
   await audit({userId:req.user.id,action:"DOCUMENT_DOWNLOADED",entityType:"organization_document",entityId:String(req.organizationDocument.id),details:`version=${version.version}`,...metadata(req)});
   res.type(version.mime_type);res.download(filePath,version.original_name);
 }));
 app.get("/api/documents/:id/content",auth,loadDocumentAccess("view"),asyncRoute(async(req,res)=>{
-  const version=await one(`SELECT * FROM organization_document_versions WHERE document_id=$1
-    ORDER BY created_at DESC LIMIT 1`,[req.organizationDocument.id]);
+  let version=await one(`SELECT * FROM organization_document_versions WHERE document_id=$1
+    ORDER BY CASE WHEN mime_type='application/pdf' THEN 0 ELSE 1 END, created_at DESC LIMIT 1`,[req.organizationDocument.id]);
   if(!version)return res.status(404).json({error:"No file has been uploaded for this document"});
+  version=await ensureOrganizationVersionIsPdf(version);
   const filePath=resolveOrganizationDocumentFile(version);
   if(!filePath)return res.status(410).json({error:"Document file is no longer available. Re-upload the file from Legal documents."});
   const content=await fs.promises.readFile(filePath);
@@ -4794,9 +4942,10 @@ app.get("/api/documents/:id/content",auth,loadDocumentAccess("view"),asyncRoute(
   res.type("application/octet-stream").send(content);
 }));
 app.get("/api/documents/:id/view",auth,loadDocumentAccess("view"),asyncRoute(async(req,res)=>{
-  const version=await one(`SELECT * FROM organization_document_versions WHERE document_id=$1
-    ORDER BY created_at DESC LIMIT 1`,[req.organizationDocument.id]);
+  let version=await one(`SELECT * FROM organization_document_versions WHERE document_id=$1
+    ORDER BY CASE WHEN mime_type='application/pdf' THEN 0 ELSE 1 END, created_at DESC LIMIT 1`,[req.organizationDocument.id]);
   if(!version)return res.status(404).json({error:"No file has been uploaded for this document"});
+  version=await ensureOrganizationVersionIsPdf(version);
   const filePath=resolveOrganizationDocumentFile(version);
   if(!filePath)return res.status(410).json({error:"Document file is no longer available. Re-upload the file from Legal documents."});
   res.set({
@@ -4977,6 +5126,7 @@ app.post("/api/messages/conversations/:id/files",auth,upload.array("files",5),as
   if(!conversation) { for(const file of req.files||[])fs.unlink(file.path,()=>{}); return res.status(404).json({error:"Conversation not found"}); }
   if(conversation.only_admins_can_post&&conversation.member_role!=="admin") { for(const file of req.files||[])fs.unlink(file.path,()=>{}); return res.status(403).json({error:"Only group administrators can share files here"}); }
   if(!req.files?.length) return res.status(400).json({error:"Choose at least one file"});
+  for(const file of req.files)await maybeConvertUploadToPdf(file);
   const caption=String(req.body.caption||"").trim();
   const message=await transaction(async client=>{
     const row=(await client.query(`INSERT INTO messages (conversation_id,sender_id,body) VALUES ($1,$2,$3) RETURNING id`,
@@ -5514,6 +5664,11 @@ app.use((error,req,res,next)=>{
   res.status(status).json({error:status>=500&&production?"An unexpected server error occurred":error.message});
 });
 initialize().then(async()=>{
+  try{
+    const {disperseOrganizationDocuments}=require("../scripts/disperse-organization-documents");
+    const dispersed=await disperseOrganizationDocuments();
+    if(dispersed.moved)console.log(`Document library: moved ${dispersed.moved} file(s) into department shelves`);
+  }catch(error){console.warn("Document disperse skipped:",error.message);}
   await runScheduledMaintenance();
   const maintenanceTimer=setInterval(()=>runScheduledMaintenance().catch(error=>console.error("Scheduled maintenance failed:",error.message)),60*60*1000);
   maintenanceTimer.unref();
