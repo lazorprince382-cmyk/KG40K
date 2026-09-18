@@ -6,7 +6,7 @@
   if(!document.querySelector('link[href*="supervisory-styles.css"]')){const link=document.createElement("link");link.rel="stylesheet";link.href="/supervisory-styles.css?v=41";document.head.appendChild(link);}
   const role="Supervisory Officer",key="supervisory";
   const config={
-    key,title:"Supervisory Department",dashboardTitle:"Supervisory Department Dashboard",
+    key,title:"Supervisory Department",dashboardTitle:"",
     pages:["dashboard","messages","supervisory-performance","supervisory-executive","supervisory-committees",
       "supervisory-projects","supervisory-resolutions","supervisory-complaints","supervisory-recommendations",
       "supervisory-kpis","supervisory-visits","supervisory-reports","supervisory-analytics",
@@ -117,9 +117,9 @@
       ["Board Resolutions Pending",x.boardResolutionsPending,"approvals","red","Implementation open","supervisory-resolutions"],
       ["Organization Performance",pct(x.organizationPerformanceScore),"reports","teal","Strategic score","supervisory-kpis"]
     ];
-    return `<div class="supervisory-command"><div class="sup-authority">${icons.eye}<div><strong>Governance and performance command center</strong><span>Monitor every department, resolution and strategic target. Operational source records remain read-only.</span></div><b>OVERSIGHT</b></div><div class="sup-stats">${cards.slice(0,8).map(x=>stat(...x)).join("")}</div><div class="sup-dashboard-grid">${performanceWidget(s)}${followupWidget(s)}${executiveWidget(s)}${resolutionWidget(s)}${complaintsWidget(s)}${projectsWidget(s)}${recommendationWidget(s)}${kpiWidget(s)}${notificationsWidget(s)}</div></div>`;
+    return `${D.dashboardGreeting()}<div class="supervisory-command"><div class="sup-authority">${icons.eye}<div><strong>Governance and performance command center</strong><span>Monitor every department, resolution and strategic target. Operational source records remain read-only.</span></div><b>OVERSIGHT</b></div><div class="sup-stats">${cards.slice(0,8).map(x=>stat(...x)).join("")}</div><div class="sup-dashboard-grid">${performanceWidget(s)}${followupWidget(s)}${executiveWidget(s)}${resolutionWidget(s)}${complaintsWidget(s)}${projectsWidget(s)}${recommendationWidget(s)}${kpiWidget(s)}${notificationsWidget(s)}</div></div>`;
   };
-  D.subtitles.supervisory=()=>state.page==="dashboard"?"Organization-wide performance, implementation, complaints and accountability in one command center.":"Governance oversight with traceable findings, recommendations and follow-up evidence.";
+  D.subtitles.supervisory=()=>"";
 
   D.views["supervisory-performance"]=()=>{
     const s=S();

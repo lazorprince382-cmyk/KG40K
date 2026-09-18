@@ -168,7 +168,7 @@ button { cursor: pointer; }
 .content { max-width: 1530px; margin: 0 auto; padding: 31px 36px 48px; }
 .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 25px; }
 .eyebrow { margin: 0 0 6px; color: var(--green-700); font-size:14px; font-weight: 800; letter-spacing: 1.6px; text-transform: uppercase; }
-.eyebrow-lg { font-size:20px; letter-spacing:2.2px; line-height:1.25; }
+.eyebrow-lg { font-size:clamp(22px,2.4vw,30px); letter-spacing:2.4px; line-height:1.2; margin-bottom:0; }
 h1, h2, h3, p { margin-top: 0; }
 h1 { margin-bottom: 7px; font: 800 clamp(24px, 3vw, 31px)/1.16 Manrope, sans-serif; letter-spacing: -1px; }
 .page-subtitle { margin-bottom: 0; color: var(--muted); font-size:14px; }
@@ -838,8 +838,12 @@ td { font-size:14px; }
 .finance-welcome-strip h2 { margin:0;font:800 22px Manrope;color:#fff; }
 .finance-welcome-strip .dashboard-year-control label { color:rgba(255,255,255,.82); }
 .finance-welcome-strip .dashboard-year-control select { color:#0b3b70; }
+.dept-welcome-strip{margin-bottom:16px}
+.dept-welcome-strip time{color:rgba(255,255,255,.85);font-weight:700}
 .finance-title-strip h2 { margin:2px 0 4px;font:800 18px Manrope; }.finance-title-strip p { margin:0;color:#768697;font-size:14px; }
+.finance-title-strip.finance-welcome-strip h2 { margin:0;font:800 22px Manrope;color:#fff; }
 .finance-title-strip time { padding:8px 11px;border:1px solid #dce5ed;border-radius:8px;color:#40546a;background:#f8fafc;font-size:14px;font-weight:700; }
+.finance-welcome-strip time { border-color:rgba(255,255,255,.25);color:#fff;background:rgba(255,255,255,.12); }
 .finance-stat-grid { margin-bottom:13px;display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:9px; }
 .finance-stat-card { min-width:0;min-height:112px;padding:11px;display:grid;grid-template-columns:38px 1fr;align-items:start;gap:9px;border:1px solid #dfe7ef;border-radius:10px;background:#fff;text-align:left;box-shadow:0 3px 12px rgba(11,34,65,.035); }
 .finance-stat-card:hover { border-color:#b9cadc;transform:translateY(-1px); }
@@ -1407,6 +1411,8 @@ table th,table td{padding:12px 11px;font-size:14px}.field input,.field select,.f
 @media(min-width:760px){.legal-document-card{grid-template-columns:minmax(0,1fr) auto;align-items:start}.legal-document-actions{justify-content:flex-end;max-width:none;padding-top:2px}}
 @media(max-width:759px){.legal-document-actions{width:100%}.legal-document-actions .mini-btn,.legal-document-actions a.mini-btn{flex:1 1 calc(50% - 8px);justify-content:center}}
 .legal-dashboard-grid-two{display:grid;gap:14px;grid-template-columns:minmax(0,1.4fr) minmax(260px,0.9fr)}.doc-audience-picker{border:1px solid var(--line);border-radius:12px;padding:12px;background:#f8fbfe}.doc-audience-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:8px}.doc-audience-option{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:#fff;cursor:pointer;font-size:13px;font-weight:600;color:#173654}.doc-audience-option input{margin:0}.doc-audience-option:has(input:checked){border-color:#7eb0e0;background:#eef5fb}
+.doc-audience-chip{display:inline-flex;align-items:center;gap:6px;max-width:100%;overflow-wrap:anywhere}.doc-audience-chip svg{width:12px;height:12px;flex:0 0 auto}
+[data-custom-document-type] input{border-color:#d89b00}
 @media(max-width:900px){.legal-dashboard-grid-two{grid-template-columns:1fr}.doc-audience-grid{grid-template-columns:1fr}}
 .document-viewer-actions .document-viewer-delete{border-color:#f2c8ce;color:#bd3145;background:#fff4f5}
 .document-publication-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.document-publication-actions .button{width:auto!important;height:auto!important;min-height:34px;padding:7px 12px!important;white-space:nowrap}
@@ -1785,3 +1791,20 @@ table th,table td{font-size:15px;line-height:1.45}.dept-panel td small,.dept-pan
 .executive-account-open{display:contents}
 button.executive-account-open{display:grid;width:100%;border:0;background:transparent;text-align:left;cursor:pointer;color:inherit;font:inherit}
 tr.pending-receipt{background:#f8fafc;color:#64748b}
+
+/* Reduce helper / instructional copy across the app */
+.page-subtitle,
+.card-subtitle,
+.dept-panel-head > div > p,
+.exec-panel-head > div > p,
+.finance-panel-head > div > p,
+.field > small,
+.record-file-field > small,
+.dept-note,
+.legal-confidential span,
+.exec-health-controls-main p,
+.welfare-standing-toggle small,
+.family-policy-notice p,
+.audit-readonly-note p,
+.permission-picker + small,
+.form .field small{display:none!important}

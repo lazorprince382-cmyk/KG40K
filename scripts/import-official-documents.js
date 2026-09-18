@@ -13,8 +13,8 @@ const documents=[
   ["2026 AGM MINUTES_KASANGATI G40 KWAGALANA LIMITED.docx","DOC-AGM-MINUTES-2026","Minutes","Annual General Meeting Minutes 2026"],
   ["INVESTMENT REPORT FOR KASANGATI G40 KWAGALANA AGM.docx","DOC-INVESTMENT-REPORT-2025","Investment Report","Investment Report for the 2025 AGM"],
   ["kasangati g40 kwagalana loan agreement (2).docx","DOC-LOAN-AGREEMENT","Loan Agreement","Kasangati G40 Kwagalana Loan Agreement"],
-  ["KASANGATI G40 KWAGALANA LTD (Private Limited By Shares.docx","DOC-COMPANY-CONSTITUTION","Constitution","Kasangati G40 Kwagalana Limited Constitution"]
-].map(([file,reference,type,title])=>({file,reference,type,title,source:path.join(downloads,file)}));
+  ["KASANGATI G40 KWAGALANA LTD (Private Limited By Shares.docx","DOC-COMPANY-CONSTITUTION","Loan Supporting Documents","Loan application form","credits"]
+].map(([file,reference,type,title,departmentCode])=>({file,reference,type,title,departmentCode:departmentCode||"legal",source:path.join(downloads,file)}));
 
 async function main(){
   for(const doc of documents)if(!fs.existsSync(doc.source))throw new Error(`Official document not found: ${doc.source}`);
@@ -22,10 +22,12 @@ async function main(){
   const uploads=path.join(__dirname,"..","storage","uploads");
   fs.mkdirSync(uploads,{recursive:true});
   const legal=await db.one("SELECT id FROM departments WHERE code='legal'");
+  const departmentByCode=Object.fromEntries((await db.query("SELECT id,code FROM departments WHERE active=true")).rows.map(row=>[row.code,row.id]));
   const uploader=await db.one("SELECT id FROM users WHERE role='Legal Officer' AND active=true ORDER BY id LIMIT 1");
   if(!legal||!uploader)throw new Error("An active Legal Officer and Legal department are required");
   const imported=[];
   for(const doc of documents){
+    const departmentId=departmentByCode[doc.departmentCode]||legal.id;
     const buffer=fs.readFileSync(doc.source),sha256=crypto.createHash("sha256").update(buffer).digest("hex");
     let destination=null;
     const result=await db.transaction(async client=>{
@@ -33,7 +35,7 @@ async function main(){
       if(!record)record=(await client.query(`INSERT INTO organization_documents
         (reference,department_id,document_type,title,version,status,visibility_level,created_by)
         VALUES ($1,$2,$3,$4,'1.0','published',4,$5) RETURNING id`,
-        [doc.reference,legal.id,doc.type,doc.title,uploader.id])).rows[0];
+        [doc.reference,departmentId,doc.type,doc.title,uploader.id])).rows[0];
       const same=(await client.query("SELECT id FROM organization_document_versions WHERE document_id=$1 AND sha256=$2",[record.id,sha256])).rows[0];
       if(!same){
         const stored=`${Date.now()}-${crypto.randomBytes(12).toString("hex")}.docx`;

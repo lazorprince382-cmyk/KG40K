@@ -6374,7 +6374,7 @@ COPY public.organization_documents (id, reference, department_id, document_type,
 8	DOC-AGM-MINUTES-2026	1	Minutes	Annual General Meeting Minutes 2026	1.1	published	4	2026-AGM-MINUTES_KASANGATI-G40-KWAGALANA-LIMITED.txt	11	\N	2026-08-03 09:25:31.461397+03	2026-08-03 09:43:46.436533+03
 9	DOC-INVESTMENT-REPORT-2025	1	Investment Report	Investment Report for the 2025 AGM	1.1	published	4	INVESTMENT-REPORT-FOR-KASANGATI-G40-KWAGALANA-AGM.txt	11	\N	2026-08-03 09:25:31.521594+03	2026-08-03 09:43:46.441486+03
 10	DOC-LOAN-AGREEMENT	1	Loan Agreement	Kasangati G40 Kwagalana Loan Agreement	1.1	published	4	kasangati-g40-kwagalana-loan-agreement--2-.txt	11	\N	2026-08-03 09:25:31.551759+03	2026-08-03 09:43:46.449374+03
-11	DOC-COMPANY-CONSTITUTION	1	Constitution	Kasangati G40 Kwagalana Limited Constitution	1.1	published	4	KASANGATI-G40-KWAGALANA-LTD--Private-Limited-By-Shares.txt	11	\N	2026-08-03 09:25:31.570047+03	2026-08-03 09:43:46.455023+03
+11	DOC-COMPANY-CONSTITUTION	3	Loan Supporting Documents	Loan application form	1.1	published	4	KASANGATI-G40-KWAGALANA-LTD--Private-Limited-By-Shares.txt	11	\N	2026-08-03 09:25:31.570047+03	2026-08-03 09:43:46.455023+03
 1	DOC-6F1C1C19FDB7483E	1	Constitution	doc 2	1.0	archived	2	PROJECT PROPOSAL.pdf	20	\N	2026-07-31 16:05:18.395127+03	2026-08-03 11:15:33.209843+03
 \.
 

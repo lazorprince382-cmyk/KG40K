@@ -44,7 +44,7 @@
       ["Closed Recommendations",s.closedRecommendations,"check","teal","Independently verified","audit-recommendations"],
       ["Fraud Alerts",s.fraudAlerts,"bell","red","Uncleared flags","audit-fraud"],
       ["Pending Investigations",s.pendingInvestigations,"search","violet","Independent review","audit-investigations"]];
-    return `<div class="audit-command"><div class="audit-independence">${icons.shield}<div><strong>Independent assurance workspace</strong><span>Audit can inspect operational records across departments. Source records remain read-only and cannot be changed here.</span></div><b>READ ONLY</b></div><div class="audit-stats">${cards.slice(0,8).map(x=>stat(...x)).join("")}</div><div class="audit-dashboard-grid">${overview(a)}${findings(a)}${compliance(a)}${investigations(a)}${recommendations(a)}${riskWidget(a)}${calendar(a)}${notifications(a)}</div></div>`;
+    return `${D.dashboardGreeting()}<div class="audit-command"><div class="audit-independence">${icons.shield}<div><strong>Independent assurance workspace</strong><span>Audit can inspect operational records across departments. Source records remain read-only and cannot be changed here.</span></div><b>READ ONLY</b></div><div class="audit-stats">${cards.slice(0,8).map(x=>stat(...x)).join("")}</div><div class="audit-dashboard-grid">${overview(a)}${findings(a)}${compliance(a)}${investigations(a)}${recommendations(a)}${riskWidget(a)}${calendar(a)}${notifications(a)}</div></div>`;
   };
-  D.subtitles.audit=()=>state.page==="dashboard"?"Independent assurance across every department - review operational records without changing them.":state.page==="settings"?"Audit authority, evidence retention and read-only operational access.":"Evidence-led assurance, risk, compliance and remediation tracking.";
+  D.subtitles.audit=()=>"";
 })();

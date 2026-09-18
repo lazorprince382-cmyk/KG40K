@@ -16,7 +16,7 @@
   const canActOnMember=()=>!readOnlyMember()||(state.memberOversight&&["Executive Officer","Credits Officer","System Admin"].includes(state.role));
   const gridTable=(heads,rows)=>`<div class="table-scroll"><table><thead><tr>${heads.map(x=>`<th>${x}</th>`).join("")}</tr></thead><tbody>${rows||`<tr><td colspan="${heads.length}"><div class="member-empty">No records yet.</div></td></tr>`}</tbody></table></div>`;
   const metric=(name,value,icon,target,sub="")=>`<button class="member-summary-card" data-member-page="${target}"><span>${icons[icon]}</span><div><small>${name}</small><strong>${value}</strong>${sub?`<em>${sub}</em>`:""}</div></button>`;
-  const panel=(title,sub,body)=>`<section class="card member-panel"><div class="card-head"><div><h2 class="card-title">${title}</h2><p class="card-subtitle">${sub}</p></div></div>${body}</section>`;
+  const panel=(title,sub,body)=>`<section class="card member-panel"><div class="card-head"><div><h2 class="card-title">${title}</h2></div></div>${body}</section>`;
   const targetLine=(label,paid,target,options={})=>{const p=Number(paid),t=Number(target),percent=t?Math.min(100,Math.round(p/t*100)):0,variance=p-t,surplusLabel=options.surplusLabel||"Ahead by";let statusClass="met",statusText="Target met";if(variance<-0.005){statusClass="behind";statusText=`Short by ${money(Math.abs(variance))}`;}else if(variance>0.005){statusClass="ahead";statusText=`${surplusLabel} ${money(variance)}`;}const barTone=statusClass==="met"?"met":statusClass;return `<div class="member-target-line ${statusClass}"><div><strong>${label}</strong><span>${money(paid)} paid of ${money(t)}</span></div><b>${percent}%</b><i class="${barTone}"><em style="width:${percent}%"></em></i><small class="${statusClass}">${statusText}</small></div>`;};
   function currentContributionBody(){
     const f=C()?.financialYearProgress;if(!f)return `<div class="member-empty">No contribution targets for this year yet.</div>`;
@@ -202,7 +202,7 @@
     const welfareSinceLabel=welfareExcluded?null:welfareVicent?"July 2026":(s.welfareSinceLabel||"June 2024");
     const welfareCardNote=welfareExcluded
       ?"Not on the welfare standing register"
-      :"";
+      :`Since ${welfareSinceLabel}`;
     const welfareAmount=money(s.welfareContributedSince??s.welfare??0);
     return `${oversightBanner()}<div class="member-portal"><section class="member-welcome member-hero-card"><div class="member-welcome-top"><span>${g}</span><h2>${esc(m.fullName)}</h2></div>${loanNeedCta(c)}</section>
       <div class="member-summary-grid">${metric("My Savings",money(s.savings),"savings","member-savings","Current carried-forward balance")}${metric("Share Capital",money(s.shares),"building","member-savings","Current share balance")}${metric("Personal Total Funds",money(s.personalTotalFunds??s.totalMemberFunds),"wallet","member-savings","Savings plus share capital")}${metric("Welfare",welfareAmount,"shield","member-welfare",welfareCardNote)}${metric("Active Loan Balance",money(s.activeLoanBalance),"loans","member-loans","Remaining total repayment including interest")}</div>

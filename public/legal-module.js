@@ -82,13 +82,14 @@
     return `<div class="legal-document-list">${rows.map(x=>`<article class="legal-document-card">
       <div class="legal-document-copy"><small>${esc(x.reference)} · ${esc(x.documentType)} · v${esc(x.version||"1.0")}${x.departmentName?` · ${esc(x.departmentName)}`:""}</small>
         <strong>${esc(x.title)}</strong>
-        <span>${badge(x.status)}<i>Updated ${date(x.updatedAt,true)}</i></span>
+        <span>${badge(x.status)}<em class="doc-audience-chip" title="Who can see this document">${icons.users||""}Who can see: ${esc(audienceLabel(x))}</em><i>Updated ${date(x.updatedAt,true)}</i></span>
         <p>${esc(x.fileName||"No file uploaded")}</p>
       </div>
       <div class="document-actions legal-document-actions">
         ${x.hasFile?`<a class="mini-btn" href="/api/documents/${x.id}/view" target="_blank" title="View">${icons.eye}<span>View</span></a>
         <a class="mini-btn" href="/api/documents/${x.id}/download" title="Download">${icons.download}<span>Download</span></a>`:`<span class="status pending">No file</span>`}
-        ${canManageDocuments()?`<button class="mini-btn" data-legal-document="${x.id}" title="Upload or replace file">${icons.refresh}<span>Replace</span></button>
+        ${canManageDocuments()?`<button class="mini-btn" data-legal-document="${x.id}" title="Edit document, file, or who can see it">${icons.refresh}<span>Edit</span></button>
+        <button class="mini-btn" data-legal-access="${x.id}" title="Change who can see this document">${icons.users||icons.eye}<span>Who can see</span></button>
         <button class="mini-btn document-delete" data-delete-document="${x.id}" data-document-title="${esc(x.title)}" title="Delete document">${icons.trash}<span>Delete</span></button>`:""}
       </div>
     </article>`).join("")}</div>`;
@@ -102,17 +103,12 @@
   }
   D.dashboards.legal=()=>{
     const shelves=libraryRows();
-    return `<div class="legal-command">
-      <div class="legal-confidential">${icons.file}<div><strong>Organization document registry</strong><span>Open a department card to browse or add its documents. Choose who can see each file when you upload.</span></div><b>REGISTRY</b></div>
+    return `${D.dashboardGreeting()}<div class="legal-command">
+      <div class="legal-confidential">${icons.file}<div><strong>Organization document registry</strong></div><b>REGISTRY</b></div>
       <div class="legal-stats">${shelves.map(departmentShelf).join("")}</div>
     </div>`;
   };
-  D.subtitles.legal=()=>{
-    const code=pageDeptCode();
-    if(code){const meta=libraryMeta(code);return `${meta.name} documents — choose All departments, selected departments, or members for visibility.`;}
-    if(state.page==="dashboard")return "Central document registry for Credits, Investment, Finance, Welfare, Supervisory, Audit, Executive and General.";
-    return "Protected organization documents with controlled department visibility.";
-  };
+  D.subtitles.legal=()=>"";
   function departmentDocumentsView(code){
     const meta=libraryMeta(code);
     const rows=docsForPage(meta.page);
@@ -145,51 +141,87 @@
     return "";
   };
   D.actions.legalReport=name=>download(name,L().documents||[]);
+  function typeListForDept(code){
+    const types=TYPE_BY_DEPT[code]||TYPE_BY_DEPT.executive;
+    return [...new Set([...types,"Policies","Minutes","Agreements","Signed Contracts","Annual Reports","Audit Reports","Legal Documents","Constitution","Bylaws","Other (type your own)"])];
+  }
+  function isListedType(type,allTypes){
+    return allTypes.includes(type)||["Board Minutes","Meeting Minutes"].includes(type);
+  }
   function syncAudiencePicker(form){
     const mode=form.querySelector('[name="audienceMode"]')?.value||"all";
     const picker=form.querySelector("[data-audience-departments]");
     if(picker)picker.hidden=mode!=="departments";
   }
-  function documentForm(existing=null,preset={}){
+  function syncCustomTypeField(form){
+    const select=form.querySelector('[name="documentTypeChoice"]');
+    const custom=form.querySelector("[data-custom-document-type]");
+    const input=form.querySelector('[name="customDocumentType"]');
+    const isCustom=select?.value==="Other (type your own)";
+    if(custom)custom.hidden=!isCustom;
+    if(input)input.required=!!isCustom;
+  }
+  function documentForm(existing=null,preset={},options={}){
     const current=existing||preset||{};
     const preferred=String(current.departmentCode||pageDeptCode()||"credits");
-    const types=TYPE_BY_DEPT[preferred]||TYPE_BY_DEPT.executive;
-    const allTypes=[...new Set([...types,"Policies","Minutes","Agreements","Signed Contracts","Annual Reports","Audit Reports","Legal Documents","Constitution","Bylaws"])];
+    const allTypes=typeListForDept(preferred);
+    const storedType=String(current.documentType||"");
+    const useCustom=storedType&&!isListedType(storedType,allTypes.filter(x=>x!=="Other (type your own)"));
+    const selectedType=useCustom?"Other (type your own)":(allTypes.includes(storedType)?storedType:(storedType==="Board Minutes"||storedType==="Meeting Minutes"?"Minutes":allTypes[0]));
     const mode=audienceModeFromDoc(current);
     const selected=new Set(parseAudience(current.audienceDepartments));
     if(mode==="departments"&&!selected.size)selected.add(preferred);
+    const focusAccess=!!options.focusAccess;
     const deptOptions=LIBRARY_DEPTS.map(x=>`<option value="${x.code}" ${preferred===x.code?"selected":""}>${esc(x.name)}</option>`).join("");
     const deptChecks=VIEW_DEPTS.map(x=>`<label class="doc-audience-option"><input type="checkbox" name="audienceDepartments" value="${x.code}" ${selected.has(x.code)?"checked":""}><span>${esc(x.name)}</span></label>`).join("");
-    modal(existing?"Update document":"Upload document","File under a department library, then choose who can see it.",`<form class="form" data-legal-document-form="${current.id||""}"><div class="form-grid">
+    modal(existing?(focusAccess?"Who can see this document":"Update document"):"Upload document",focusAccess?"Change who can open this file after upload.":"File under a department library, then choose who can see it.",`<form class="form" data-legal-document-form="${current.id||""}"><div class="form-grid">
       <div class="field full"><label>Document title</label><input name="title" value="${esc(current.title||"")}" required></div>
-      <div class="field"><label>Department library</label><select name="department" required>${deptOptions}</select><small>Document is stored under this department.</small></div>
-      <div class="field"><label>Document type</label><select name="documentType">${allTypes.map(x=>`<option ${current.documentType===x||(x==="Minutes"&&["Board Minutes","Meeting Minutes"].includes(current.documentType))?"selected":""}>${x}</option>`).join("")}</select></div>
+      <div class="field"><label>Department library</label><select name="department" required>${deptOptions}</select></div>
+      <div class="field"><label>Document type</label><select name="documentTypeChoice">${allTypes.map(x=>`<option value="${esc(x)}" ${selectedType===x?"selected":""}>${esc(x)}</option>`).join("")}</select></div>
+      <div class="field" data-custom-document-type ${useCustom||selectedType==="Other (type your own)"?"":"hidden"}><label>Custom type</label><input name="customDocumentType" value="${esc(useCustom?storedType:"")}" placeholder="Type the document type" ${useCustom||selectedType==="Other (type your own)"?"required":""}></div>
       <div class="field"><label>Version</label><input name="version" value="${esc(current.version||"1.0")}" required></div>
-      <div class="field"><label>Who can see it</label><select name="audienceMode">
+      <div class="field ${focusAccess?"full":""}"><label>Who can see it</label><select name="audienceMode">
         <option value="all" ${mode==="all"?"selected":""}>All departments</option>
-        <option value="departments" ${mode==="departments"?"selected":""}>Departments</option>
+        <option value="departments" ${mode==="departments"?"selected":""}>Selected departments only</option>
         <option value="members" ${mode==="members"?"selected":""}>Members</option>
-      </select><small>Choose Departments to pick one or more departments.</small></div>
+      </select></div>
       <div class="field"><label>Publication</label><select name="status">
         <option value="published" ${!current.status||current.status==="published"?"selected":""}>Publish now</option>
         <option value="draft" ${current.status==="draft"?"selected":""}>Save draft</option>
         <option value="pending_executive" ${current.status==="pending_executive"?"selected":""}>Request Executive publication</option>
       </select></div>
-      <div class="field full doc-audience-picker" data-audience-departments ${mode==="departments"?"":"hidden"}><label>Select departments</label><div class="doc-audience-grid">${deptChecks}</div></div>
-      <div class="field full"><label>${existing?"Upload a new file version":"Choose document file"}</label><input name="file" type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,image/*" ${existing?"":"required"}><small>Word (.docx) files are converted to PDF for clear in-app viewing.</small></div>
-    </div>${formEnd(existing?"Save document":"Upload document")}</form>`);
+      <div class="field full doc-audience-picker" data-audience-departments ${mode==="departments"?"":"hidden"}><label>Select departments that can see it</label><div class="doc-audience-grid">${deptChecks}</div></div>
+      <div class="field full"><label>${existing?"Upload a new file version (optional)":"Choose document file"}</label><input name="file" type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,image/*" ${existing?"":"required"}></div>
+    </div>${formEnd(existing?(focusAccess?"Save who can see it":"Save document"):"Upload document")}</form>`);
     const form=document.querySelector("[data-legal-document-form]");
     form?.querySelector('[name="audienceMode"]')?.addEventListener("change",()=>syncAudiencePicker(form));
+    form?.querySelector('[name="documentTypeChoice"]')?.addEventListener("change",()=>syncCustomTypeField(form));
+    form?.querySelector('[name="department"]')?.addEventListener("change",event=>{
+      const code=String(event.target.value||"credits");
+      const select=form.querySelector('[name="documentTypeChoice"]');
+      if(!select)return;
+      const previous=select.value;
+      const nextTypes=typeListForDept(code);
+      select.innerHTML=nextTypes.map(x=>`<option value="${esc(x)}" ${previous===x||(previous==="Other (type your own)"&&x==="Other (type your own)")?"selected":""}>${esc(x)}</option>`).join("");
+      if(!nextTypes.includes(previous)&&previous!=="Other (type your own)")select.value="Other (type your own)";
+      syncCustomTypeField(form);
+    });
     syncAudiencePicker(form);
+    syncCustomTypeField(form);
+    if(focusAccess)form?.querySelector('[name="audienceMode"]')?.focus();
     form?.addEventListener("submit",async event=>{
       event.preventDefault();
       const data=new FormData(form),file=data.get("file");
       const audienceMode=String(data.get("audienceMode")||"all");
       const audienceDepartments=data.getAll("audienceDepartments").map(value=>String(value).toLowerCase());
       if(audienceMode==="departments"&&!audienceDepartments.length){toast("Select at least one department that can see this document.");return;}
+      const typeChoice=String(data.get("documentTypeChoice")||"");
+      const customType=String(data.get("customDocumentType")||"").trim();
+      const documentType=typeChoice==="Other (type your own)"?customType:typeChoice;
+      if(!documentType){toast("Enter a custom document type.");return;}
       const body={
         title:data.get("title"),
-        documentType:data.get("documentType"),
+        documentType,
         version:data.get("version"),
         status:data.get("status"),
         audienceMode:audienceMode==="all"?"general":audienceMode,
@@ -208,7 +240,7 @@
           if(!response.ok)throw new Error(result.error||"Document upload failed");
         }
         closeModal();
-        await reload(body.status==="published"?`Document published (${audienceLabel(body)}).`:"Document saved.");
+        await reload(body.status==="published"?`Document published · Who can see: ${audienceLabel(body)}.`:"Document saved.");
       }catch(error){toast(error.message);}
     });
   }
@@ -217,6 +249,10 @@
     if(type==="document")return documentForm(null,{departmentCode:pageDeptCode()||"credits",visibilityLevel:2});
   }
   D.quick.legal=quick;
-  D.binders.push(cfg=>{if(cfg.key!=="legal")return;document.querySelectorAll("[data-legal-document]").forEach(x=>x.addEventListener("click",()=>documentForm(L().documents.find(d=>String(d.id)===x.dataset.legalDocument))));});
+  D.binders.push(cfg=>{
+    if(cfg.key!=="legal")return;
+    document.querySelectorAll("[data-legal-document]").forEach(x=>x.addEventListener("click",()=>documentForm(L().documents.find(d=>String(d.id)===x.dataset.legalDocument))));
+    document.querySelectorAll("[data-legal-access]").forEach(x=>x.addEventListener("click",()=>documentForm(L().documents.find(d=>String(d.id)===x.dataset.legalAccess),{},{focusAccess:true})));
+  });
   D.binders.push(cfg=>{if(cfg.key!=="legal")return;document.querySelectorAll("[data-legal-contract]").forEach(x=>x.addEventListener("click",async()=>{const decision=prompt("Decision: approve, reject, more_information","approve");if(!decision)return;const comment=prompt("Legal review note:","Legal requirements verified.")||"";try{await api(`/api/legal/contracts/${x.dataset.legalContract}/decision`,{method:"POST",body:JSON.stringify({decision,comment})});await reload("Contract review recorded.");}catch(error){toast(error.message);}}));document.querySelectorAll("[data-legal-case]").forEach(x=>x.addEventListener("click",async()=>{const status=prompt("Case status: open, investigation, hearing, appeal, resolved, closed","investigation");if(!status)return;const note=prompt("Timeline note or decision:","")||"";try{await api(`/api/legal/cases/${x.dataset.legalCase}/update`,{method:"POST",body:JSON.stringify({status,note})});await reload("Case timeline updated.");}catch(error){toast(error.message);}}));document.querySelectorAll("[data-legal-complaint]").forEach(x=>x.addEventListener("click",async()=>{const status=prompt("Complaint stage: submitted, legal_review, investigation, recommendation, decision, closed","legal_review");if(!status)return;const comment=prompt("Recommendation or decision note:","")||"";try{await api(`/api/legal/complaints/${x.dataset.legalComplaint}/advance`,{method:"POST",body:JSON.stringify({status,comment})});await reload("Complaint stage updated.");}catch(error){toast(error.message);}}));});
 })();

@@ -2,7 +2,7 @@
 (() => {
   const configs = {
     "Welfare Officer": {
-      key:"welfare", title:"Welfare Department", dashboardTitle:"Welfare Department Dashboard",
+      key:"welfare", title:"Welfare Department", dashboardTitle:"",
       pages:["dashboard","messages","welfare-requests","welfare-emergencies","welfare-contributions","welfare-beneficiaries","welfare-approvals",
         "welfare-payments","welfare-activities","welfare-meetings","welfare-reports","welfare-analytics","welfare-documents",
         "welfare-notifications","settings","welfare-search"],
@@ -17,7 +17,7 @@
         "welfare-reports":"reports","welfare-analytics":"reports","welfare-documents":"file","welfare-notifications":"bell"}
     },
     "Legal Officer": {
-      key:"legal", title:"Legal Department", dashboardTitle:"Legal Department Dashboard",
+      key:"legal", title:"Legal Department", dashboardTitle:"",
       pages:["dashboard","messages","docs-credits","docs-investment","docs-finance","docs-welfare","docs-supervisory","docs-audit","docs-executive","docs-general",
         "legal-documents","legal-cases","legal-contracts","legal-agreements","legal-policies","legal-constitution","legal-disciplinary","legal-complaints",
         "legal-opinions","legal-compliance","legal-court","legal-reports","legal-calendar",
@@ -36,7 +36,7 @@
         "legal-notifications":"bell"}
     },
     Auditor: {
-      key:"audit", title:"Audit Department", dashboardTitle:"Audit Department Dashboard",
+      key:"audit", title:"Audit Department", dashboardTitle:"",
       pages:["dashboard","messages","audit-plans","audits","audit-findings","audit-investigations","audit-recommendations",
         "audit-compliance","audit-risk","audit-fraud","audit-reports","audit-analytics","audit-documents",
         "audit-calendar","audit-notifications","settings","audit-search"],
@@ -86,7 +86,13 @@
   function date(value,time=false){if(!value)return " - ";const d=new Date(value);return Number.isNaN(d.getTime())?esc(value):(time?d.toLocaleString():d.toLocaleDateString());}
   function badge(value,className=""){const text=String(value||"pending").replaceAll("_"," ");return `<span class="dept-tag ${className||text.toLowerCase().replaceAll(" ","-")}">${esc(text)}</span>`;}
   function risk(value){return badge(value,`risk-${String(value||"low").toLowerCase()}`);}
-  function panel(title,sub,body,className=""){return `<section class="dept-panel ${className}"><div class="dept-panel-head"><div><h3>${title}</h3><p>${sub}</p></div></div>${body}</section>`;}
+  function dashboardGreeting(){
+    const hour=new Date().getHours();
+    const part=hour<12?"morning":hour<17?"afternoon":"evening";
+    const name=esc(String((typeof actor==="function"?actor():"there")||"there").split(/\s+/)[0]||"there");
+    return `<div class="finance-title-strip finance-welcome-strip dept-welcome-strip"><div><h2>Good ${part}, ${name}</h2></div></div>`;
+  }
+  function panel(title,sub,body,className=""){return `<section class="dept-panel ${className}"><div class="dept-panel-head"><div><h3>${title}</h3>${sub?`<p>${sub}</p>`:""}</div></div>${body}</section>`;}
   function empty(text){return `<div class="dept-empty">${icons.file}<p>${text}</p></div>`;}
   function table(headers,rows){return `<div class="table-scroll"><table><thead><tr>${headers.map(x=>`<th>${x}</th>`).join("")}</tr></thead><tbody>${rows||`<tr><td colspan="${headers.length}">No records available.</td></tr>`}</tbody></table></div>`;}
   function options(items,label="name"){return (items||[]).map(x=>`<option value="${x.id}">${esc(x[label]||x.fullName||x.name)}</option>`).join("");}
@@ -102,7 +108,7 @@
   async function reload(message=""){const cfg=effectiveConfig();if(!cfg)return;state[cfg.key==="audit"?"auditCenter":cfg.key]=await api(`/api/${cfg.key}/command-center`);render();if(message)toast(message);}
   function download(name,rows=[],format="excel"){const cfg=effectiveConfig();if(!cfg)return;downloadGeneratedReport(cfg.key,name,format);}
 
-  const ui=window.DepartmentUi={configs,views:{},dashboards:{},settings:{},actions:{},binders:[],subtitles:{},quick:{},esc,date,badge,risk,panel,empty,table,options,go,modal,reload,download,effectiveConfig};
+  const ui=window.DepartmentUi={configs,views:{},dashboards:{},settings:{},actions:{},binders:[],subtitles:{},quick:{},esc,date,badge,risk,panel,empty,table,options,go,modal,reload,download,effectiveConfig,dashboardGreeting};
 
   const baseRefresh=refreshData;
   refreshData=async function(){await baseRefresh();const cfg=effectiveConfig();if(cfg&&(configs[state.role]||["welfare","legal","audit","supervisory"].includes(state.executiveWorkspace)))state[cfg.key==="audit"?"auditCenter":cfg.key]=await api(`/api/${cfg.key}/command-center`);};
@@ -119,7 +125,7 @@
   sidebar=function(){const cfg=effectiveConfig();if(!cfg)return baseSidebar();return typeof injectWorkspaceSwitcher==="function"?injectWorkspaceSwitcher(deptSidebar(cfg)):deptSidebar(cfg);};
 
   const baseSubtitle=subtitle;
-  subtitle=function(){const cfg=effectiveConfig();if(!cfg)return baseSubtitle();if(ui.subtitles[cfg.key])return ui.subtitles[cfg.key]();return `${cfg.title} records, workflows, reports and controlled decisions.`;};
+  subtitle=function(){const cfg=effectiveConfig();if(!cfg)return baseSubtitle();return "";};
 
   const baseHeadActions=headActions;
   headActions=function(){const cfg=effectiveConfig();if(state.executiveWorkspace)return "";return cfg&&ui.actions[cfg.key]?ui.actions[cfg.key]():baseHeadActions();};
@@ -131,7 +137,7 @@
   view=function(){const cfg=effectiveConfig();if(cfg){if(state.page==="settings"&&ui.settings[cfg.key])return ui.settings[cfg.key]();if(ui.views[state.page])return ui.views[state.page]();}return baseView();};
 
   const baseRender=render;
-  render=function(){baseRender();const cfg=effectiveConfig();if(!cfg)return;const eyebrow=document.querySelector(".page-head .eyebrow");const title=document.querySelector(".page-head h1");if(state.page==="dashboard"){if(eyebrow)eyebrow.textContent=cfg.title;if(title)title.textContent=cfg.dashboardTitle;}const search=document.getElementById("global-search");if(search)search.placeholder=cfg.key==="audit"?"Search audit, finding, risk, investigation, recommendation...":cfg.key==="legal"?"Search document, department, title, policy...":"Search member, request, receipt, beneficiary, activity...";};
+  render=function(){baseRender();const cfg=effectiveConfig();if(!cfg)return;const eyebrow=document.querySelector(".page-head .eyebrow");const title=document.querySelector(".page-head h1");if(state.page==="dashboard"){if(eyebrow){eyebrow.textContent=`${cfg.title} Dashboard`;eyebrow.classList.add("eyebrow-lg");}if(title)title.remove();}const search=document.getElementById("global-search");if(search)search.placeholder=cfg.key==="audit"?"Search audit, finding, risk, investigation, recommendation...":cfg.key==="legal"?"Search document, department, title, policy...":"Search member, request, receipt, beneficiary, activity...";};
 
   function installSearch(){
     const cfg=effectiveConfig(),input=document.getElementById("global-search");if(!cfg||!input)return;

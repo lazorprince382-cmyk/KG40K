@@ -154,9 +154,9 @@ function enhanceDepartmentRecordForm(form,{department,attachment=true,photo=fals
   if(attachment){
     const current=form.querySelector('input[name="supportingDocument"],input[name="documentReference"]');
     if(current){current.type="file";current.accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,image/*";current.dataset.fileTarget=current.name;current.name="attachment";current.closest(".field")?.classList.add("record-file-field");}
-    else form.querySelector(".form-grid")?.insertAdjacentHTML("beforeend",`<div class="field full record-file-field"><label>Supporting file</label><input name="attachment" type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,image/*" data-file-target="supportingDocument"><small>PDF, Office document, image, text or CSV; maximum 15 MB. Word (.docx) files are converted to PDF for clear in-app viewing.</small></div>`);
+    else form.querySelector(".form-grid")?.insertAdjacentHTML("beforeend",`<div class="field full record-file-field"><label>Supporting file</label><input name="attachment" type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,image/*" data-file-target="supportingDocument"></div>`);
   }
-  if(photo)form.querySelector(".form-grid")?.insertAdjacentHTML("beforeend",`<div class="field full record-file-field"><label>Photo</label><input name="photo" type="file" accept="image/jpeg,image/png,image/webp,image/gif"><small>Upload a clear asset or project photo.</small></div>`);
+  if(photo)form.querySelector(".form-grid")?.insertAdjacentHTML("beforeend",`<div class="field full record-file-field"><label>Photo</label><input name="photo" type="file" accept="image/jpeg,image/png,image/webp,image/gif"></div>`);
 }
 async function departmentFormPayload(form) {
   const formData=new FormData(form),data={};
@@ -672,10 +672,10 @@ function render() {
     !(state.role==="Investment Officer"&&state.page==="investment-search")) state.page = allowed[0] || "dashboard";
   trackNavigation();
   let [eyebrow, title] = pageMeta[state.page]||["Organization","Dashboard"];
-  if(state.page==="dashboard"&&state.role==="Executive Officer"&&!state.executiveWorkspace)[eyebrow,title]=["Executive Department","Executive Command Center"];
-  if(state.page==="dashboard"&&(state.role==="Finance Officer"||state.executiveWorkspace==="finance"))[eyebrow,title]=["Finance","Dashboard"];
-  if(state.page==="dashboard"&&(state.role==="Credits Officer"||state.executiveWorkspace==="credits"))[eyebrow,title]=["Credits Department","Credits (SACCO) Dashboard"];
-  if(state.page==="dashboard"&&(state.role==="Investment Officer"||state.executiveWorkspace==="investment"))[eyebrow,title]=["Investment Department","Investment Dashboard"];
+  if(state.page==="dashboard"&&state.role==="Executive Officer"&&!state.executiveWorkspace)[eyebrow,title]=["Executive Department Dashboard",""];
+  if(state.page==="dashboard"&&(state.role==="Finance Officer"||state.executiveWorkspace==="finance"))[eyebrow,title]=["Finance Department Dashboard",""];
+  if(state.page==="dashboard"&&(state.role==="Credits Officer"||state.executiveWorkspace==="credits"))[eyebrow,title]=["Credits Department Dashboard",""];
+  if(state.page==="dashboard"&&(state.role==="Investment Officer"||state.executiveWorkspace==="investment"))[eyebrow,title]=["Investment Department Dashboard",""];
   const app = document.getElementById("app");
   app.innerHTML = `
     <div class="app-shell ${state.executiveWorkspace?"executive-workspace-mode":""}">
@@ -699,7 +699,7 @@ function render() {
         </header>
         <div class="content">
           <div class="page-head">
-            <div><p class="eyebrow${state.role==="Executive Officer"&&!state.executiveWorkspace?" eyebrow-lg":""}">${eyebrow}</p><h1>${title}</h1>${subtitle()?`<p class="page-subtitle">${subtitle()}</p>`:""}</div>
+            <div><p class="eyebrow${state.page==="dashboard"?" eyebrow-lg":""}">${eyebrow}</p>${title?`<h1>${title}</h1>`:""}${subtitle()?`<p class="page-subtitle">${subtitle()}</p>`:""}</div>
             ${headActions()}
           </div>
           ${view()}
@@ -828,91 +828,7 @@ function executiveSidebar() {
 }
 
 function subtitle() {
-  const copy = {
-    dashboard: state.role === "Member" ? "Your membership, department, benefits and financial activity in one place." :
-      state.role==="Finance Officer"?"":
-      state.role==="Credits Officer"?"":
-      state.role==="Investment Officer"?"Projects, opportunities, capital, returns and portfolio performance in one business-intelligence workspace.":
-      state.role==="Executive Officer"?"":"A central view of verified organization information and work requiring attention.",
-    departments: "Only departments granted by your assignment and leadership level are shown.",
-    messages: "Securely connect with members, departments and leadership.",
-    users: "Reset passwords and manage secure login accounts for staff and members.",
-    members: "Manage member records, status and account information.",
-    savings: "Track contributions, deposits and member savings balances.",
-    loans: "Manage applications, approvals and repayment performance.",
-    withdrawals: "Review and process member withdrawal requests.",
-    approvals: "Keep duties separate with clear, traceable decisions.",
-    reports: "Financial and operational performance at a glance.",
-    audit: "A permanent record of important actions across the system.",
-    settings: "Configure access, security and organization operations.",
-    "executive-finance":"Strategic financial health, budget and major payment summary.",
-    "executive-credits":"Savings, loan portfolio health and executive-level credit decisions.",
-    "executive-investments":"Project performance, returns and ventures needing attention.",
-    "executive-welfare":"Welfare fund strength, requests and major support decisions.",
-    "executive-legal":"Contracts, cases, policies and compliance alerts.",
-    "executive-audit":"Independent assurance issues and resolution progress.",
-    "executive-supervisory":"Recommendations, follow-ups and departments below target.",
-    "executive-approvals":"Major actions requiring executive authority and a recorded decision.",
-    "executive-meetings":"Board, committee, welfare, investment and training events.",
-    "executive-projects":"Organization investment projects and expected returns.",
-    "executive-reports":"Download strategic reports across every organizational arm.",
-    notifications:"Urgent alerts and important organization updates.",
-    "executive-documents":"Constitution, policies, minutes, contracts and formal reports.",
-    "executive-search":"Search results across members, loans, departments, projects, cases and records."
-  };
-  Object.assign(copy,{
-    "finance-income":"Record and monitor organization revenue by source.",
-    "finance-expenses":"Create controlled expense requests without touching SACCO accounts.",
-    "finance-vouchers":"Review payment vouchers and route large payments for executive authority.",
-    "finance-receipts":"Find and issue evidence for completed organization income.",
-    "finance-invoices":"Monitor supplier invoices, due dates and liabilities.",
-    "finance-budgets":"Allocate departmental budgets and act on utilization alerts.",
-    "finance-bank":"Organization bank, cash, Unit Trust (UAP) and reconciliation summary.",
-    "finance-unit-trust":"Old Mutual / UAP balance, daily interest and bank transfers — view or download the movement report.",
-    "finance-cashbook":"A chronological ledger of organization income and expenditure.",
-    "finance-assets":"Land, buildings, vehicles, furniture, computers and equipment.",
-    "finance-procurement":"Track purchasing from departmental request through payment and closure.",
-    "finance-approvals":"Routine finance reviews and payments awaiting further authority.",
-    "finance-reports":"Generate financial, budget, bank, asset and procurement reports.",
-    "finance-analytics":"Revenue, expense, budget, department spending and cash-flow trends.",
-    "finance-documents":"Supporting finance documents and approved reports.",
-    "finance-search":"Results from receipts, vouchers, suppliers, invoices, accounts, assets and procurement."
-  });
-  Object.assign(copy,{
-    "credits-members":"Member SACCO accounts, savings, loans, guarantee positions and histories.",
-    "credits-savings":"Record deposits and controlled withdrawals with complete receipt references.",
-    "credits-applications":"Applications from submission through guarantor consent and credit review.",
-    "credits-approvals":"Review decisions by the Credits officer, committee and authorized leadership.",
-    "credits-disbursement":"Approved loans ready to be sent to members and scheduled for repayment.",
-    "credits-repayments":"",
-    "credits-guarantors":"Guarantee requests, capacity, accepted security and declined requests.",
-    "credits-recovery":"Overdue facilities, recovery officers, reminders, actions and follow-ups.",
-    "credits-statements":"Generate detailed savings and loan account statements for members.",
-    "credits-charges":"Interest, late penalties, service charges, processing fees and approved waivers.",
-    "credits-reports":"Savings, portfolio, recovery, interest, guarantor and transaction reports.",
-    "credits-analytics":"Savings growth, loan quality, repayments, default risk and interest trends.",
-    "credits-documents":"Credit policies, supporting documents and approved SACCO reports.",
-    "credits-notifications":"Applications, guarantor responses, due repayments, defaults and deposits.",
-    "credits-search":"Results from SACCO members, loans, guarantors, receipts and references."
-  });
-  Object.assign(copy,{
-    "investment-projects":"Register, monitor and compare every income-generating organization project.",
-    "investment-portfolio":"Capital invested, current value, growth, returns and historical performance.",
-    "investment-proposals":"Ideas moving through review, analysis, Executive approval, funding and implementation.",
-    "investment-investors":"Member investors, grants, funding sources, ownership and return obligations.",
-    "investment-revenue":"Rental, sales, service, agricultural, dividend and interest income by project.",
-    "investment-expenses":"Construction, maintenance, salaries, utilities, repairs, taxes and project costs.",
-    "investment-pl":"Project revenue less expenses, net profit, margin and monthly trends.",
-    "investment-budgets":"Project budgets, capital utilization, remaining requirements and alerts.",
-    "investment-assets":"Buildings, vehicles, equipment and other property assigned to investments.",
-    "investment-contracts":"Contractor, supplier, lease, partnership and insurance agreements.",
-    "investment-reports":"Portfolio, project, P&L, ROI, budget and annual investment reports.",
-    "investment-analytics":"Portfolio growth, ROI comparison, progress, distribution and budget intelligence.",
-    "investment-documents":"Investment policies, agreements, proposals and performance records.",
-    "investment-notifications":"Proposal decisions, budget alerts, milestones, maintenance and contract renewals.",
-    "investment-search":"Results from projects, proposals, investors, contractors, categories and locations."
-  });
-  return copy[state.page];
+  return "";
 }
 
 function headActions() {
@@ -1117,7 +1033,7 @@ function executiveDashboardView() {
     ["Supervisory Recommendations",s.supervisoryRecommendations,"shield","executive-supervisory","Pending follow-up"],
     ["Upcoming Meetings",s.upcomingMeetings,"clock","executive-meetings","Organization calendar"]
   ];
-  return `<div class="exec-welcome"><div><h2>Good ${new Date().getHours()<12?"morning":new Date().getHours()<17?"afternoon":"evening"}, ${actor().split(" ")[0]}</h2><p>Positions match Finance — UAP, Centenary, loans, and welfare savings since June 2024.</p></div><div class="dashboard-year-control"><label>Financial year</label><strong class="exec-fy-static">FY 26/27</strong></div></div>
+  return `<div class="exec-welcome"><div><h2>Good ${new Date().getHours()<12?"morning":new Date().getHours()<17?"afternoon":"evening"}, ${actor().split(" ")[0]}</h2></div><div class="dashboard-year-control"><label>Financial year</label><strong class="exec-fy-static">FY 26/27</strong></div></div>
     <div class="exec-stat-grid">${cards.slice(0,9).map((c,i)=>executiveStatCard(...c,i)).join("")}</div>
     <div class="exec-command-grid">
       ${executiveApprovalWidget(e.approvals.slice(0,5))}
@@ -1349,7 +1265,7 @@ function openMonthWelfarePayers(){
   document.getElementById("modal-backdrop")?.addEventListener("click",event=>{if(event.target.id==="modal-backdrop")closeModal();});
 }
 function executiveRecordTable(title,headers,rows) {
-  return `<section class="exec-panel exec-table-panel"><div class="exec-panel-head"><div><h3>${title}</h3><p>Summary view?operational entry remains with the responsible department</p></div></div><div class="table-scroll"><table><thead><tr>${headers.map(h=>`<th>${h}</th>`).join("")}</tr></thead><tbody>${rows.length?rows.map(r=>`<tr>${r.map(v=>`<td>${v}</td>`).join("")}</tr>`).join(""):`<tr><td colspan="${headers.length}">No records found.</td></tr>`}</tbody></table></div></section>`;
+  return `<section class="exec-panel exec-table-panel"><div class="exec-panel-head"><div><h3>${title}</h3></div></div><div class="table-scroll"><table><thead><tr>${headers.map(h=>`<th>${h}</th>`).join("")}</tr></thead><tbody>${rows.length?rows.map(r=>`<tr>${r.map(v=>`<td>${v}</td>`).join("")}</tr>`).join(""):`<tr><td colspan="${headers.length}">No records found.</td></tr>`}</tbody></table></div></section>`;
 }
 function executiveApprovalsView() {
   const items=state.executive.approvals||[],history=state.executive.approvalHistory||[];
@@ -1420,10 +1336,15 @@ function executiveNotificationsView() {
   return `<section class="exec-panel"><div class="exec-notification-page">${state.executive.notifications.map(n=>`<article><span>${icons.bell}</span><div><small>${n.type}</small><h3>${n.title}</h3><p>${n.detail}</p></div><time>${relativeTime(n.createdAt||n.time)}</time><button>Mark read</button></article>`).join("")}</div></section>`;
 }
 function executiveDocumentsView() {
-  const types=["Constitution","Policies","Minutes","Signed Contracts","Annual Reports","Audit Reports","Legal Documents"];
+  const types=["Constitution","Bylaws","Policies","Minutes","Signed Contracts","Annual Reports","Audit Reports","Legal Documents"];
   const libraryDocs=(state.executive.documents||[]).filter(d=>d.status!=="pending_executive");
   const pendingCount=(state.executive.documents||[]).filter(d=>d.status==="pending_executive").length;
-  return `${pendingCount?`<div class="credits-verification-banner"><div>${icons.info}<span><strong>${pendingCount} document${pendingCount===1?"":"s"} awaiting publication</strong><small>Review and publish them from the Approvals tab.</small></span></div><button class="button small primary" data-executive-page="executive-approvals">Open Approvals</button></div>`:""}<div class="exec-document-groups">${types.map(type=>{const docs=libraryDocs.filter(d=>type==="Minutes"?["Minutes","Board Minutes","Meeting Minutes"].includes(d.documentType):d.documentType===type);return `<section class="exec-panel"><div class="exec-panel-head"><div><h3>${type}</h3><p>${docs.length} official document${docs.length===1?"":"s"}</p></div></div>${docs.map(d=>`<div class="exec-document-row"><span>${icons.file}</span><div class="exec-document-copy"><strong>${escapeHtml(d.title)}</strong><small>${escapeHtml(d.reference)} - Version ${escapeHtml(d.version)} - ${escapeHtml(d.department||"")}</small></div><div class="exec-document-controls">${status(d.status)}${d.hasFile?`<div class="document-actions"><a href="/api/documents/${d.id}/view" target="_blank" title="View document">${icons.eye}<span>View</span></a><a href="/api/documents/${d.id}/download" title="Download document">${icons.download}</a></div>`:`<span class="status pending no-file-badge">No file</span>`}<button type="button" class="document-delete" data-delete-document="${d.id}" data-document-title="${escapeHtml(d.title)}" title="Delete document">${icons.trash}</button></div></div>`).join("")||`<div class="exec-empty">No documents in this category.</div>`}</section>`}).join("")}</div>`;
+  const matchesType=(d,type)=>type==="Minutes"?["Minutes","Board Minutes","Meeting Minutes"].includes(d.documentType):d.documentType===type;
+  const knownSet=new Set(types.flatMap(t=>t==="Minutes"?["Minutes","Board Minutes","Meeting Minutes"]:[t]));
+  const other=libraryDocs.filter(d=>!knownSet.has(d.documentType));
+  const who=(d)=>d.visibilityLevel!=null?` · Who can see: ${Number(d.visibilityLevel)<=1?"Members":Number(d.visibilityLevel)===3?"Selected departments":"All departments"}`:"";
+  const row=(d)=>`<div class="exec-document-row"><span>${icons.file}</span><div class="exec-document-copy"><strong>${escapeHtml(d.title)}</strong><small>${escapeHtml(d.reference)} - ${escapeHtml(d.documentType)} - Version ${escapeHtml(d.version)} - ${escapeHtml(d.department||"")}${who(d)}</small></div><div class="exec-document-controls">${status(d.status)}${d.hasFile?`<div class="document-actions"><a href="/api/documents/${d.id}/view" target="_blank" title="View document">${icons.eye}<span>View</span></a><a href="/api/documents/${d.id}/download" title="Download document">${icons.download}</a></div>`:`<span class="status pending no-file-badge">No file</span>`}<button type="button" class="document-delete" data-delete-document="${d.id}" data-document-title="${escapeHtml(d.title)}" title="Delete document">${icons.trash}</button></div></div>`;
+  return `${pendingCount?`<div class="credits-verification-banner"><div>${icons.info}<span><strong>${pendingCount} document${pendingCount===1?"":"s"} awaiting publication</strong><small>Review and publish them from the Approvals tab.</small></span></div><button class="button small primary" data-executive-page="executive-approvals">Open Approvals</button></div>`:""}<div class="exec-document-groups">${types.map(type=>{const docs=libraryDocs.filter(d=>matchesType(d,type));return `<section class="exec-panel"><div class="exec-panel-head"><div><h3>${type}</h3><p>${docs.length} official document${docs.length===1?"":"s"}</p></div></div>${docs.map(row).join("")||`<div class="exec-empty">No documents in this category.</div>`}</section>`;}).join("")}${other.length?`<section class="exec-panel"><div class="exec-panel-head"><div><h3>Other documents</h3><p>${other.length} custom-typed document${other.length===1?"":"s"}</p></div></div>${other.map(row).join("")}</section>`:""}</div>`;
 }
 function executiveSettingsView() {
   return `<div class="settings-grid"><div class="card setting-card"><div class="card-head" style="padding:0 0 16px"><div><h2 class="card-title">Executive preferences</h2><p class="card-subtitle">Command-center display and alerts</p></div></div>
@@ -1865,7 +1786,11 @@ function financeForecastWidget(f) {
   return `<section class="finance-panel"><div class="finance-panel-head"><div><h3>Financial Forecast</h3><p>Projected next-quarter net position</p></div></div><div class="finance-forecast"><strong>${money(avg*3)}</strong><span>Projected three-month surplus</span>${progress("Forecast confidence","82%",82,"lime")}<p>Based on six-month revenue and expenditure trends.</p></div></section>`;
 }
 function financeDocumentsView() {
-  return `<div class="exec-document-groups">${["Annual Reports","Audit Reports","Financial Statements","Bank Reconciliations","Payment Support"].map(type=>{const docs=state.finance.documents.filter(d=>d.documentType===type);return `<section class="finance-panel"><div class="finance-panel-head"><div><h3>${type}</h3><p>${docs.length} finance document${docs.length===1?"":"s"}</p></div></div>${docs.map(d=>`<div class="exec-document-row"><span>${icons.file}</span><div><strong>${d.title}</strong><small>${d.reference} - Version ${d.version}</small></div>${status(d.status)}${d.hasFile?`<div class="document-actions"><a href="/api/documents/${d.id}/view" target="_blank">${icons.eye}View</a><a href="/api/documents/${d.id}/download">${icons.download}</a></div>`:`<span class="status pending">No file</span>`}</div>`).join("")||`<div class="exec-empty">No documents in this category yet.</div>`}</section>`}).join("")}</div>`;
+  const known=["Annual Reports","Audit Reports","Financial Statements","Bank Reconciliations","Payment Support","Policies","Minutes"];
+  const docs=state.finance.documents||[];
+  const other=docs.filter(d=>!known.includes(d.documentType));
+  const row=(d)=>`<div class="exec-document-row"><span>${icons.file}</span><div><strong>${escapeHtml(d.title)}</strong><small>${escapeHtml(d.reference)} - ${escapeHtml(d.documentType)} - Version ${escapeHtml(d.version)}${d.visibilityLevel!=null?` · Who can see: ${Number(d.visibilityLevel)<=1?"Members":Number(d.visibilityLevel)===3?"Selected departments":"All departments"}`:""}</small></div>${status(d.status)}${d.hasFile?`<div class="document-actions"><a href="/api/documents/${d.id}/view" target="_blank">${icons.eye}View</a><a href="/api/documents/${d.id}/download">${icons.download}</a></div>`:`<span class="status pending">No file</span>`}</div>`;
+  return `<div class="exec-document-groups">${known.map(type=>{const rows=docs.filter(d=>d.documentType===type);return `<section class="finance-panel"><div class="finance-panel-head"><div><h3>${type}</h3><p>${rows.length} finance document${rows.length===1?"":"s"}</p></div></div>${rows.map(row).join("")||`<div class="exec-empty">No documents in this category yet.</div>`}</section>`;}).join("")}${other.length?`<section class="finance-panel"><div class="finance-panel-head"><div><h3>Other documents</h3><p>${other.length} custom-typed document${other.length===1?"":"s"}</p></div></div>${other.map(row).join("")}</section>`:""}</div>`;
 }
 function financeSettingsView() {
   return `<div class="settings-grid"><div class="card setting-card"><div class="card-head" style="padding:0 0 16px"><div><h2 class="card-title">Finance controls</h2><p class="card-subtitle">Accounting and payment safeguards</p></div></div>
@@ -2339,7 +2264,7 @@ function investmentDashboardView() {
     ["Under Construction",s.underConstruction,"building","investment-projects","Implementation stage"],
     ["Completed Projects",s.completedProjects,"check","investment-projects","Closed implementation"]
   ];
-  return `<div class="finance-title-strip investment-title-strip"><div><p class="eyebrow">Investment Department</p><h2>${u?"Old Mutual unit trust":"Portfolio intelligence center"}</h2><p>${u?"Same live account Finance shows. Each new day adds that day's interest. Future days are not calculated.":"Projects, capital, opportunities and returns. Operational accounting remains in Finance."}</p></div><time>${new Date().toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"})}</time></div>
+  return `<div class="finance-title-strip finance-welcome-strip"><div><h2>Good ${new Date().getHours()<12?"morning":new Date().getHours()<17?"afternoon":"evening"}, ${escapeHtml((actor()||"there").split(" ")[0])}</h2></div><time>${new Date().toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"})}</time></div>
     <div class="exec-module-metrics" style="margin-bottom:14px">${cards.map((card,index)=>financeUnitTrustMetric(card[0],card[1],card[4],["violet","green","blue","orange"][index])).join("")}</div>
     ${u?"":`<div class="finance-stat-grid investment-stat-grid">${cards.map((card,index)=>investmentStatCard(...card,index)).join("")}</div>`}
     <div class="investment-dashboard-grid">
@@ -2461,7 +2386,11 @@ function investmentAnalyticsView() {
     <section class="finance-panel"><div class="finance-panel-head"><div><h3>ROI Comparison</h3><p>Return by project</p></div></div><div class="finance-category-list">${i.projects.map(p=>`<div><span>${p.name}</span><i><b style="width:${Math.max(0,Math.min(100,p.roi*4))}%"></b></i><strong>${p.roi}%</strong></div>`).join("")}</div></section></div>`;
 }
 function investmentDocumentsView() {
-  return `<div class="exec-document-groups">${["Policies","Signed Contracts","Investment Proposals","Performance Reports"].map(type=>{const docs=state.investment.documents.filter(d=>d.documentType===type);return `<section class="finance-panel"><div class="finance-panel-head"><div><h3>${type}</h3><p>${docs.length} investment document${docs.length===1?"":"s"}</p></div></div>${docs.map(d=>`<div class="exec-document-row"><span>${icons.file}</span><div><strong>${d.title}</strong><small>${d.reference} - Version ${d.version}</small></div>${status(d.status)}${d.hasFile?`<div class="document-actions"><a href="/api/documents/${d.id}/view" target="_blank">${icons.eye}View</a><a href="/api/documents/${d.id}/download">${icons.download}</a></div>`:`<span class="status pending">No file</span>`}</div>`).join("")||`<div class="exec-empty">No documents in this category.</div>`}</section>`}).join("")}</div>`;
+  const known=["Policies","Signed Contracts","Investment Proposals","Performance Reports","Agreements","Minutes"];
+  const docs=state.investment.documents||[];
+  const other=docs.filter(d=>!known.includes(d.documentType));
+  const row=(d)=>`<div class="exec-document-row"><span>${icons.file}</span><div><strong>${escapeHtml(d.title)}</strong><small>${escapeHtml(d.reference)} - ${escapeHtml(d.documentType)} - Version ${escapeHtml(d.version)}${d.visibilityLevel!=null?` · Who can see: ${Number(d.visibilityLevel)<=1?"Members":Number(d.visibilityLevel)===3?"Selected departments":"All departments"}`:""}</small></div>${status(d.status)}${d.hasFile?`<div class="document-actions"><a href="/api/documents/${d.id}/view" target="_blank">${icons.eye}View</a><a href="/api/documents/${d.id}/download">${icons.download}</a></div>`:`<span class="status pending">No file</span>`}</div>`;
+  return `<div class="exec-document-groups">${known.map(type=>{const rows=docs.filter(d=>d.documentType===type);return `<section class="finance-panel"><div class="finance-panel-head"><div><h3>${type}</h3><p>${rows.length} investment document${rows.length===1?"":"s"}</p></div></div>${rows.map(row).join("")||`<div class="exec-empty">No documents in this category.</div>`}</section>`;}).join("")}${other.length?`<section class="finance-panel"><div class="finance-panel-head"><div><h3>Other documents</h3><p>${other.length} custom-typed document${other.length===1?"":"s"}</p></div></div>${other.map(row).join("")}</section>`:""}</div>`;
 }
 function investmentNotificationsView() {
   return `<section class="finance-panel"><div class="exec-notification-page">${state.investment.notifications.map(n=>`<article><span>${icons.bell}</span><div><small>${n.level}</small><h3>${n.title}</h3><p>Investment Department portfolio alert</p></div><time>${relativeTime(n.createdAt||n.time)}</time><button>Mark read</button></article>`).join("")}</div></section>`;
@@ -2895,7 +2824,11 @@ function creditsAnalyticsView() {
     <section class="finance-panel"><div class="finance-panel-head"><div><h3>Loan Category Distribution</h3><p>Outstanding balance by loan product</p></div></div><div class="finance-category-list">${[...new Set(c.loans.map(l=>l.product))].map(product=>{const amount=c.loans.filter(l=>l.product===product).reduce((n,l)=>n+l.balance,0);return `<div><span>${product}</span><i><b style="width:${c.portfolio.outstanding?amount/c.portfolio.outstanding*100:0}%"></b></i><strong>${money(amount)}</strong></div>`}).join("")}</div></section></div>`;
 }
 function creditsDocumentsView() {
-  return `<div class="exec-document-groups">${["Policies","Credit Reports","Loan Supporting Documents","Annual Reports"].map(type=>{const docs=state.credits.documents.filter(d=>d.documentType===type);return `<section class="finance-panel"><div class="finance-panel-head"><div><h3>${type}</h3><p>${docs.length} Credits document${docs.length===1?"":"s"}</p></div></div>${docs.map(d=>`<div class="exec-document-row"><span>${icons.file}</span><div><strong>${d.title}</strong><small>${d.reference} - Version ${d.version}</small></div>${status(d.status)}${d.hasFile?`<div class="document-actions"><a href="/api/documents/${d.id}/view" target="_blank">${icons.eye}View</a><a href="/api/documents/${d.id}/download">${icons.download}</a></div>`:`<span class="status pending">No file</span>`}</div>`).join("")||`<div class="exec-empty">No documents in this category yet.</div>`}</section>`}).join("")}</div>`;
+  const known=["Policies","Credit Reports","Loan Supporting Documents","Agreements","Minutes","Annual Reports"];
+  const docs=state.credits.documents||[];
+  const other=docs.filter(d=>!known.includes(d.documentType));
+  const row=(d)=>`<div class="exec-document-row"><span>${icons.file}</span><div><strong>${escapeHtml(d.title)}</strong><small>${escapeHtml(d.reference)} - ${escapeHtml(d.documentType)} - Version ${escapeHtml(d.version)}${d.visibilityLevel!=null?` · Who can see: ${Number(d.visibilityLevel)<=1?"Members":Number(d.visibilityLevel)===3?"Selected departments":"All departments"}`:""}</small></div>${status(d.status)}${d.hasFile?`<div class="document-actions"><a href="/api/documents/${d.id}/view" target="_blank">${icons.eye}View</a><a href="/api/documents/${d.id}/download">${icons.download}</a></div>`:`<span class="status pending">No file</span>`}</div>`;
+  return `<div class="exec-document-groups">${known.map(type=>{const rows=docs.filter(d=>d.documentType===type);return `<section class="finance-panel"><div class="finance-panel-head"><div><h3>${type}</h3><p>${rows.length} Credits document${rows.length===1?"":"s"}</p></div></div>${rows.map(row).join("")||`<div class="exec-empty">No documents in this category yet.</div>`}</section>`;}).join("")}${other.length?`<section class="finance-panel"><div class="finance-panel-head"><div><h3>Other documents</h3><p>${other.length} custom-typed document${other.length===1?"":"s"}</p></div></div>${other.map(row).join("")}</section>`:""}</div>`;
 }
 function creditsNotificationsView() {
   return `<section class="finance-panel"><div class="exec-notification-page">${state.credits.notifications.map(n=>`<article><span>${icons.bell}</span><div><small>${n.level}</small><h3>${n.title}</h3><p>Credits Department notification</p></div><time>${relativeTime(n.createdAt||n.time)}</time></article>`).join("")||`<div class="exec-empty">No current Credits notifications.</div>`}</div></section>`;
