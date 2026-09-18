@@ -77,6 +77,10 @@ if (!skipSync) {
     "scripts/sync-welfare-member-balances.js",
     ...dry,
   ]);
+  run("Include Oketcho on welfare standing (650k since June 2024)", "node", [
+    "scripts/include-oketcho-welfare-standing.js",
+    ...dry,
+  ]);
   run("Historical welfare expenditures (burials + weddings)", "node", [
     "scripts/sync-welfare-historical-expenditures.js",
     ...dry,

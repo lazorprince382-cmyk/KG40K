@@ -444,7 +444,7 @@ module.exports = function registerMemberAccountApi({
     const welfarePaid=Number(contributionsTotal||0);
     const memberName=String(member.fullName||member.full_name||"");
     const memberNumber=String(member.memberNumber||member.member_number||"");
-    const welfareExcluded=/oketcho/i.test(memberName)||(/baraza/i.test(memberName)&&/nakayiza|olivia/i.test(memberName));
+    const welfareExcluded=(/baraza/i.test(memberName)&&/nakayiza|olivia/i.test(memberName));
     const welfareVicent=(/vicent|vincent/i.test(memberName)&&/gumisiriza/i.test(memberName))||memberNumber==="G40-2026-0002";
     const welfareSinceLabel=welfareExcluded?null:welfareVicent?"July 2026":"June 2024";
     const welfareStanding=await loadWelfareStanding();

@@ -1,8 +1,9 @@
 "use strict";
 /**
  * Shared welfare standing for Finance, Welfare and Executive.
- * Standard members: UGX 650,000 welfare since June 2024 (inside personal savings).
- * Vicent: UGX 50,000 since July 2026. Oketcho & Baraza excluded from standing.
+ * Standard members (including Oketcho): UGX 650,000 welfare since June 2024.
+ * Vicent: UGX 50,000 since July 2026 (also listed on the standing register).
+ * Baraza remains excluded from standing.
  */
 const { query, one } = require("./db");
 
@@ -11,10 +12,13 @@ const VICENT_SINCE = "2026-07-01";
 const DEFAULT_MONTHLY = 25000;
 
 function isExcluded(name) {
-  return /oketcho/i.test(name || "") || (/baraza/i.test(name || "") && /nakayiza|olivia/i.test(name || ""));
+  return /baraza/i.test(name || "") && /nakayiza|olivia/i.test(name || "");
 }
 function isVicent(name) {
   return /vicent|vincent/i.test(name || "") && /gumisiriza/i.test(name || "");
+}
+function isOketcho(name) {
+  return /oketcho/i.test(name || "");
 }
 
 async function loadWelfareStanding() {
@@ -80,16 +84,17 @@ async function loadWelfareStanding() {
     };
   });
 
-  const standingMembers = byMember.filter((row) => !row.excluded && !row.isVicent && Number(row.standingBalance) > 0);
+  const standingMembers = byMember.filter((row) => !row.excluded && Number(row.standingBalance) > 0);
   const allOnRegister = byMember.filter((row) => !row.excluded && Number(row.standingBalance) > 0);
   const collectedSince = allOnRegister.reduce((sum, row) => sum + Number(row.standingBalance || 0), 0);
   const collectedAllTime = collectedSince;
-  const newMembers = byMember.filter((row) => row.isVicent || row.isNewMember);
+  const newMembers = byMember.filter((row) => row.isVicent || (row.isNewMember && !isOketcho(row.member)));
   const closingBalance = Math.max(0, collectedSince);
   const standardGrossTarget = 650000;
   const historicalAssistancePaid = Math.max(0, Number(assistancePaid) || 0);
+  const shareBase = byMember.filter((row) => !row.excluded && !row.isVicent && Number(row.standingBalance) > 0);
   const historicalSharePerMember =
-    standingMembers.length > 0 ? Math.round(historicalAssistancePaid / standingMembers.length) : 0;
+    shareBase.length > 0 ? Math.round(historicalAssistancePaid / shareBase.length) : 0;
   const enrichedMembers = byMember.map((row) => {
     const standing = Number(row.standingBalance || 0);
     const monthly = Number(row.monthlyContributed || 0);
@@ -137,11 +142,10 @@ async function loadWelfareStanding() {
     standardMemberTarget: standardGrossTarget,
     standardGrossTarget,
     historicalSharePerMember,
-    note:
-      "Welfare standing since June 2024. Oketcho and Baraza are excluded. Joshua Ssewanyana appears only in assistance history.",
+    note: "Welfare standing since June 2024. Joshua Ssewanyana appears only in assistance history.",
     byMember: enrichedMembers,
-    standingMembers: enrichedMembers.filter((row) => !row.excluded && !row.isVicent && Number(row.contributedSince) > 0),
-    newMembers: enrichedMembers.filter((row) => row.isVicent || row.isNewMember),
+    standingMembers: enrichedMembers.filter((row) => !row.excluded && Number(row.contributedSince) > 0),
+    newMembers: enrichedMembers.filter((row) => row.isVicent || (row.isNewMember && !isOketcho(row.member))),
   };
 }
 

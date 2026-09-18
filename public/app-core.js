@@ -699,7 +699,7 @@ function render() {
         </header>
         <div class="content">
           <div class="page-head">
-            <div><p class="eyebrow">${eyebrow}</p><h1>${title}</h1><p class="page-subtitle">${subtitle()}</p></div>
+            <div><p class="eyebrow${state.role==="Executive Officer"&&!state.executiveWorkspace?" eyebrow-lg":""}">${eyebrow}</p><h1>${title}</h1>${subtitle()?`<p class="page-subtitle">${subtitle()}</p>`:""}</div>
             ${headActions()}
           </div>
           ${view()}
@@ -833,7 +833,7 @@ function subtitle() {
       state.role==="Finance Officer"?"":
       state.role==="Credits Officer"?"":
       state.role==="Investment Officer"?"Projects, opportunities, capital, returns and portfolio performance in one business-intelligence workspace.":
-      state.role==="Executive Officer"?"Strategic organization health, performance, alerts and major decisions.":"A central view of verified organization information and work requiring attention.",
+      state.role==="Executive Officer"?"":"A central view of verified organization information and work requiring attention.",
     departments: "Only departments granted by your assignment and leadership level are shown.",
     messages: "Securely connect with members, departments and leadership.",
     users: "Reset passwords and manage secure login accounts for staff and members.",
@@ -1117,7 +1117,7 @@ function executiveDashboardView() {
     ["Supervisory Recommendations",s.supervisoryRecommendations,"shield","executive-supervisory","Pending follow-up"],
     ["Upcoming Meetings",s.upcomingMeetings,"clock","executive-meetings","Organization calendar"]
   ];
-  return `<div class="exec-welcome"><div><h2>Good ${new Date().getHours()<12?"morning":new Date().getHours()<17?"afternoon":"evening"}, ${actor().split(" ")[0]}</h2><p>Positions match Finance — UAP, Centenary, loans, and welfare savings since June 2024.</p></div><div class="dashboard-year-control"><label>Financial year</label><strong class="exec-fy-static">FY 26/27</strong><span class="exec-live"><i></i>Organization Overview</span></div></div>
+  return `<div class="exec-welcome"><div><h2>Good ${new Date().getHours()<12?"morning":new Date().getHours()<17?"afternoon":"evening"}, ${actor().split(" ")[0]}</h2><p>Positions match Finance — UAP, Centenary, loans, and welfare savings since June 2024.</p></div><div class="dashboard-year-control"><label>Financial year</label><strong class="exec-fy-static">FY 26/27</strong></div></div>
     <div class="exec-stat-grid">${cards.slice(0,9).map((c,i)=>executiveStatCard(...c,i)).join("")}</div>
     <div class="exec-command-grid">
       ${executiveApprovalWidget(e.approvals.slice(0,5))}
@@ -1247,9 +1247,9 @@ function executiveModuleView(module) {
   if(module==="welfare") {
     const standing=e.welfareStanding||e.welfare||{};
     const pool=standing.standingMembers||standing.byMember||e.welfare?.standingMembers||e.welfare?.byMember||[];
-    const standingList=pool.filter(x=>!x.excluded&&!x.isVicent&&Number(x.currentBalance||x.collected)>0);
+    const standingList=pool.filter(x=>!x.excluded&&Number(x.contributedSince||x.currentBalance||x.collected)>0);
     const sinceTotal=Number(standing.collectedSince||standing.grossCollectedSince||e.welfare?.collectedSince||0)
-      ||standingList.reduce((sum,x)=>sum+Number(x.currentBalance||x.collected||0),0);
+      ||standingList.reduce((sum,x)=>sum+Number(x.contributedSince||x.currentBalance||x.collected||0),0);
     const assistancePaid=Number(standing.assistancePaid||standing.historicalAssistancePaid||e.welfare?.assistancePaid||0)
       ||(e.welfareRequests||[]).filter(x=>["closed","paid","processed","approved"].includes(String(x.status||"").toLowerCase()))
         .reduce((sum,x)=>sum+Number(x.amount||0),0);
@@ -1258,16 +1258,18 @@ function executiveModuleView(module) {
       ?currentStanding
       :Math.max(0,sinceTotal-assistancePaid);
     const pending=Number(e.welfare?.pending||e.welfareProgress?.pendingRequests||0);
-    const newPool=standing.newMembers||e.welfare?.newMembers||[];
-    const newRows=newPool.map(x=>[x.member,x.memberNumber||"",x.joinedAt?new Date(x.joinedAt).toLocaleDateString("en-GB"):"—",money(x.contributedSince||x.currentBalance||x.collected||0),money(x.savingsBalance||0),escapeHtml(x.sinceLabel||(x.isVicent?"July 2026":"June 2024"))]);
-    const standingRows=standingList.slice(0,20).map(x=>[x.member,x.memberNumber||"",money(x.contributedSince||x.collected),escapeHtml(x.sinceLabel||"June 2024")]);
-    const note=standing.note||e.welfare?.note||"Welfare standing since June 2024. Summary view — operational entry remains with the responsible department.";
+    const standingRows=standingList.slice(0,40).map(x=>[
+      x.member,
+      x.memberNumber||"",
+      money(x.contributedSince||x.collected||0),
+      money(x.currentBalance??Math.max(0,Number(x.contributedSince||x.collected||0)-(x.historicalShare||0))),
+      escapeHtml(x.sinceLabel||"June 2024")
+    ]);
     const open=Boolean(state.welfareStandingOpen?.executive);
     const body=`<div class="exec-module-metrics">${executiveModuleMetric("Since June 2024",money(sinceTotal),"violet")}${executiveModuleMetric("Current welfare standing",money(currentTotal),"green")}${executiveModuleMetric("Members on standing",standing.membersContributing||standingList.length,"blue")}${executiveModuleMetric("Pending requests",pending,"orange")}</div>
-      ${executiveRecordTable(`Welfare standing since June 2024 (${standing.membersContributing||standingList.length} members)`,["Member","Number","Welfare","Since"],standingRows)}
-      ${executiveRecordTable("New / recent members — welfare vs personal savings",["Member","Number","Joined","Welfare","Personal savings","Since"],newRows)}
+      ${executiveRecordTable(`Welfare standing since June 2024 (${standing.membersContributing||standingList.length} members)`,["Member","Number","Welfare","Current balance","Since"],standingRows)}
       ${executiveRecordTable("Welfare assistance history",["Reference","Member","Request","Amount","Status"],(e.welfareRequests||[]).map(x=>[x.reference,x.member,x.requestType,money(x.amount),status(x.status)]))}`;
-    return welfareStandingReveal("executive","Welfare overview",note,body,open);
+    return welfareStandingReveal("executive","Welfare overview","",body,open);
   }
   if(["legal","audit","supervisory"].includes(module)) {
     const rows=e.governance.filter(x=>module==="legal"?x.departmentCode==="legal":x.departmentCode==="supervisory"&&(module==="audit"?x.recordType==="audit":true));
@@ -1476,28 +1478,30 @@ function financeDashboardView() {
 function financeWelfareStandingSection(f){
   const standing=f.welfareStanding||{};
   const pool=standing.standingMembers||standing.byMember||[];
-  const standingList=pool.filter(x=>!x.excluded&&!x.isVicent&&Number(x.currentBalance||x.collected)>0);
-  const sinceTotal=Number(standing.collectedSince||standing.grossCollectedSince||0)||standingList.reduce((sum,x)=>sum+Number(x.currentBalance||x.collected||0),0);
+  const standingList=pool.filter(x=>!x.excluded&&Number(x.contributedSince||x.currentBalance||x.collected)>0);
+  const sinceTotal=Number(standing.collectedSince||standing.grossCollectedSince||0)||standingList.reduce((sum,x)=>sum+Number(x.contributedSince||x.currentBalance||x.collected||0),0);
   const assistancePaid=Number(standing.assistancePaid||standing.historicalAssistancePaid||0);
   const currentStanding=Number(standing.currentStandingAfterAssistance);
   const currentTotal=Number.isFinite(currentStanding)&&currentStanding>=0
     ?currentStanding
     :Math.max(0,sinceTotal-assistancePaid);
-  const newPool=standing.newMembers||[];
-  const standingRows=standingList.slice(0,20).map(x=>[x.member,x.memberNumber||"",money(x.contributedSince||x.collected),escapeHtml(x.sinceLabel||"June 2024")]);
-  const newRows=newPool.map(x=>[x.member,x.memberNumber||"",x.joinedAt?new Date(x.joinedAt).toLocaleDateString("en-GB"):"—",money(x.contributedSince||x.currentBalance||x.collected||0),money(x.savingsBalance||0),escapeHtml(x.sinceLabel||"July 2026")]);
+  const standingRows=standingList.slice(0,40).map(x=>[
+    x.member,
+    x.memberNumber||"",
+    money(x.contributedSince||x.collected||0),
+    money(x.currentBalance??Math.max(0,Number(x.contributedSince||x.collected||0)-(x.historicalShare||0))),
+    escapeHtml(x.sinceLabel||"June 2024")
+  ]);
   const pending=Number(f.welfareProgress?.pendingRequests??0);
   const open=Boolean(state.welfareStandingOpen?.finance);
-  const note=standing.note||"";
   const body=`<div class="exec-module-metrics" style="margin-bottom:14px">
       ${executiveModuleMetric("Since June 2024",money(sinceTotal),"violet")}
       ${executiveModuleMetric("Current welfare standing",money(currentTotal),"green")}
       ${executiveModuleMetric("Members on standing",standing.membersContributing||standingList.length,"blue")}
       ${executiveModuleMetric("Pending requests",pending,"orange")}
     </div>
-    ${executiveRecordTable(`Welfare standing since June 2024 (${standing.membersContributing||standingList.length} members)`,["Member","Number","Welfare","Since"],standingRows)}
-    ${executiveRecordTable("New / recent members — welfare vs personal savings",["Member","Number","Joined","Welfare","Personal savings","Since"],newRows)}`;
-  return welfareStandingReveal("finance","Welfare overview",note,body,open);
+    ${executiveRecordTable(`Welfare standing since June 2024 (${standing.membersContributing||standingList.length} members)`,["Member","Number","Welfare","Current balance","Since"],standingRows)}`;
+  return welfareStandingReveal("finance","Welfare overview","",body,open);
 }
 function welfareStandingReveal(key,title,subtitle,body,open){
   return `<section class="welfare-standing-reveal${open?" open":""}">

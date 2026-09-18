@@ -197,7 +197,7 @@
     const company=Number(s.companyFunds??org.companyFunds??(uap+bank+loansOut));
     const memberName=String(m.fullName||m.full_name||"");
     const memberNumber=String(m.memberNumber||m.member_number||"");
-    const welfareExcluded=/oketcho/i.test(memberName)||(/baraza/i.test(memberName)&&/nakayiza|olivia/i.test(memberName));
+    const welfareExcluded=(/baraza/i.test(memberName)&&/nakayiza|olivia/i.test(memberName));
     const welfareVicent=(/vicent|vincent/i.test(memberName)&&/gumisiriza/i.test(memberName))||memberNumber==="G40-2026-0002";
     const welfareSinceLabel=welfareExcluded?null:welfareVicent?"July 2026":(s.welfareSinceLabel||"June 2024");
     const welfareCardNote=welfareExcluded
