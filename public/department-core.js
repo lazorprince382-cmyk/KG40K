@@ -17,7 +17,7 @@
         "welfare-reports":"reports","welfare-analytics":"reports","welfare-documents":"file","welfare-notifications":"bell"}
     },
     "Legal Officer": {
-      key:"legal", title:"Documents Department", dashboardTitle:"Documents Department Dashboard",
+      key:"legal", title:"Legal Department", dashboardTitle:"Legal Department Dashboard",
       pages:["dashboard","messages","docs-credits","docs-investment","docs-finance","docs-welfare","docs-supervisory","docs-audit","docs-executive","docs-general",
         "legal-documents","legal-cases","legal-contracts","legal-agreements","legal-policies","legal-constitution","legal-disciplinary","legal-complaints",
         "legal-opinions","legal-compliance","legal-court","legal-reports","legal-calendar",

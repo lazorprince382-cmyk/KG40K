@@ -1227,7 +1227,7 @@ function executiveDepartmentsView() {
     ["credits","Credits Department (SACCO)","Savings, loans and credit","Total savings",money(e.stats.totalSavings),"Outstanding loans",money(e.stats.outstandingLoans),"executive-credits","credits"],
     ["investment","Investment Department","Old Mutual unit trust","UAP account",money(e.investment.unitTrust?.balance??e.investment.current_value),"Profit so far",money(e.investment.unitTrust?.profitThisMonth||0),"executive-investments","investment"],
     ["welfare","Welfare Department","Member welfare support","Since June 2024",money(e.welfareStanding?.collectedSince||e.welfareStanding?.grossCollectedSince||e.welfare?.collectedSince||0),"Members on standing",e.welfareStanding?.membersContributing||e.welfare?.membersContributing||0,"executive-welfare","welfare"],
-    ["legal","Documents Department","Organization document registry","Documents filed",e.legal.open_cases,"Departments covered",e.legal.contracts,"executive-legal","legal"],
+    ["legal","Legal Department","Organization document registry","Documents filed",e.legal.open_cases,"Departments covered",e.legal.contracts,"executive-legal","legal"],
     ["audit","Audit Department","Financial integrity","Open audit issues",e.audit.open,"Resolved issues",e.audit.resolved,"executive-audit","audit"],
     ["supervisory","Supervisory Department","Oversight and accountability","Pending follow-ups",e.supervisory.followups,"Recommendations",e.supervisory.recommendations,"executive-supervisory","supervisory"]
   ];
