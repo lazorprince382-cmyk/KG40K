@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 "use strict";
 /**
- * Upsert a simple Welfare assistance register into Legal → Welfare library.
- * Also ensures the loan agreement is visible under Credits (common hosting gap).
+ * Upsert Legal library documents that hosting often misses:
+ *  - DOC-WELFARE-ASSISTANCE → Welfare
+ *  - DOC-LOAN-AGREEMENT → Credits (create if missing)
  *
  *   node scripts/seed-welfare-assistance-document.js
  *   node scripts/seed-welfare-assistance-document.js --dry-run
@@ -17,11 +18,30 @@ const projectRoot = path.resolve(__dirname, "..");
 requireDatabaseUrl(projectRoot);
 
 const dryRun = process.argv.includes("--dry-run");
-const SOURCE = path.join(projectRoot, "database", "seed-documents", "welfare-assistance-register.txt");
-const REFERENCE = "DOC-WELFARE-ASSISTANCE";
-const TITLE = "Welfare assistance register — people given support";
-const DOC_TYPE = "Welfare Reports";
-const FILE_NAME = "welfare-assistance-register.txt";
+const seedDir = path.join(projectRoot, "database", "seed-documents");
+const uploadsDir = path.join(projectRoot, "storage", "uploads");
+
+const DOCS = [
+  {
+    reference: "DOC-WELFARE-ASSISTANCE",
+    department: "welfare",
+    documentType: "Welfare Reports",
+    title: "Welfare assistance register — people given support",
+    source: path.join(seedDir, "welfare-assistance-register.txt"),
+    fileName: "welfare-assistance-register.txt",
+  },
+  {
+    reference: "DOC-LOAN-AGREEMENT",
+    department: "credits",
+    documentType: "Loan Agreement",
+    title: "Kasangati G40 Kwagalana Loan Agreement",
+    sourceCandidates: [
+      path.join(seedDir, "loan-agreement.txt"),
+      path.join(projectRoot, "storage", "official-text", "kasangati-g40-kwagalana-loan-agreement--2-.txt"),
+    ],
+    fileName: "kasangati-g40-kwagalana-loan-agreement--2-.txt",
+  },
+];
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -33,117 +53,118 @@ const pool = new Pool({
       : undefined,
 });
 
-async function main() {
-  if (!fs.existsSync(SOURCE)) throw new Error(`Missing seed file: ${SOURCE}`);
-  const buffer = fs.readFileSync(SOURCE);
+function resolveSource(doc) {
+  if (doc.source) return doc.source;
+  for (const candidate of doc.sourceCandidates || []) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+async function upsertDocument(client, { deptByCode, actorId, hasAudience }, doc) {
+  const department = deptByCode[doc.department];
+  if (!department) throw new Error(`Missing department: ${doc.department}`);
+  const source = resolveSource(doc);
+  if (!source || !fs.existsSync(source)) throw new Error(`Missing seed file for ${doc.reference}`);
+  const buffer = fs.readFileSync(source);
   const sha256 = crypto.createHash("sha256").update(buffer).digest("hex");
+
+  if (dryRun) {
+    console.log(`Would upsert ${doc.reference} → ${doc.department} (${buffer.length} bytes)`);
+    return;
+  }
+
+  let row = (await client.query(`SELECT id FROM organization_documents WHERE reference=$1`, [doc.reference])).rows[0];
+  if (!row) {
+    row = (
+      await client.query(
+        hasAudience
+          ? `INSERT INTO organization_documents
+              (reference,department_id,document_type,title,version,status,visibility_level,audience_departments,file_name,created_by)
+             VALUES ($1,$2,$3,$4,'1.1','published',2,NULL,$5,$6) RETURNING id`
+          : `INSERT INTO organization_documents
+              (reference,department_id,document_type,title,version,status,visibility_level,file_name,created_by)
+             VALUES ($1,$2,$3,$4,'1.1','published',2,$5,$6) RETURNING id`,
+        [doc.reference, department.id, doc.documentType, doc.title, doc.fileName, actorId]
+      )
+    ).rows[0];
+    console.log(`Created ${doc.reference} under ${doc.department} id=${row.id}`);
+  } else {
+    await client.query(
+      hasAudience
+        ? `UPDATE organization_documents SET
+             department_id=$2, document_type=$3, title=$4, version='1.1', status='published',
+             visibility_level=2, audience_departments=NULL, file_name=$5, updated_at=NOW()
+           WHERE id=$1`
+        : `UPDATE organization_documents SET
+             department_id=$2, document_type=$3, title=$4, version='1.1', status='published',
+             visibility_level=2, file_name=$5, updated_at=NOW()
+           WHERE id=$1`,
+      [row.id, department.id, doc.documentType, doc.title, doc.fileName]
+    );
+    console.log(`Updated ${doc.reference} → ${doc.department} id=${row.id}`);
+  }
+
+  const same = (
+    await client.query(`SELECT id FROM organization_document_versions WHERE document_id=$1 AND sha256=$2`, [
+      row.id,
+      sha256,
+    ])
+  ).rows[0];
+  const versionExists = (
+    await client.query(`SELECT id FROM organization_document_versions WHERE document_id=$1 AND version=$2`, [
+      row.id,
+      "1.1",
+    ])
+  ).rows[0];
+  if (!same && !versionExists) {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+    const stored = `${Date.now()}-${crypto.randomBytes(12).toString("hex")}.txt`;
+    fs.writeFileSync(path.join(uploadsDir, stored), buffer);
+    await client.query(
+      `INSERT INTO organization_document_versions
+        (document_id,version,original_name,stored_name,mime_type,file_size,sha256,uploaded_by)
+       VALUES ($1,'1.1',$2,$3,'text/plain; charset=utf-8',$4,$5,$6)`,
+      [row.id, doc.fileName, stored, buffer.length, sha256, actorId]
+    );
+    await client.query(`UPDATE organization_documents SET file_name=$1, version='1.1', updated_at=NOW() WHERE id=$2`, [
+      doc.fileName,
+      row.id,
+    ]);
+    console.log(`  Attached ${stored}`);
+  } else {
+    console.log("  File version already present");
+  }
+}
+
+async function main() {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    const welfare = (await client.query(`SELECT id FROM departments WHERE code='welfare' AND active=true`)).rows[0];
-    const credits = (await client.query(`SELECT id FROM departments WHERE code='credits' AND active=true`)).rows[0];
+    const depts = (await client.query(`SELECT id, code FROM departments WHERE active=true`)).rows;
+    const deptByCode = Object.fromEntries(depts.map((d) => [d.code, d]));
     const actor =
       (await client.query(`SELECT id FROM users WHERE role='Legal Officer' AND active=true ORDER BY id LIMIT 1`)).rows[0] ||
       (await client.query(`SELECT id FROM users WHERE active=true ORDER BY id LIMIT 1`)).rows[0];
-    if (!welfare || !actor) throw new Error("Welfare department and an active user are required");
-
-    if (dryRun) {
-      console.log(`Would upsert ${REFERENCE} under Welfare (${welfare.id}), ${buffer.length} bytes`);
-      if (credits) console.log("Would also publish DOC-LOAN-AGREEMENT under Credits (visibility 2)");
-      await client.query("ROLLBACK");
-      return;
-    }
-
-    const uploads = path.join(projectRoot, "storage", "uploads");
-    fs.mkdirSync(uploads, { recursive: true });
-
-    const hasAudience = (
+    if (!actor) throw new Error("An active user is required");
+    const hasAudience = !!(
       await client.query(
         `SELECT 1 FROM information_schema.columns
          WHERE table_name='organization_documents' AND column_name='audience_departments'`
       )
     ).rows[0];
 
-    let doc = (await client.query(`SELECT id FROM organization_documents WHERE reference=$1`, [REFERENCE])).rows[0];
-    if (!doc) {
-      doc = (
-        await client.query(
-          hasAudience
-            ? `INSERT INTO organization_documents
-                (reference,department_id,document_type,title,version,status,visibility_level,audience_departments,file_name,created_by)
-               VALUES ($1,$2,$3,$4,'1.0','published',2,NULL,$5,$6) RETURNING id`
-            : `INSERT INTO organization_documents
-                (reference,department_id,document_type,title,version,status,visibility_level,file_name,created_by)
-               VALUES ($1,$2,$3,$4,'1.0','published',2,$5,$6) RETURNING id`,
-          [REFERENCE, welfare.id, DOC_TYPE, TITLE, FILE_NAME, actor.id]
-        )
-      ).rows[0];
-      console.log(`Created ${REFERENCE} id=${doc.id}`);
-    } else {
-      await client.query(
-        hasAudience
-          ? `UPDATE organization_documents SET
-               department_id=$2, document_type=$3, title=$4, version='1.0', status='published',
-               visibility_level=2, audience_departments=NULL, file_name=$5, updated_at=NOW()
-             WHERE id=$1`
-          : `UPDATE organization_documents SET
-               department_id=$2, document_type=$3, title=$4, version='1.0', status='published',
-               visibility_level=2, file_name=$5, updated_at=NOW()
-             WHERE id=$1`,
-        [doc.id, welfare.id, DOC_TYPE, TITLE, FILE_NAME]
-      );
-      console.log(`Updated ${REFERENCE} id=${doc.id}`);
+    for (const doc of DOCS) {
+      await upsertDocument(client, { deptByCode, actorId: actor.id, hasAudience }, doc);
     }
 
-    const same = (
-      await client.query(`SELECT id FROM organization_document_versions WHERE document_id=$1 AND sha256=$2`, [
-        doc.id,
-        sha256,
-      ])
-    ).rows[0];
-    if (!same) {
-      const stored = `${Date.now()}-${crypto.randomBytes(12).toString("hex")}.txt`;
-      const destination = path.join(uploads, stored);
-      fs.writeFileSync(destination, buffer);
-      await client.query(
-        `INSERT INTO organization_document_versions
-          (document_id,version,original_name,stored_name,mime_type,file_size,sha256,uploaded_by)
-         VALUES ($1,'1.0',$2,$3,'text/plain; charset=utf-8',$4,$5,$6)`,
-        [doc.id, FILE_NAME, stored, buffer.length, sha256, actor.id]
-      );
-      await client.query(`UPDATE organization_documents SET file_name=$1, version='1.0', updated_at=NOW() WHERE id=$2`, [
-        FILE_NAME,
-        doc.id,
-      ]);
-      console.log(`Attached file version ${stored}`);
-    } else {
-      console.log("File version already present");
+    if (dryRun) {
+      await client.query("ROLLBACK");
+      console.log("Dry run only.");
+      return;
     }
-
-    // Hosting often still has the loan agreement stuck on Legal / high visibility.
-    if (credits) {
-      const loan = (
-        await client.query(`SELECT id, department_id, visibility_level, status FROM organization_documents WHERE reference='DOC-LOAN-AGREEMENT'`)
-      ).rows[0];
-      if (loan) {
-        await client.query(
-          hasAudience
-            ? `UPDATE organization_documents SET
-                 department_id=$2, document_type='Loan Agreement', status='published',
-                 visibility_level=2, audience_departments=NULL, updated_at=NOW()
-               WHERE id=$1`
-            : `UPDATE organization_documents SET
-                 department_id=$2, document_type='Loan Agreement', status='published',
-                 visibility_level=2, updated_at=NOW()
-               WHERE id=$1`,
-          [loan.id, credits.id]
-        );
-        console.log(`Ensured DOC-LOAN-AGREEMENT under Credits (visibility 2)`);
-      }
-    }
-
     await client.query("COMMIT");
-    console.log("Done.");
+    console.log("Done. Credits should show Loan Agreement; Welfare should show assistance register.");
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
