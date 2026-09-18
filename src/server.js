@@ -572,6 +572,8 @@ async function organizationContext(user) {
   return {...organization,departments:assignmentRows,leadership,workspaces:await buildAvailableWorkspaces(user)};
 }
 async function departmentPermission(user,code,action="view") {
+  // Document delete is treated as an edit-level department right.
+  if(action==="delete")action="edit";
   if(!["view","create","edit","approve"].includes(action)) return null;
   if(user.role==="Member"&&action==="view"&&user.member_id) return one(`SELECT d.id,d.code,d.name,d.description,1 AS authority_level
     FROM departments d JOIN member_department_profiles mdp ON mdp.department_id=d.id
@@ -3583,8 +3585,8 @@ app.get("/api/legal/command-center",auth,requireLegal("view"),asyncRoute(async(r
       documentLibrary.find(x=>x.documentCount===0)&&{level:"warning",title:`${documentLibrary.filter(x=>x.documentCount===0).map(x=>x.name).join(", ")} still need documents`,createdAt:new Date().toISOString(),target:"dashboard"},
       deadlines.some(x=>new Date(x.date).getTime()<now+7*86400000)&&{level:"danger",title:`${deadlines.filter(x=>new Date(x.date).getTime()<now+7*86400000).length} deadlines fall within seven days`,createdAt:deadlines.find(x=>new Date(x.date).getTime()<now+7*86400000)?.date,target:"legal-calendar"}
     ].filter(Boolean),
-    access:{authorityLevel:req.legalAccess.authority_level,canCreate:Boolean(req.legalAccess.can_create)||req.user.role==="Legal Officer"||req.user.role==="System Admin",
-      canEdit:Boolean(req.legalAccess.can_edit)||req.user.role==="Legal Officer"||req.user.role==="System Admin",canApprove:Boolean(req.legalAccess.can_approve)}
+    access:{authorityLevel:req.legalAccess.authority_level,canCreate:Boolean(req.legalAccess.can_create)||["Legal Officer","System Admin","Executive Officer"].includes(req.user.role),
+      canEdit:Boolean(req.legalAccess.can_edit)||["Legal Officer","System Admin","Executive Officer"].includes(req.user.role),canApprove:Boolean(req.legalAccess.can_approve)||["Legal Officer","System Admin","Executive Officer"].includes(req.user.role)}
   });
 }));
 app.get("/api/legal/search",auth,requireLegal("view"),asyncRoute(async(req,res)=>{
@@ -4752,23 +4754,30 @@ app.post("/api/withdrawals/:id/process",auth,asyncRoute(async(req,res)=>{
   res.json({ok:true,transactionReference:processed.tx.reference,receiptNumber:processed.tx.receipt_number,balance:Number(processed.balance)});
 }));
 async function documentAccess(user,document,action="view") {
-  if(user.role==="System Admin")return true;
-  if(["Legal Officer"].includes(user.role)&&["view","edit","delete"].includes(action))return true;
-  if(action==="delete"&&["Executive Officer","Legal Officer"].includes(user.role))return true;
-  if(action==="view"&&["Auditor","Executive Officer","Supervisory Officer","Legal Officer"].includes(user.role))return true;
+  const role=String(user?.role||"");
+  if(role==="System Admin")return true;
+  // Legal and Executive may permanently archive any organization document.
+  if(action==="delete"&&["Legal Officer","Executive Officer","System Admin"].includes(role))return true;
+  if(role==="Legal Officer"&&["view","edit","delete"].includes(action))return true;
+  if(action==="view"&&["Auditor","Executive Officer","Supervisory Officer","Legal Officer"].includes(role))return true;
   const level=Number(document.visibility_level||2);
-  const code=document.department_code||"executive";
+  const code=String(document.department_code||"executive").toLowerCase();
   const audience=parseDocumentAudience(document.audience_departments);
+  if(action==="delete"){
+    if(await departmentPermission(user,code,"edit"))return true;
+    if(await departmentPermission(user,"legal","edit"))return true;
+    return false;
+  }
   if(action==="view"&&document.status==="published"){
     if(level<=1){
       return true; // members + staff
     }
     if(level===2){
-      if(user.role!=="Member")return true; // all departments
+      if(role!=="Member")return true; // all departments
       return false;
     }
     // Selected departments
-    if(["Legal Officer","System Admin","Executive Officer"].includes(user.role))return true;
+    if(["Legal Officer","System Admin","Executive Officer"].includes(role))return true;
     const targets=audience.length?audience:[code];
     for(const target of targets){
       if(await departmentPermission(user,target,"view"))return true;

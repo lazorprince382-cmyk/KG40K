@@ -1,4 +1,4 @@
-const CACHE="kasangati-v220";
+const CACHE="kasangati-v221";
 const SHELL=[
   "/","/index.html","/styles.css?v=116","/brand-theme.css?v=64","/brand-no-green.css?v=17","/legal-member-exit.css?v=2","/app.js?v=189",
   "/app-core.js?v=175","/department-theme.js?v=63","/department-core.js?v=71",

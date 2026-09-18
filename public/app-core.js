@@ -4159,16 +4159,23 @@ async function handleAction(action, element) {
 }
 
 async function deleteOrganizationDocument(id,title="this document") {
+  if(!canManageOrganizationDocuments()){
+    toast("Only Legal or Executive can delete organization documents.");
+    return;
+  }
   const confirmed=await confirmDialog(`Delete "${title}" from active documents? Everyone will stop seeing it immediately. The record remains in audit history for recovery.`);
   if(!confirmed)return;
   try {
     await api(`/api/documents/${id}`,{method:"DELETE"});
     closeDocumentViewer();
-    if(state.role==="Executive Officer")state.executive=await api("/api/executive/command-center");
-    else if(state.role==="Legal Officer")state.legal=await api("/api/legal/command-center");
-    else await refreshData();
+    if(state.role==="Executive Officer"){
+      state.executive=await api("/api/executive/command-center");
+      if(state.executiveWorkspace==="legal")state.legal=await api("/api/legal/command-center");
+    }else if(state.role==="Legal Officer"||state.executiveWorkspace==="legal"){
+      state.legal=await api("/api/legal/command-center");
+    }else await refreshData();
     render();toast("Document deleted. It is no longer visible to anyone.");
-  } catch(error) { toast(error.message); }
+  } catch(error) { toast(error.message||"Document could not be deleted."); }
 }
 
 async function decideDocumentPublication(id,decision) {

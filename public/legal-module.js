@@ -52,7 +52,7 @@
     const names=codes.map(code=>VIEW_DEPTS.find(x=>x.code===code)?.name||code);
     return names.length<=2?names.join(", "):`${names.slice(0,2).join(", ")} +${names.length-2}`;
   };
-  const canManageDocuments=()=>["Legal Officer","System Admin"].includes(state.role)||L().access.canEdit||L().access.canCreate;
+  const canManageDocuments=()=>["Legal Officer","Executive Officer","System Admin"].includes(state.role)||L().access.canEdit||L().access.canCreate;
   const libraryMeta=code=>LIBRARY_DEPTS.find(x=>x.code===code)||{code,page:`docs-${code}`,name:code,tone:"blue",icon:"file",note:"Department documents"};
   const libraryRows=()=>{
     const fromApi=L().documentLibrary;
