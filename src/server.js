@@ -2299,9 +2299,10 @@ app.get("/api/credits/command-center",auth,requireCredits("view"),asyncRoute(asy
       (t.evidence_stored_name IS NOT NULL) AS "hasEvidence",t.evidence_original_name AS "evidenceName",
       t.verification_comment AS "verificationComment",t.target_fiscal_year AS "targetFiscalYear",t.created_at AS "createdAt",t.verified_at AS "verifiedAt",
       m.id AS "memberId",m.member_number AS "memberNumber",m.full_name AS member,u.full_name AS officer,
-      verifier.full_name AS "verifiedBy",l.reference AS "loanReference"
+      verifier.full_name AS "verifiedBy",t.loan_id AS "loanId",l.reference AS "loanReference",l.status AS "loanStatus"
       FROM transactions t JOIN members m ON m.id=t.member_id JOIN users u ON u.id=t.recorded_by
       LEFT JOIN users verifier ON verifier.id=t.verified_by LEFT JOIN loans l ON l.id=t.loan_id
+      WHERE NOT (t.type='Loan repayment' AND COALESCE(l.reference,'') LIKE 'LN-HIST-%')
       ORDER BY t.created_at DESC,t.id DESC LIMIT 150`),
     query(`SELECT l.id,l.reference,m.id AS "memberId",m.member_number AS "memberNumber",m.full_name AS member,
       CASE WHEN m.provisional THEN NULL ELSE m.phone END AS phone,m.email,m.status AS "memberStatus",
@@ -2488,11 +2489,21 @@ app.get("/api/credits/command-center",auth,requireCredits("view"),asyncRoute(asy
   const totalSavings=summary.rows[0].total_savings;
   const outstanding=portfolioSummary.rows[0].outstanding;
   const availableFunds=Math.max(0,totalSavings-outstanding);
+  const totalRepaidActive=Number((await one(`SELECT COALESCE(SUM(s.paid_amount),0)::float AS total
+    FROM loan_repayment_schedule s JOIN loans l ON l.id=s.loan_id
+    WHERE l.status IN ('active','overdue')`))?.total||0);
+  const historyRecovery=Number((await one(`SELECT COALESCE(SUM(s.paid_amount),0)::float AS total
+    FROM loan_repayment_schedule s JOIN loans l ON l.id=s.loan_id
+    WHERE l.status IN ('completed','closed')
+      OR l.reference LIKE 'LN-HIST-%'`))?.total||0);
   const totalRepaid=Number((await one(`SELECT COALESCE(SUM(s.paid_amount),0)::float AS total
     FROM loan_repayment_schedule s JOIN loans l ON l.id=s.loan_id`))?.total||0);
-  const duePrincipal=(await one(`SELECT COALESCE(SUM(principal),0)::float AS amount FROM loan_repayment_schedule
-    WHERE due_date<=CURRENT_DATE`)).amount;
-  const paidPrincipal=(await one(`SELECT COALESCE(SUM(LEAST(paid_amount,principal)),0)::float AS amount FROM loan_repayment_schedule`)).amount;
+  const duePrincipal=(await one(`SELECT COALESCE(SUM(principal),0)::float AS amount FROM loan_repayment_schedule s
+    JOIN loans l ON l.id=s.loan_id
+    WHERE l.status IN ('active','overdue') AND s.due_date<=CURRENT_DATE`)).amount;
+  const paidPrincipal=(await one(`SELECT COALESCE(SUM(LEAST(s.paid_amount,s.principal)),0)::float AS amount
+    FROM loan_repayment_schedule s JOIN loans l ON l.id=s.loan_id
+    WHERE l.status IN ('active','overdue')`)).amount;
   const recoveryRate=duePrincipal?Number((paidPrincipal/duePrincipal*100).toFixed(1)):0;
   const interestEarned=(await one(`SELECT COALESCE(SUM(LEAST(paid_amount,total_due)-LEAST(paid_amount,principal)),0)::float AS amount
     FROM loan_repayment_schedule WHERE paid_at>=date_trunc('month',CURRENT_DATE)`)).amount;
@@ -2530,19 +2541,19 @@ app.get("/api/credits/command-center",auth,requireCredits("view"),asyncRoute(asy
       pendingGuarantors:guarantorSummary.rows[0].pending,applicationsUnderReview:underReview.filter(l=>["review","officer-review","committee-review"].includes(l.status)).length,
       pendingRepaymentVerifications:pendingRepaymentVerifications.length,
       pendingContributionVerifications:pendingContributionVerifications.length,
-      totalRepaid,loansOutstanding:outstanding},
+      totalRepaid,totalRepaidActive,historyRecovery,loansOutstanding:outstanding},
     savings:{totalSavings,depositsToday:depositSummary.rows[0].deposits_today,monthlyDeposits:savingsThisMonth,
       withdrawals:depositSummary.rows[0].withdrawals_month,growth:savingsGrowth},
     portfolio:{active:portfolioSummary.rows[0].active,completed:portfolioSummary.rows[0].completed,
       pending:portfolioSummary.rows[0].pending,rejected:portfolioSummary.rows[0].rejected,arrears:overdueRows.length,
-      outstanding,disbursedMonth:portfolioSummary.rows[0].disbursed_month,totalRepaid},
+      outstanding,disbursedMonth:portfolioSummary.rows[0].disbursed_month,totalRepaid,totalRepaidActive,historyRecovery},
     guarantorSummary:{...guarantorSummary.rows[0],overGuaranteed,totalActive:activeGuarantees.length,
       guaranteedAmount:activeGuarantees.reduce((sum,g)=>sum+g.guaranteedAmount,0)},
     members:members.rows,transactions:transactionsResult.rows,loans:loanRows,guarantors:guarantors.rows,
     contributionPolicy,contributionProgress,pastContributionProgress,
     recovery:recovery.rows,charges:charges.rows,documents:documents.rows,monthly,
     notifications:[
-      pendingRepaymentVerifications.length&&{level:"warning",title:`${pendingRepaymentVerifications.length} loan repayment${pendingRepaymentVerifications.length===1?"":"s"} awaiting Credits Officer approval`,detail:`Review on Repayments${primaryCreditsOfficer?.name?` — ${primaryCreditsOfficer.name}`:""}`,target:"credits-repayments",transactionId:pendingRepaymentVerifications[0]?.id,createdAt:pendingRepaymentVerifications[0]?.createdAt},
+      pendingRepaymentVerifications.length&&{level:"warning",title:`${pendingRepaymentVerifications.length} loan repayment${pendingRepaymentVerifications.length===1?"":"s"} awaiting Credits Officer approval`,detail:"Review on Repayments",target:"credits-repayments",transactionId:pendingRepaymentVerifications[0]?.id,createdAt:pendingRepaymentVerifications[0]?.createdAt},
       pendingContributionVerifications.length&&{level:"info",title:`${pendingContributionVerifications.length} member contribution${pendingContributionVerifications.length===1?"":"s"} awaiting verification`,detail:"Review on Savings",target:"credits-savings",transactionId:pendingContributionVerifications[0]?.id,createdAt:pendingContributionVerifications[0]?.createdAt},
       dangerRows.length&&{level:"danger",title:`${dangerRows.length} loan${dangerRows.length===1?"":"s"} past due — remind members before the 5% principal penalty grows`,createdAt:dangerRows[0]?.nextDueDate||dangerRows[0]?.dueDate||dangerRows[0]?.createdAt},
       overdueRows.length&&{level:"danger",title:`${overdueRows.length} loan${overdueRows.length===1?" is":"s are"} overdue and need recovery follow-up`,createdAt:overdueRows[0]?.dueDate||overdueRows[0]?.createdAt},

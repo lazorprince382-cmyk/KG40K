@@ -89,6 +89,10 @@ if (!skipSync) {
     "scripts/sync-sep2026-receipt-dates.js",
     ...dry,
   ]);
+  run("Historical loan spreadsheet → completed history", "node", [
+    "scripts/seed-historical-loan-spreadsheet.js",
+    ...dry,
+  ]);
 } else {
   console.log("\n== Sync ==\nSkipped (--skip-sync)");
 }
@@ -111,6 +115,7 @@ console.log("  npm run db:sync-sep2026-live");
 console.log("  npm run db:sync-vicent-welfare");
   console.log("  npm run db:sync-welfare-balances");
   console.log("  npm run db:sync-welfare-history");
+  console.log("  npm run db:seed-historical-loans");
   console.log("  npm run db:sync-live-pack");
 console.log("  npm run db:verify-live");
 console.log("  npm run db:export-system      # refresh dump after local data changes");

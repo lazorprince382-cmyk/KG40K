@@ -819,7 +819,7 @@ function subtitle() {
   const copy = {
     dashboard: state.role === "Member" ? "Your membership, department, benefits and financial activity in one place." :
       state.role==="Finance Officer"?"":
-      state.role==="Credits Officer"?"Savings, loans, guarantors, repayments and portfolio recovery in one SACCO workspace.":
+      state.role==="Credits Officer"?"":
       state.role==="Investment Officer"?"Projects, opportunities, capital, returns and portfolio performance in one business-intelligence workspace.":
       state.role==="Executive Officer"?"Strategic organization health, performance, alerts and major decisions.":"A central view of verified organization information and work requiring attention.",
     departments: "Only departments granted by your assignment and leadership level are shown.",
@@ -872,7 +872,7 @@ function subtitle() {
     "credits-applications":"Applications from submission through guarantor consent and credit review.",
     "credits-approvals":"Review decisions by the Credits officer, committee and authorized leadership.",
     "credits-disbursement":"Approved loans ready to be sent to members and scheduled for repayment.",
-    "credits-repayments":"Post repayments against schedules, balances, interest and charges.",
+    "credits-repayments":"",
     "credits-guarantors":"Guarantee requests, capacity, accepted security and declined requests.",
     "credits-recovery":"Overdue facilities, recovery officers, reminders, actions and follow-ups.",
     "credits-statements":"Generate detailed savings and loan account statements for members.",
@@ -1854,7 +1854,7 @@ function financeSearchView() {
   return `<div class="exec-search-summary">${icons.search}<div><strong>${results.length} finance result${results.length===1?"":"s"}</strong><span>for &quot;${escapeHtml(state.financeSearchTerm||"")}&quot;</span></div></div><section class="finance-panel"><div class="exec-global-results">${results.map(r=>`<button data-finance-page="${r.target}"><span>${r.type}</span><div><strong>${r.title}</strong><small>${r.reference} - ${r.detail||""}</small></div><b>&gt;</b></button>`).join("")||`<div class="exec-empty">Type at least two characters to search Finance.</div>`}</div></section>`;
 }
 function financeDataTable(title,headers,rows) {
-  return `<section class="finance-panel finance-data-panel"><div class="finance-panel-head"><div><h3>${title}</h3><p>${rows.length} verified record${rows.length===1?"":"s"}</p></div></div><div class="table-scroll"><table><thead><tr>${headers.map(h=>`<th>${h}</th>`).join("")}</tr></thead><tbody>${rows.length?rows.map(row=>`<tr>${row.map(value=>`<td>${value}</td>`).join("")}</tr>`).join(""):`<tr><td colspan="${headers.length}">No records found.</td></tr>`}</tbody></table></div></section>`;
+  return `<section class="finance-panel finance-data-panel"><div class="finance-panel-head"><div><h3>${title}</h3><p>${rows.length} record${rows.length===1?"":"s"}</p></div></div><div class="table-scroll credits-card-scroll"><table><thead><tr>${headers.map(h=>`<th>${h}</th>`).join("")}</tr></thead><tbody>${rows.length?rows.map(row=>`<tr>${row.map(value=>`<td>${value}</td>`).join("")}</tr>`).join(""):`<tr><td colspan="${headers.length}">No records found.</td></tr>`}</tbody></table></div></section>`;
 }
 function financeAccountOptions() {
   return state.finance.accounts.map(a=>`<option value="${a.id}" data-account-type="${a.accountType}" data-account-code="${escapeHtml(a.accountCode||"")}">${escapeHtml(a.accountName)} - ${money(a.balance)}</option>`).join("");
@@ -2513,33 +2513,29 @@ function creditsDashboardView() {
   const s=c.stats;
   const pendingRepays=(c.verificationQueue||[]).filter(x=>x.type==="Loan repayment");
   const pendingQueue=c.verificationQueue||[];
+  const hour=new Date().getHours();
+  const greeting=hour<12?"morning":hour<17?"afternoon":"evening";
+  const firstName=escapeHtml((actor()||"there").split(" ")[0]);
   const cards=[
     ["SACCO Members",s.totalMembers,"members","credits-members","Active SACCO accounts"],
     ["Total Savings",money(s.totalSavings),"wallet","credits-savings",`${s.savingsGrowth}% growth this month`],
     ["Active Loans",s.activeLoans,"loans","credits-active",money(c.portfolio.outstanding)],
-    ["Total repayment",money(s.totalRepaid||c.portfolio?.totalRepaid||0),"receipt","credits-repayments","Money paid so far on loans"],
-    ["Total amount remaining",money(c.portfolio.outstanding),"loans","credits-active","Principal still outstanding"],
+    ["Repayment on active loans",money(s.totalRepaidActive||c.portfolio?.totalRepaidActive||0),"receipt","credits-repayments","Paid on loans still running"],
+    ["History recovery",money(s.historyRecovery||c.portfolio?.historyRecovery||0),"receipt","credits-repayments","Recovered on cleared loans"],
     ["Pending Applications",s.pendingApplications,"file","credits-applications","Across approval stages"],
-    ["Repayments to approve",s.pendingRepaymentVerifications||pendingRepays.length,"receipt","credits-repayments",c.primaryCreditsOfficer?`Assigned to ${c.primaryCreditsOfficer}`:"Member payments awaiting verification"],
+    ["Repayments to approve",s.pendingRepaymentVerifications||pendingRepays.length,"receipt","credits-repayments","Member payments awaiting verification"],
     ["Overdue Loans",s.overdueLoans,"clock","credits-recovery","Recovery attention"]
   ];
-  const approvalBanner=pendingRepays.length?`<div class="credits-verification-banner"><div>${icons.bell}<span><strong>${pendingRepays.length} loan repayment${pendingRepays.length===1?"":"s"} awaiting your approval</strong><small>${c.primaryCreditsOfficer?`${c.primaryCreditsOfficer} (Credits Officer)`:"Credits Officer"} — open Repayments, verify the receipt, then approve to update the member loan.</small></span></div></div>`:"";
-  return `<div class="finance-title-strip credits-title-strip"><div><p class="eyebrow">Credits Department - SACCO</p><h2>Savings and credit control center</h2><p>Member savings, loans, guarantors and recovery only?organization Finance remains separate.</p></div><time>${new Date().toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"})}</time></div>
-    ${approvalBanner}
-    <div class="finance-stat-grid credits-stat-grid">${cards.slice(0,8).map((card,index)=>creditsStatCard(...card,index)).join("")}</div>
+  return `<div class="finance-title-strip finance-welcome-strip"><div><h2>Good ${greeting}, ${firstName}</h2></div><div class="dashboard-year-control"><label>Financial year</label><select disabled aria-label="Financial year"><option selected>FY 26/27</option></select></div></div>
+    <div class="finance-stat-grid credits-stat-grid">${cards.map((card,index)=>creditsStatCard(...card,index)).join("")}</div>
     ${creditsApprovalQueueWidget(c,pendingQueue)}
-    ${creditsContributionProgress(c)}
-    <div class="credits-dashboard-grid">
-      ${creditsSavingsLoanChart(c)}${creditsPortfolioWidget(c)}${creditsPendingApplicationsWidget(c)}
-      ${creditsSavingsOverviewWidget(c)}${creditsRecoveryWidget(c)}${creditsGuarantorWidget(c)}
-    </div>
-    <div class="credits-lower-grid">${creditsTransactionsWidget(c)}${creditsDisbursementWidget(c)}${creditsNotificationsWidget(c)}</div>
+    <div class="credits-lower-grid credits-lower-notifications">${creditsNotificationsWidget(c)}</div>
     ${creditsQuickPanel()}`;
 }
 function creditsApprovalQueueWidget(c,rows=[]) {
   if(!rows.length)return "";
-  return `<section class="finance-panel credits-approval-queue"><div class="finance-panel-head"><div><h3>Payments awaiting approval</h3><p>${c.primaryCreditsOfficer?`Routed to ${c.primaryCreditsOfficer} (Credits Officer)`:"Credits Officer verification queue"}</p></div><button data-credits-page="credits-repayments">Open repayments ></button></div>
-    <div class="credits-application-list">${rows.map(t=>`<article class="credits-app-card"><div class="credits-app-top"><strong title="${escapeHtml(t.member)}">${escapeHtml(t.member)}</strong><b>${money(t.amount)}</b></div><div class="credits-app-bottom"><small><span class="credits-ref" title="${escapeHtml(t.reference)}">${escapeHtml(shortRef(t.reference))}</span>${t.loanReference?`<span class="credits-ref" title="${escapeHtml(t.loanReference)}">${escapeHtml(shortRef(t.loanReference))}</span>`:""}<span>${escapeHtml(t.type)}</span></small><div class="credits-row-actions">${status("pending")}<button type="button" class="credits-review-btn" data-credits-transaction="${t.id}">${icons.eye}<span>Review</span></button></div></div></article>`).join("")}</div></section>`;
+  return `<section class="finance-panel credits-approval-queue"><div class="finance-panel-head"><div><h3>Payments awaiting approval</h3><p>${rows.length} pending verification${rows.length===1?"":"s"}</p></div><button data-credits-page="credits-repayments">Open repayments ></button></div>
+    <div class="credits-card-scroll credits-application-list">${rows.map(t=>`<article class="credits-app-card"><div class="credits-app-top"><strong title="${escapeHtml(t.member)}">${escapeHtml(t.member)}</strong><b>${money(t.amount)}</b></div><div class="credits-app-bottom"><small><span class="credits-ref" title="${escapeHtml(t.reference)}">${escapeHtml(shortRef(t.reference))}</span>${t.loanReference?`<span class="credits-ref" title="${escapeHtml(t.loanReference)}">${escapeHtml(shortRef(t.loanReference))}</span>`:""}<span>${escapeHtml(t.type)}</span></small><div class="credits-row-actions">${status("pending")}<button type="button" class="credits-review-btn" data-credits-transaction="${t.id}">${icons.eye}<span>Review</span></button></div></div></article>`).join("")}</div></section>`;
 }
 function creditsStatCard(label,value,icon,target,note,index) {
   const colors=["blue","green","violet","red","orange","violet","red","teal","green","blue","violet","orange"];
@@ -2610,7 +2606,7 @@ function creditsDisbursementWidget(c) {
     <div class="orange"><span>Interest earned</span><strong>${money(c.stats.interestEarned)}</strong></div></div></section>`;
 }
 function creditsNotificationsWidget(c) {
-  return `<section class="finance-panel"><div class="finance-panel-head"><div><h3>Notifications</h3><p>SACCO alerts requiring attention</p></div><button data-credits-page="credits-notifications">View all ></button></div><div class="finance-notifications">${c.notifications.map(n=>`<button type="button" class="finance-notification-item ${n.level}" ${n.target?`data-credits-page="${n.target}"`:""} ${n.transactionId?`data-credits-transaction="${n.transactionId}"`:""}><span>${n.level==="success"?icons.check:icons.info}</span><div><strong>${escapeHtml(n.title)}</strong>${n.detail?`<small>${escapeHtml(n.detail)}</small>`:""}</div><time>${relativeTime(n.createdAt||n.time)}</time></button>`).join("")}</div></section>`;
+  return `<section class="finance-panel"><div class="finance-panel-head"><div><h3>Notifications</h3></div><button data-credits-page="credits-notifications">View all ></button></div><div class="finance-notifications credits-card-scroll">${(c.notifications||[]).map(n=>`<button type="button" class="finance-notification-item ${n.level}" ${n.target?`data-credits-page="${n.target}"`:""} ${n.transactionId?`data-credits-transaction="${n.transactionId}"`:""}><span>${n.level==="success"?icons.check:icons.info}</span><div><strong>${escapeHtml(n.title)}</strong>${n.detail?`<small>${escapeHtml(n.detail)}</small>`:""}</div><time>${relativeTime(n.createdAt||n.time)}</time></button>`).join("")||`<div class="exec-empty">No current Credits notifications.</div>`}</div></section>`;
 }
 function creditsQuickPanel() {
   if(isExecutiveReadOnly()) return `<div class="notice"><div>${icons.shield}</div><div><strong>Executive read-only mode</strong><p>You can inspect the live Credits dashboard. Recording deposits, loans and repayments remains with Credits officers.</p></div></div>`;
@@ -2809,18 +2805,29 @@ function creditsReceiptsView() {
     ]))}`;
 }
 function creditsRepaymentsView() {
-  const c=state.credits,rows=c.transactions.filter(t=>t.type==="Loan repayment");
+  const c=state.credits;
+  const activeLoanIds=new Set((c.loans||[]).filter(l=>["active","overdue"].includes(l.status)).map(l=>String(l.id)));
+  const activeLoanRefs=new Set((c.loans||[]).filter(l=>["active","overdue"].includes(l.status)).map(l=>String(l.reference||"")));
+  const isActiveRepayment=t=>{
+    if(String(t.loanReference||"").startsWith("LN-HIST-"))return false;
+    if(t.loanId!=null&&activeLoanIds.has(String(t.loanId)))return true;
+    return activeLoanRefs.has(String(t.loanReference||""));
+  };
+  const rows=(c.transactions||[]).filter(t=>t.type==="Loan repayment"&&isActiveRepayment(t));
   const pendingReview=rows.filter(t=>t.status==="pending");
   const canVerify=Boolean(c.access?.canApprove||c.access?.canEdit)&&!isExecutiveReadOnly();
-  return `<div class="exec-module-metrics">${executiveModuleMetric("Repayments this month",money(rows.filter(t=>new Date(t.createdAt).getMonth()===new Date().getMonth()&&t.status==="completed").reduce((n,t)=>n+t.amount,0)),"green")}${executiveModuleMetric("Outstanding",money(c.portfolio.outstanding),"violet")}${executiveModuleMetric("Recovery rate",`${c.stats.recoveryRate}%`,"blue")}${executiveModuleMetric("Loans in arrears",c.portfolio.arrears,"red")}</div>
-    ${pendingReview.length?`<div class="credits-verification-banner"><div>${icons.info}<span><strong>${pendingReview.length} loan payment${pendingReview.length===1?"":"s"} awaiting verification</strong><small>Use Approve or No on each pending row after checking the payment reference and any uploaded receipt.</small></span></div></div>`:""}
-    ${financeDataTable("Loan repayment history",["Receipt","Date","Member","Loan","Method","Reference","Submitted by","Amount","Evidence","Status","Review"],rows.map(t=>{
+  const activeRepaid=Number(c.stats?.totalRepaidActive||c.portfolio?.totalRepaidActive||0);
+  const historyRecovery=Number(c.stats?.historyRecovery||c.portfolio?.historyRecovery||0);
+  return `<div class="exec-module-metrics">${executiveModuleMetric("Repayment on active loans",money(activeRepaid),"green")}${executiveModuleMetric("Outstanding",money(c.portfolio.outstanding),"violet")}${executiveModuleMetric("Recovery rate",`${c.stats.recoveryRate}%`,"blue")}${executiveModuleMetric("History recovery",money(historyRecovery),"red")}</div>
+    ${pendingReview.length?`<section class="finance-panel credits-approval-queue" style="margin-bottom:16px"><div class="finance-panel-head"><div><h3>Pending verifications</h3><p>${pendingReview.length} payment${pendingReview.length===1?"":"s"} awaiting review</p></div></div>
+      <div class="credits-card-scroll">${pendingReview.map(t=>`<article class="credits-app-card"><div class="credits-app-top"><strong>${escapeHtml(t.member)}</strong><b>${money(t.amount)}</b></div><div class="credits-app-bottom"><small><span class="credits-ref">${escapeHtml(shortRef(t.loanReference||t.reference))}</span><span>${new Date(t.createdAt).toLocaleString()}</span></small><div class="credits-row-actions">${status("pending")}${canVerify?`<button class="button small primary" data-deposit-decision-row="${t.id}" data-decision="approve">Approve</button><button class="button small danger" data-deposit-decision-row="${t.id}" data-decision="reject">No</button>`:""}<button class="button small secondary" data-credits-transaction="${t.id}">Details</button></div></div></article>`).join("")}</div></section>`:""}
+    ${financeDataTable("Active loan repayments",["Receipt","Date","Member","Loan","Method","Reference","Submitted by","Amount","Evidence","Status","Review"],rows.filter(t=>t.status!=="pending").map(t=>{
       const pending=t.status==="pending";
       const actions=pending&&canVerify
         ?`<div class="credits-verify-actions"><button class="button small primary" data-deposit-decision-row="${t.id}" data-decision="approve">Approve</button><button class="button small danger" data-deposit-decision-row="${t.id}" data-decision="reject">No</button><button class="button small secondary" data-credits-transaction="${t.id}">Details</button></div>`
         :`<button class="button small ${pending?"primary":"secondary"}" data-credits-transaction="${t.id}">${pending?"Review":"Details"}</button>`;
       return [
-      t.receiptNumber||`<span class="pending-receipt">Pending verification</span>`,new Date(t.createdAt).toLocaleString(),`${t.member}<small class="table-sub">${t.memberNumber||""}</small>`,t.loanReference||"—",t.method,t.externalReference||"—",`${t.officer}<small class="table-sub">${t.submissionSource==="member"?"Member submission":"Credits entry"}</small>`,money(t.amount),t.hasEvidence?`<a class="mini-btn" href="/api/transactions/${t.id}/evidence" target="_blank" title="View receipt evidence">${icons.eye}</a>`:"—",status(t.status),actions
+      t.receiptNumber||(pending?`<span class="pending-receipt">Pending verification</span>`:escapeHtml(t.reference||"—")),new Date(t.createdAt).toLocaleString(),`${t.member}<small class="table-sub">${t.memberNumber||""}</small>`,t.loanReference||"—",t.method,t.externalReference||"—",`${t.officer}<small class="table-sub">${t.submissionSource==="member"?"Member submission":"Credits entry"}</small>`,money(t.amount),t.hasEvidence?`<a class="mini-btn" href="/api/transactions/${t.id}/evidence" target="_blank" title="View receipt evidence">${icons.eye}</a>`:"—",status(t.status),actions
     ];}))}`;
 }
 function creditsGuarantorsView() {
