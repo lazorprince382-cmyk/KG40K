@@ -93,6 +93,10 @@ if (!skipSync) {
     "scripts/disperse-organization-documents.js",
     ...dry,
   ]);
+  run("Welfare assistance register document (Legal → Welfare)", "node", [
+    "scripts/seed-welfare-assistance-document.js",
+    ...dry,
+  ]);
   run("Pin Dan savings to UGX 8,900,000 (finance accounts unchanged)", "node", [
     "scripts/sync-dan-savings-8900000.js",
     ...dry,

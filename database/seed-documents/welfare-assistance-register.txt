@@ -1,0 +1,41 @@
+Kasangati G40 Kwagalana SACCO
+Welfare Assistance Register
+Simple record of people the organization has already given welfare assistance.
+
+Prepared for: Legal Department document registry (Welfare library)
+Version: 1.0
+Status: Published
+
+Total assistance listed: UGX 7,000,000
+(Each payout UGX 1,000,000)
+
+-------------------------------------------------------------------
+1. Funeral assistance — 28 February 2026 — UGX 1,000,000
+   Member / family: Jude Tadieus Kyobe
+
+2. Funeral assistance — 28 February 2026 — UGX 1,000,000
+   Member / family: Justine Kaudha Inhensiko
+
+3. Funeral assistance — 28 February 2026 — UGX 1,000,000
+   Member / family: Josephine Babirye Kyobe
+
+4. Funeral assistance — 02 February 2026 — UGX 1,000,000
+   Member / family: Christopher Muhoozi
+
+5. Funeral assistance — 02 February 2026 — UGX 1,000,000
+   Member / family: Dan Rwebingira Ssalongo
+
+6. Marriage assistance — 10 September 2025 — UGX 1,000,000
+   Member: Dan Rwebingira Ssalongo
+   Note: Wedding support for Dan's son
+
+7. Marriage assistance — 05 September 2025 — UGX 1,000,000
+   Member: Joshua Ssewanyana
+   Note: Former member; kept in welfare history only
+
+-------------------------------------------------------------------
+Notes
+- This register mirrors the historical welfare expenditure records used by the
+  Welfare Department standing calculations.
+- Vicent Gumisiriza is not charged a shared deduction on these historical payouts.
+- File under Legal → Welfare so officers can view who has already received support.
