@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 "use strict";
 /**
- * Record historical welfare expenditures (death burials + weddings), deduct the
- * UGX 7,000,000 from the welfare fund and from each standing member's welfare
- * balance (equal share). Vicent is not charged. Joshua Ssewanyana stays history-only
- * (exited + soft-deleted) so the active roll remains 18 members.
+ * Record historical welfare expenditures (death burials + weddings) as payment
+ * history only. Member standing stays at the gross UGX 650,000 figure; the API
+ * subtracts the UGX 7,000,000 assistance when showing current standing.
+ * Vicent is not charged. Joshua Ssewanyana stays history-only (exited).
  *
  * Usage:
  *   node scripts/sync-welfare-historical-expenditures.js
@@ -107,13 +107,6 @@ function isExcluded(name) {
 }
 function isVicent(name) {
   return /vicent|vincent/i.test(name || "") && /gumisiriza/i.test(name || "");
-}
-
-function standingAfterDeduction(memberCount) {
-  const totalAfter = STANDARD_STANDING * memberCount - PAYOUT_TOTAL;
-  const base = Math.floor(totalAfter / memberCount);
-  const rem = totalAfter - base * memberCount;
-  return { totalAfter, base, rem };
 }
 
 async function ensureJoshuaHistoryOnly(client) {
@@ -246,7 +239,8 @@ async function upsertPayout(client, actorId, payout, member) {
   return { amount: payout.amount };
 }
 
-async function deductMemberStanding(client, actorId) {
+async function restoreGrossStanding(client, actorId) {
+  // Keep standing at pre-deduction gross (650k). Current balance = gross − assistance in the API.
   const members = (
     await client.query(
       `SELECT id, full_name, member_number FROM members
@@ -254,15 +248,9 @@ async function deductMemberStanding(client, actorId) {
     )
   ).rows.filter((m) => !isExcluded(m.full_name) && !isVicent(m.full_name));
 
-  const { totalAfter, base, rem } = standingAfterDeduction(members.length);
-  let i = 0;
   for (const member of members) {
-    const amount = i < rem ? base + 1 : base;
-    i += 1;
     const ref = `WEL-STANDING-${member.member_number}`;
-    console.log(
-      `  ${member.full_name}: welfare standing UGX ${STANDARD_STANDING.toLocaleString()} → UGX ${amount.toLocaleString()}`
-    );
+    console.log(`  ${member.full_name}: welfare standing → UGX ${STANDARD_STANDING.toLocaleString()} (gross)`);
     if (dryRun) continue;
     await client.query(
       `DELETE FROM welfare_contributions
@@ -277,20 +265,21 @@ async function deductMemberStanding(client, actorId) {
       [
         ref,
         member.id,
-        amount,
+        STANDARD_STANDING,
         `sync-welfare-member-balances-${member.member_number}`,
         STANDARD_SINCE,
         actorId,
-        `Standing after UGX ${PAYOUT_TOTAL.toLocaleString()} historical welfare expenditures (equal share).`,
+        `Gross standing since June 2024. Historical assistance of UGX ${PAYOUT_TOTAL.toLocaleString()} is shown via payments; current standing is computed as gross minus assistance.`,
       ]
     );
   }
 
   if (!dryRun) {
+    const total = STANDARD_STANDING * members.length;
     await client.query(
       `INSERT INTO settings (key, value) VALUES ('welfareStandingStandardTotal', $1)
        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
-      [String(totalAfter)]
+      [String(total)]
     );
     await client.query(
       `INSERT INTO settings (key, value) VALUES ('welfareStandingMemberCount', $1)
@@ -300,57 +289,39 @@ async function deductMemberStanding(client, actorId) {
     await client.query(
       `INSERT INTO settings (key, value) VALUES ('welfareStandingAfterHistorical', $1)
        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
-      [String(base)]
+      [String(STANDARD_STANDING)]
+    );
+    await client.query(
+      `INSERT INTO settings (key, value) VALUES ('welfareHistoricalAssistancePaid', $1)
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+      [String(PAYOUT_TOTAL)]
     );
   }
 
   console.log(
-    `  ${members.length} members now hold UGX ${totalAfter.toLocaleString()} combined standing (Vicent unchanged)`
+    `  ${members.length} members hold UGX ${(STANDARD_STANDING * members.length).toLocaleString()} combined gross standing`
   );
-  return { count: members.length, totalAfter, base };
+  return { count: members.length, totalAfter: STANDARD_STANDING * members.length, base: STANDARD_STANDING };
 }
 
-async function deductFundBalance(client) {
+async function ensureFundSetting(client) {
+  // Do not net the fund setting by 7M — assistance is subtracted in loadWelfareStanding().
   const current = Number(
     (await client.query(`SELECT value FROM settings WHERE key='welfareFundBalance'`)).rows[0]?.value || 0
   );
-  const already = Number(
-    (await client.query(`SELECT value FROM settings WHERE key='welfareHistoricalFundDeducted'`)).rows[0]?.value || 0
-  );
-  let before = Number(
-    (await client.query(`SELECT value FROM settings WHERE key='welfareFundBalanceBeforeHistorical'`)).rows[0]?.value || 0
-  );
-  if (!before) before = current + already;
-  const next = Math.max(0, before - PAYOUT_TOTAL);
-  console.log(
-    `  Fund setting UGX ${before.toLocaleString()} − UGX ${PAYOUT_TOTAL.toLocaleString()} → UGX ${next.toLocaleString()}`
-  );
-  if (dryRun) return { before, next };
-  await client.query(
-    `INSERT INTO settings (key, value) VALUES ('welfareFundBalanceBeforeHistorical', $1)
-     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
-    [String(before)]
-  );
-  await client.query(
-    `INSERT INTO settings (key, value) VALUES ('welfareHistoricalFundDeducted', $1)
-     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
-    [String(PAYOUT_TOTAL)]
-  );
-  await client.query(
-    `INSERT INTO settings (key, value) VALUES ('welfareFundBalance', $1)
-     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
-    [String(next)]
-  );
-  await client.query(
-    `INSERT INTO settings (key, value) VALUES ('welfareHistoricalAssistancePaid', $1)
-     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
-    [String(PAYOUT_TOTAL)]
-  );
-  return { before, next };
+  console.log(`  Fund setting left as live standing source (currently UGX ${current.toLocaleString()}); assistance deducted in API`);
+  if (!dryRun) {
+    await client.query(
+      `INSERT INTO settings (key, value) VALUES ('welfareHistoricalAssistancePaid', $1)
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+      [String(PAYOUT_TOTAL)]
+    );
+  }
+  return { before: current, next: current };
 }
 
 async function main() {
-  console.log(dryRun ? "DRY RUN\n" : "Recording historical welfare expenditures + deductions\n");
+  console.log(dryRun ? "DRY RUN\n" : "Recording historical welfare expenditures (history only; standing stays gross)\n");
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -387,11 +358,11 @@ async function main() {
       payoutTotal += result.amount;
     }
 
-    console.log("\n== Deduct UGX 7,000,000 from member welfare standing ==");
-    const standing = await deductMemberStanding(client, actor);
+    console.log("\n== Restore gross member welfare standing (no DB deduction) ==");
+    const standing = await restoreGrossStanding(client, actor);
 
-    console.log("\n== Deduct UGX 7,000,000 from welfare fund balance ==");
-    const fund = await deductFundBalance(client);
+    console.log("\n== Welfare fund setting ==");
+    const fund = await ensureFundSetting(client);
 
     // Keep Dan monthly welfare share if missing.
     if (!dryRun) {
@@ -421,9 +392,9 @@ async function main() {
 
     console.log("\n== Summary ==");
     console.log(`  Historical payouts: UGX ${payoutTotal.toLocaleString()}`);
-    console.log(`  Welfare fund: UGX ${fund.before.toLocaleString()} → UGX ${fund.next.toLocaleString()}`);
+    console.log(`  Fund setting unchanged (API nets assistance): UGX ${fund.next.toLocaleString()}`);
     console.log(
-      `  Standing members: ${standing.count} × ~UGX ${standing.base.toLocaleString()} = UGX ${standing.totalAfter.toLocaleString()}`
+      `  Gross standing members: ${standing.count} × UGX ${standing.base.toLocaleString()} = UGX ${standing.totalAfter.toLocaleString()}`
     );
     console.log(`  Active members on roll: ${activeCount} (Joshua history-only)`);
     console.log(dryRun ? "\nDry run complete (rolled back)." : "\nDone.");

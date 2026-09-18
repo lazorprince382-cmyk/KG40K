@@ -81,6 +81,10 @@ if (!skipSync) {
     "scripts/sync-welfare-historical-expenditures.js",
     ...dry,
   ]);
+  run("Restore gross welfare standing after history sync", "node", [
+    "scripts/reverse-welfare-historical-deduction.js",
+    ...dry,
+  ]);
   run("Pin Dan savings to UGX 8,900,000 (finance accounts unchanged)", "node", [
     "scripts/sync-dan-savings-8900000.js",
     ...dry,
@@ -115,6 +119,7 @@ console.log("  npm run db:sync-sep2026-live");
 console.log("  npm run db:sync-vicent-welfare");
   console.log("  npm run db:sync-welfare-balances");
   console.log("  npm run db:sync-welfare-history");
+  console.log("  npm run db:reverse-welfare-deduction");
   console.log("  npm run db:seed-historical-loans");
   console.log("  npm run db:sync-live-pack");
 console.log("  npm run db:verify-live");

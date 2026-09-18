@@ -25,6 +25,7 @@
     "db:sync-vicent-welfare": "node scripts/sync-vicent-welfare-start.js",
     "db:sync-welfare-balances": "node scripts/sync-welfare-member-balances.js",
     "db:sync-welfare-history": "node scripts/sync-welfare-historical-expenditures.js",
+    "db:reverse-welfare-deduction": "node scripts/reverse-welfare-historical-deduction.js",
     "db:purge-loans": "node scripts/purge-test-loans.js",
     "db:audit-fy2026": "node scripts/audit-fy2026-alignment.js",
     "db:sync-fy2026": "node scripts/sync-fy2026-statement-live.js",
