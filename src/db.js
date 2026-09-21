@@ -27,7 +27,8 @@ const pool = new Pool({
   idleTimeoutMillis: 20000,
   // Fail reasonably fast when the DB is asleep/overloaded (Neon cold start usually <10s).
   connectionTimeoutMillis: 12000,
-  options: "-c statement_timeout=15000"
+  // Do not set statement_timeout via Pool "options" — it breaks some poolers (PgBouncer)
+  // and can cancel long-running startup migrations (e.g. 052 index builds).
 });
 
 function isTransientDbError(error) {
@@ -79,25 +80,36 @@ async function audit({ userId = null, action, entityType = null, entityId = null
 
 async function runMigrations() {
   const migrationsDir=path.join(projectRoot,"database","migrations");
-  await query(`CREATE TABLE IF NOT EXISTS schema_migrations (
-    name TEXT PRIMARY KEY,
-    checksum TEXT NOT NULL,
-    applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-  )`);
-  const files=fs.readdirSync(migrationsDir).filter(file=>file.endsWith(".sql")).sort();
-  for(const file of files) {
-    // Normalize CRLF from Windows checkouts so checksums match Linux/Railway applies.
-    const sql=fs.readFileSync(path.join(migrationsDir,file),"utf8").replace(/\r\n/g,"\n").replace(/\r/g,"\n");
-    const checksum=crypto.createHash("sha256").update(sql).digest("hex");
-    const applied=await one("SELECT checksum FROM schema_migrations WHERE name=$1",[file]);
-    if(applied) {
-      if(applied.checksum!==checksum)throw new Error(`Applied migration ${file} was modified; create a new migration instead`);
-      continue;
+  const client=await pool.connect();
+  try {
+    await client.query("SET statement_timeout = 0");
+    await client.query(`CREATE TABLE IF NOT EXISTS schema_migrations (
+      name TEXT PRIMARY KEY,
+      checksum TEXT NOT NULL,
+      applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`);
+    const files=fs.readdirSync(migrationsDir).filter(file=>file.endsWith(".sql")).sort();
+    for(const file of files) {
+      // Normalize CRLF from Windows checkouts so checksums match Linux/Railway applies.
+      const sql=fs.readFileSync(path.join(migrationsDir,file),"utf8").replace(/\r\n/g,"\n").replace(/\r/g,"\n");
+      const checksum=crypto.createHash("sha256").update(sql).digest("hex");
+      const applied=(await client.query("SELECT checksum FROM schema_migrations WHERE name=$1",[file])).rows[0];
+      if(applied) {
+        if(applied.checksum!==checksum)throw new Error(`Applied migration ${file} was modified; create a new migration instead`);
+        continue;
+      }
+      await client.query("BEGIN");
+      try {
+        await client.query(sql);
+        await client.query("INSERT INTO schema_migrations (name,checksum) VALUES ($1,$2)",[file,checksum]);
+        await client.query("COMMIT");
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      }
     }
-    await transaction(async client=>{
-      await client.query(sql);
-      await client.query("INSERT INTO schema_migrations (name,checksum) VALUES ($1,$2)",[file,checksum]);
-    });
+  } finally {
+    client.release();
   }
 }
 

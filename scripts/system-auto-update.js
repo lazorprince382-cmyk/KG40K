@@ -100,9 +100,23 @@ if (!skipSync) {
   run("Live finance / welfare / document sync pack", "node", [
     "scripts/sync-live-pack.js",
     ...(dryRun ? ["--dry-run"] : []),
-  ]);
+  ], { optional: true });
 } else {
   console.log("\n== Sync ==\nSkipped (--skip-sync)");
+}
+
+const verifyTargets = ["server.js", "src/server.js", "src/db.js"];
+let verifyOk = true;
+for (const rel of verifyTargets) {
+  const abs = path.join(projectRoot, rel);
+  if (!fs.existsSync(abs)) continue;
+  if (!run(`Verify syntax (${rel})`, "node", ["--check", rel], { optional: true })) verifyOk = false;
+}
+if (!verifyOk) {
+  console.warn(
+    "\nWARNING: Syntax check failed after update. Do not restart production until fixed " +
+      "(or roll back git). npm start will likely exit immediately."
+  );
 }
 
 console.log(`
