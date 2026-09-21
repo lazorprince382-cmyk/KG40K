@@ -129,19 +129,30 @@ let navigatingBack = false;
 
 async function api(url, options = {}) {
   const isFormData=options.body instanceof FormData;
-  const response = await fetch(url, {
-    credentials: "same-origin",
-    headers: { ...(isFormData?{}:{"Content-Type":"application/json"}), ...(options.headers || {}) },
-    ...options
-  });
-  const type = response.headers.get("content-type") || "";
-  const data = type.includes("application/json") ? await response.json() : await response.text().then(text=>{
-    const tagged=text.match(/<pre>([\s\S]*?)<\/pre>/i)||text.match(/<title>([\s\S]*?)<\/title>/i);
-    const plain=String(tagged?.[1]||text||"").replace(/<[^>]+>/g," ").replace(/\s+/g," ").trim();
-    return {error:plain.slice(0,240)};
-  });
-  if (!response.ok) throw new Error((typeof data==="string"?data:data?.error) || `Request failed (${response.status})`);
-  return data;
+  const timeoutMs=Number(options.timeoutMs||45000);
+  const controller=typeof AbortController!=="undefined"?new AbortController():null;
+  const timer=controller?setTimeout(()=>controller.abort(),timeoutMs):null;
+  try{
+    const response = await fetch(url, {
+      credentials: "same-origin",
+      headers: { ...(isFormData?{}:{"Content-Type":"application/json"}), ...(options.headers || {}) },
+      ...options,
+      signal:controller?.signal
+    });
+    const type = response.headers.get("content-type") || "";
+    const data = type.includes("application/json") ? await response.json() : await response.text().then(text=>{
+      const tagged=text.match(/<pre>([\s\S]*?)<\/pre>/i)||text.match(/<title>([\s\S]*?)<\/title>/i);
+      const plain=String(tagged?.[1]||text||"").replace(/<[^>]+>/g," ").replace(/\s+/g," ").trim();
+      return {error:plain.slice(0,240)};
+    });
+    if (!response.ok) throw new Error((typeof data==="string"?data:data?.error) || `Request failed (${response.status})`);
+    return data;
+  }catch(error){
+    if(error?.name==="AbortError")throw new Error("Request timed out. Check your connection and try again.");
+    throw error;
+  }finally{
+    if(timer)clearTimeout(timer);
+  }
 }
 async function uploadDepartmentFile(file,departmentCode) {
   if(!(file instanceof File)||!file.size)return null;
@@ -169,11 +180,16 @@ async function departmentFormPayload(form) {
   return data;
 }
 function normalize(data) {
-  data.members = data.members.map(m => ({ ...m, initials: initials(m.name) }));
-  data.transactions = data.transactions.map(t => ({ ...t }));
-  data.loans = data.loans.map(l => ({ ...l, term: `${l.termMonths} months` }));
-  data.withdrawals = data.withdrawals.map(w => ({ ...w }));
-  data.audit = data.audit.map(a => ({ ...a, id: `AUD-${String(a.id).padStart(5,"0")}`, detail: a.details || `${a.entityType || ""} ${a.entityId || ""}` }));
+  data.members = (data.members||[]).map(m => ({ ...m, initials: initials(m.name) }));
+  data.transactions = (data.transactions||[]).map(t => ({ ...t }));
+  data.loans = (data.loans||[]).map(l => ({ ...l, term: `${l.termMonths} months` }));
+  data.withdrawals = (data.withdrawals||[]).map(w => ({ ...w }));
+  data.audit = (data.audit||[]).map(a => ({ ...a, id: `AUD-${String(a.id).padStart(5,"0")}`, detail: a.details || `${a.entityType || ""} ${a.entityId || ""}` }));
+  data.products = data.products||[];
+  data.announcements = data.announcements||[];
+  data.notifications = data.notifications||[];
+  data.guarantorRequests = data.guarantorRequests||[];
+  data.workspaces = data.workspaces||data.organization?.workspaces||[];
   return data;
 }
 function save() {}
@@ -485,15 +501,16 @@ function injectWorkspaceSwitcher(html){
   }
   return html;
 }
-async function refreshData(seedUser=null,{skipCenter=false}={}) {
+async function refreshData(seedUser=null,{skipCenter=false,lite=false}={}) {
   const knownRole=seedUser?.role||state.activeWorkspace?.role||state.role||state.user?.role||null;
   const centerByRole=WORKSPACE_CENTER;
   const centerUrl=!skipCenter?(centerByRole[knownRole]||null):null;
   const memberNeeded=!skipCenter&&(knownRole==="Member"||seedUser?.role==="Member");
+  const bootUrl=lite||skipCenter?"/api/boot":"/api/bootstrap";
   const [data,center,memberCenter]=await Promise.all([
-    api("/api/bootstrap"),
-    centerUrl?api(centerUrl).catch(()=>null):Promise.resolve(null),
-    memberNeeded?api("/api/member/command-center").catch(()=>null):Promise.resolve(null)
+    api(bootUrl,{timeoutMs:lite||skipCenter?20000:60000}),
+    centerUrl?api(centerUrl,{timeoutMs:60000}).catch(()=>null):Promise.resolve(null),
+    memberNeeded?api("/api/member/command-center",{timeoutMs:60000}).catch(()=>null):Promise.resolve(null)
   ]);
   const previousWorkspace=state.activeWorkspace;
   const previousMemberContext=state.memberContext;
@@ -522,6 +539,24 @@ async function refreshData(seedUser=null,{skipCenter=false}={}) {
     state.memberContext=true;
   }
 }
+function hydrateBootstrapInBackground(){
+  // Fill remaining lists after the shell is visible; never block the splash on this.
+  api("/api/bootstrap",{timeoutMs:90000}).then(data=>{
+    if(!state.user)return;
+    const normalized=normalize(data);
+    state.members=normalized.members;
+    state.transactions=normalized.transactions;
+    state.loans=normalized.loans;
+    state.withdrawals=normalized.withdrawals;
+    state.products=normalized.products;
+    state.announcements=normalized.announcements;
+    state.notifications=normalized.notifications;
+    state.guarantorRequests=normalized.guarantorRequests;
+    state.audit=normalized.audit;
+    state.settings={...state.settings,...(normalized.settings||{})};
+    if(typeof data.unreadMessages==="number")state.unreadMessages=data.unreadMessages;
+  }).catch(error=>console.warn("Background bootstrap hydrate failed",error.message));
+}
 function permissionsForRole(role){
   // Bootstrap permissions stay on primary role; workspace payload carries its own permissions.
   return null;
@@ -531,16 +566,17 @@ async function login(event) {
   const button=event.currentTarget.querySelector("button[type=submit]"); button.disabled=true; button.innerHTML=`${icons.lock} Signing in...`;
   try {
     const values=Object.fromEntries(new FormData(event.currentTarget));
-    const session=await api("/api/auth/login",{method:"POST",body:JSON.stringify(values)});
+    const session=await api("/api/auth/login",{method:"POST",body:JSON.stringify(values),timeoutMs:30000});
     state.user=session.user; state.role=session.user.role; state.permissions=session.permissions||[];
     state.primaryRole=session.user.role; state.activeWorkspace=null; state.memberContext=false; state.executiveWorkspace=null;
     persistWorkspaceChoice(null);
     document.getElementById("app").innerHTML=`<div class="loading-screen"><div class="loading-mark"><div class="brand-mark">${icons.logo}</div>Opening your workspace<div class="spinner"></div></div></div>`;
-    await refreshData(session.user,{skipCenter:true});
+    await refreshData(session.user,{skipCenter:true,lite:true});
     const workspaces=session.workspaces?.length?session.workspaces:availableWorkspaces();
     state.workspaces=workspaces;
     if(workspaceNeedsPicker(workspaces)){
       workspacePickerView(workspaces);
+      hydrateBootstrapInBackground();
       return;
     }
     const only=workspaces[0];
@@ -549,12 +585,13 @@ async function login(event) {
       state.page=session.user.role==="Member"?"member-dashboard":"dashboard";
       render();
     }
+    hydrateBootstrapInBackground();
   } catch(error) { loginView(error.message); }
 }
 async function init() {
   document.getElementById("app").innerHTML=`<div class="loading-screen"><div class="loading-mark"><div class="brand-mark">${icons.logo}</div>Kasangati G40 Kwagalana<div class="spinner"></div></div></div>`;
   try {
-    await refreshData(null,{skipCenter:true});
+    await refreshData(null,{skipCenter:true,lite:true});
     const workspaces=availableWorkspaces();
     const saved=readPersistedWorkspace();
     const ui=readUiState();
@@ -566,11 +603,13 @@ async function init() {
     else if(workspaces.length===1)await enterWorkspace(workspaces[0],{preserveNavigation:true});
     else if(workspaceNeedsPicker(workspaces)&&!savedWorkspace){
       workspacePickerView(workspaces);
+      hydrateBootstrapInBackground();
       return;
     }else render();
     if(ui?.executiveWorkspace)restoreExecutiveWorkspace(ui.executiveWorkspace).then(()=>render()).catch(()=>{});
     previousNavKey=navKey();
     pageHistory=[];
+    hydrateBootstrapInBackground();
   } catch { loginView(); }
 }
 function loginView(error = "") {

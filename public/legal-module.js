@@ -224,7 +224,7 @@
         documentType,
         version:data.get("version"),
         status:data.get("status"),
-        audienceMode:audienceMode==="all"?"general":audienceMode,
+        audienceMode,
         audienceDepartments,
         visibilityLevel:audienceMode==="members"?1:audienceMode==="departments"?3:2,
         department:String(data.get("department")||preferred).toLowerCase()

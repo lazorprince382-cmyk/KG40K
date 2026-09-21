@@ -1,9 +1,9 @@
-const CACHE="kasangati-v226";
+const CACHE="kasangati-v227";
 const SHELL=[
-  "/","/index.html","/styles.css?v=124","/brand-theme.css?v=64","/brand-no-green.css?v=17","/legal-member-exit.css?v=2","/app.js?v=207",
-  "/app-core.js?v=207","/department-theme.js?v=63","/department-core.js?v=91",
+  "/","/index.html","/styles.css?v=124","/brand-theme.css?v=64","/brand-no-green.css?v=17","/legal-member-exit.css?v=2","/app.js?v=208",
+  "/app-core.js?v=208","/department-theme.js?v=63","/department-core.js?v=92",
   "/audit-dashboard.js?v=80","/audit-modules.js?v=63","/welfare-module.js?v=90",
-  "/legal-module.js?v=91","/legal-biodata-module.js?v=69","/legal-family-ui.js?v=2","/legal-member-exit-ui.js?v=2",
+  "/legal-module.js?v=92","/legal-biodata-module.js?v=69","/legal-family-ui.js?v=2","/legal-member-exit-ui.js?v=2",
   "/legal-registration-module.js?v=63","/supervisory-module.js?v=80","/department-events.js?v=63",
   "/official-policy-ui.js?v=11","/member-portal.js?v=124","/loan-calculator.js?v=7","/department-bootstrap.js?v=64",
   "/legal-biodata-styles.css?v=37",
@@ -18,5 +18,18 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   if (event.request.method !== "GET" || url.origin !== self.location.origin) return;
-  event.respondWith(caches.match(event.request).then((cached) => cached || fetch(event.request)));
+  // Never cache API responses — they must always hit the live server.
+  if (url.pathname.startsWith("/api/")) {
+    event.respondWith(fetch(event.request));
+    return;
+  }
+  event.respondWith(
+    fetch(event.request)
+      .then((response) => {
+        const copy = response.clone();
+        caches.open(CACHE).then((cache) => cache.put(event.request, copy)).catch(() => {});
+        return response;
+      })
+      .catch(() => caches.match(event.request))
+  );
 });

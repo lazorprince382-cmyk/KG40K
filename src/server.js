@@ -669,6 +669,35 @@ app.post("/api/auth/change-password",auth,asyncRoute(async(req,res)=>{
   res.json({ok:true,reauthenticate:true});
 }));
 
+app.get("/api/boot",auth,asyncRoute(async(req,res)=>{
+  // Ultra-light session payload so the splash screen never waits on heavy tables.
+  const [organization,workspaces,settingsResult]=await Promise.all([
+    organizationContext(req.user,{includeWorkspaces:false}),
+    buildAvailableWorkspaces(req.user),
+    query("SELECT key,value FROM settings")
+  ]);
+  if(organization)organization.workspaces=workspaces;
+  res.json({
+    user:req.user,
+    permissions:permissions[req.user.role]||[],
+    roles:ROLES,
+    organization,
+    workspaces,
+    members:[],
+    transactions:[],
+    loans:[],
+    withdrawals:[],
+    products:[],
+    settings:Object.fromEntries(settingsResult.rows.map(s=>[s.key,s.value==="true"?true:s.value==="false"?false:s.value])),
+    announcements:[],
+    notifications:[],
+    unreadMessages:0,
+    guarantorRequests:[],
+    audit:[],
+    lite:true
+  });
+}));
+
 app.get("/api/bootstrap",auth,asyncRoute(async(req,res)=>{
   const memberId=req.user.role==="Member"?req.user.member_id:null;
   const memberFilter=memberId?"WHERE m.id=$1 AND m.deleted_at IS NULL":"WHERE m.deleted_at IS NULL", args=memberId?[memberId]:[];
@@ -4845,8 +4874,10 @@ function normalizeDocumentAudience(body={},fallbackCode=""){
       .map(value=>String(value||"").trim().toLowerCase())
       .filter(code=>code&&code!=="legal"&&code!=="general");
     if(!audience.length&&fallbackCode&&!["general","legal"].includes(fallbackCode))audience=[fallbackCode];
+  }else if(mode==="all"||mode==="general"||visibility===2){
+    visibility=2;audience=[]; // all departments (legacy clients sent audienceMode "general")
   }else{
-    visibility=2;audience=[]; // all departments
+    visibility=2;audience=[];
   }
   return {visibility,audienceJson:audience.length?JSON.stringify(audience):null,audience};
 }
@@ -4856,8 +4887,9 @@ async function documentCreateAccess(user,code){
   const role=String(user?.role||"");
   // Registry managers may file into any library shelf (including General).
   if(DOCUMENT_REGISTRY_ROLES.has(role)){
-    const department=await ensureDocumentLibraryDepartment(normalized)
-      || await one("SELECT id,code,name,description FROM departments WHERE code=$1 AND active=true",[normalized]);
+    let department=null;
+    if(DOCUMENT_LIBRARY_CODES.has(normalized))department=await ensureDocumentLibraryDepartment(normalized);
+    if(!department)department=await one("SELECT id,code,name,description FROM departments WHERE code=$1 AND active=true",[normalized]);
     if(!department)return null;
     return {...department,position_title:"Document registry",authority_level:5,can_view:true,can_create:true,can_edit:true,can_approve:true,is_head:false};
   }
@@ -4869,6 +4901,35 @@ async function documentCreateAccess(user,code){
     return {...department,position_title:"Document registry",authority_level:Number(legalWrite.authority_level||3),can_view:true,can_create:true,can_edit:true,can_approve:false,is_head:false};
   }
   return departmentPermission(user,normalized,"create");
+}
+async function documentCreateDenialMessage(user,code){
+  const normalized=String(code||"").trim().toLowerCase();
+  const role=String(user?.role||"").trim();
+  if(!normalized)return "Choose a department library before uploading.";
+  if(DOCUMENT_REGISTRY_ROLES.has(role)){
+    if(DOCUMENT_LIBRARY_CODES.has(normalized)){
+      const org=await one("SELECT id FROM organizations ORDER BY id LIMIT 1");
+      if(!org)return "Document library setup failed: no organization record exists in the database.";
+      const row=await one("SELECT active FROM departments WHERE code=$1",[normalized]);
+      if(row&&!row.active)return `The "${normalized}" library exists but is inactive. Reactivate it or run database migrations.`;
+      if(!row)return `The "${normalized}" document library could not be created. Check database migrations and try again.`;
+    }
+    const department=await one("SELECT id FROM departments WHERE code=$1 AND active=true",[normalized]);
+    if(!department)return `There is no active department with code "${normalized}".`;
+    return "Document registry access is configured but creation was still denied. Restart the server after deploying access fixes.";
+  }
+  const legalWrite=await departmentPermission(user,"legal","create")||await departmentPermission(user,"legal","edit");
+  if(legalWrite&&DOCUMENT_LIBRARY_CODES.has(normalized)){
+    return `Legal can manage the registry, but the "${normalized}" library could not be resolved. Run migrations or contact an administrator.`;
+  }
+  if(role==="Executive Officer"&&DOCUMENT_LIBRARY_CODES.has(normalized))
+    return "Executive officers upload via the document registry; if this persists, restart the server after updating.";
+  const assigned=await departmentPermission(user,normalized,"create");
+  if(!assigned){
+    if(!role)return "Sign in with a staff account that can upload documents.";
+    return `Your role (${role||"unknown"}) is not assigned to create documents in "${normalized}". Ask an administrator for department create access.`;
+  }
+  return "Document creation access denied.";
 }
 const loadDocumentAccess=action=>asyncRoute(async(req,res,next)=>{
   const document=await one(`SELECT doc.*,d.code AS department_code,d.name AS department_name FROM organization_documents doc
@@ -4894,7 +4955,7 @@ app.get("/api/documents",auth,asyncRoute(async(req,res)=>{
 app.post("/api/documents",auth,asyncRoute(async(req,res)=>{
   const b=req.body,code=String(b.department||"").trim().toLowerCase();
   const access=await documentCreateAccess(req.user,code);
-  if(!access)return res.status(403).json({error:"Document creation access denied"});
+  if(!access)return res.status(403).json({error:await documentCreateDenialMessage(req.user,code)});
   if(!b.title||!b.documentType)return res.status(400).json({error:"Document title and type are required"});
   let status=["draft","published","pending_executive","archived"].includes(b.status)?b.status:"draft";
   const audience=normalizeDocumentAudience(b,code);
@@ -4916,7 +4977,7 @@ app.patch("/api/documents/:id",auth,loadDocumentAccess("edit"),asyncRoute(async(
   let nextCode=String(b.department||req.organizationDocument.department_code||"").trim().toLowerCase();
   if(b.department){
     const access=await documentCreateAccess(req.user,nextCode);
-    if(!access)return res.status(403).json({error:"You cannot move documents into that department"});
+    if(!access)return res.status(403).json({error:await documentCreateDenialMessage(req.user,nextCode)});
     departmentId=access.id;
   }
   const audience=normalizeDocumentAudience({

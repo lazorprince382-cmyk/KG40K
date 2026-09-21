@@ -113,12 +113,12 @@
   const baseRefresh=refreshData;
   refreshData=async function(seedUser=null,options={}){
     await baseRefresh(seedUser,options);
-    if(options?.skipCenter)return;
+    if(options?.skipCenter||options?.lite)return;
     const cfg=effectiveConfig();
     if(!(cfg&&(configs[state.role]||["welfare","legal","audit","supervisory"].includes(state.executiveWorkspace))))return;
     const key=cfg.key==="audit"?"auditCenter":cfg.key;
     if(state[key])return;
-    state[key]=await api(`/api/${cfg.key}/command-center`);
+    state[key]=await api(`/api/${cfg.key}/command-center`,{timeoutMs:60000});
   };
 
   function deptSidebar(cfg){
