@@ -549,7 +549,7 @@ async function buildAvailableWorkspaces(user){
   });
   return workspaces;
 }
-async function organizationContext(user) {
+async function organizationContext(user,{includeWorkspaces=true}={}) {
   const organization=await one("SELECT id,name,code,description FROM organizations WHERE active=true ORDER BY id LIMIT 1");
   if(!organization) return null;
   let assignmentRows=(await query(`SELECT d.id,d.code,d.name,d.description,d.sort_order AS "sortOrder",
@@ -569,7 +569,9 @@ async function organizationContext(user) {
   const leadership=(await query(`SELECT body,position_title AS "positionTitle",leadership_level AS "leadershipLevel",
     starts_on AS "startsOn",ends_on AS "endsOn" FROM leadership_assignments
     WHERE user_id=$1 AND active=true AND (ends_on IS NULL OR ends_on>=CURRENT_DATE) ORDER BY leadership_level DESC`,[user.id])).rows;
-  return {...organization,departments:assignmentRows,leadership,workspaces:await buildAvailableWorkspaces(user)};
+  const payload={...organization,departments:assignmentRows,leadership};
+  if(includeWorkspaces)payload.workspaces=await buildAvailableWorkspaces(user);
+  return payload;
 }
 async function departmentPermission(user,code,action="view") {
   // Document delete is treated as an edit-level department right.
@@ -672,16 +674,19 @@ app.get("/api/bootstrap",auth,asyncRoute(async(req,res)=>{
   const memberFilter=memberId?"WHERE m.id=$1 AND m.deleted_at IS NULL":"WHERE m.deleted_at IS NULL", args=memberId?[memberId]:[];
   const userPermissions=permissions[req.user.role]||[];
   const allowed=p=>userPermissions.includes(p);
+  const usesDepartmentCenter=["Executive Officer","Finance Officer","Credits Officer","Investment Officer","Welfare Officer","Legal Officer","Auditor","Supervisory Officer"].includes(req.user.role);
   const canSeeTransactions=req.user.role==="Finance Officer"?false:req.user.role==="Member"||
     ["finance:read","transaction:read","transaction:create","transaction:verify","accounting:manage","receipt:print"].some(allowed);
-  const canSeeLoans=req.user.role==="Member"||userPermissions.some(p=>p.startsWith("loan:"))||["approval:high","approval:delegated"].some(allowed);
-  const canSeeWithdrawals=req.user.role==="Member"||userPermissions.some(p=>p.startsWith("withdrawal:"))||allowed("finance:read");
-  const needsMemberDirectory=["Executive Officer","Credits Officer","Finance Officer","System Admin","Investment Officer"].includes(req.user.role)||req.user.role==="Member";
+  const canSeeLoans=(!usesDepartmentCenter||req.user.role==="Credits Officer"||req.user.role==="Member")&&(req.user.role==="Member"||userPermissions.some(p=>p.startsWith("loan:"))||["approval:high","approval:delegated"].some(allowed));
+  const canSeeWithdrawals=(!usesDepartmentCenter||req.user.role==="Credits Officer"||req.user.role==="Member")&&(req.user.role==="Member"||userPermissions.some(p=>p.startsWith("withdrawal:"))||allowed("finance:read"));
+  // Department dashboards load their own command centers — skip the full member directory on boot.
+  const needsMemberDirectory=!usesDepartmentCenter&&(["Executive Officer","Credits Officer","Finance Officer","System Admin","Investment Officer"].includes(req.user.role)||req.user.role==="Member")
+    ||req.user.role==="Credits Officer"||req.user.role==="Member";
   const empty={rows:[]};
-  const [membersResult,txResult,loansResult,withdrawalsResult,productsResult,settingsResult,announcementsResult,notificationsResult,unreadResult,guarantorRequestsResult]=await Promise.all([
+  const [membersResult,txResult,loansResult,withdrawalsResult,productsResult,settingsResult,announcementsResult,notificationsResult,unreadResult,guarantorRequestsResult,organization,workspaces]=await Promise.all([
     needsMemberDirectory?query(`SELECT m.id AS "databaseId",m.member_number AS id,m.full_name AS name,m.email,CASE WHEN m.provisional THEN NULL ELSE m.phone END AS phone,CASE WHEN m.provisional THEN NULL ELSE m.national_id END AS national_id,m.occupation,m.employer,m.address,m.next_of_kin,
       m.savings_balance::float AS savings,m.share_capital::float AS shares,m.dividends::float,m.fines::float,m.status,m.joined_at AS joined,b.name AS branch
-      FROM members m LEFT JOIN branches b ON b.id=m.branch_id ${memberFilter} ORDER BY m.id DESC`,args):Promise.resolve(empty),
+      FROM members m LEFT JOIN branches b ON b.id=m.branch_id ${memberFilter} ORDER BY m.id DESC LIMIT 500`,args):Promise.resolve(empty),
     canSeeTransactions?query(`SELECT t.id AS "databaseId",t.reference AS id,t.type,t.method,t.amount::float,t.status,t.external_reference,t.created_at AS date,
       m.id AS "memberId",m.member_number,m.full_name AS member,u.full_name AS "recordedBy"
       FROM transactions t JOIN members m ON m.id=t.member_id JOIN users u ON u.id=t.recorded_by ${memberId?"WHERE m.id=$1":""} ORDER BY t.id DESC LIMIT 250`,args):Promise.resolve(empty),
@@ -699,9 +704,9 @@ app.get("/api/bootstrap",auth,asyncRoute(async(req,res)=>{
         FROM loan_guarantors lg JOIN members guarantor ON guarantor.id=lg.member_id WHERE lg.loan_id=l.id),'[]') AS guarantors
       FROM loans l JOIN members m ON m.id=l.member_id JOIN loan_products p ON p.id=l.product_id LEFT JOIN members gm ON gm.id=l.guarantor_member_id
       LEFT JOIN loan_disbursements d ON d.loan_id=l.id
-      ${memberId?"WHERE m.id=$1":""} ORDER BY l.id DESC`,args):Promise.resolve(empty),
+      ${memberId?"WHERE m.id=$1":""} ORDER BY l.id DESC LIMIT 200`,args):Promise.resolve(empty),
     canSeeWithdrawals?query(`SELECT w.id AS "databaseId",w.reference AS id,w.amount::float,w.method,w.reason,w.status,w.created_at AS date,m.id AS "memberId",m.full_name AS member,m.member_number
-      FROM withdrawals w JOIN members m ON m.id=w.member_id ${memberId?"WHERE m.id=$1":""} ORDER BY w.id DESC`,args):Promise.resolve(empty),
+      FROM withdrawals w JOIN members m ON m.id=w.member_id ${memberId?"WHERE m.id=$1":""} ORDER BY w.id DESC LIMIT 200`,args):Promise.resolve(empty),
     query(`SELECT id,name,annual_rate::float AS "annualRate",max_term AS "maxTerm",max_multiplier::float AS "maxMultiplier",
       max_amount::float AS "maxAmount",processing_fee_rate::float AS "processingFeeRate",late_penalty_rate::float AS "latePenaltyRate",
       minimum_guarantors AS "minimumGuarantors",maximum_guarantors AS "maximumGuarantors",interest_method AS "interestMethod",policy_reference AS "policyReference"
@@ -717,7 +722,9 @@ app.get("/api/bootstrap",auth,asyncRoute(async(req,res)=>{
       l.purpose,l.status,p.name AS product,borrower.full_name AS member,borrower.savings_balance::float AS "borrowerSavings",
       lg.id AS "guarantorRequestId",lg.status AS "guarantorStatus",lg.response_note AS "responseNote"
       FROM loan_guarantors lg JOIN loans l ON l.id=lg.loan_id JOIN members borrower ON borrower.id=l.member_id
-      JOIN loan_products p ON p.id=l.product_id WHERE lg.member_id=$1 ORDER BY lg.id DESC`,[req.user.member_id]):Promise.resolve(empty)
+      JOIN loan_products p ON p.id=l.product_id WHERE lg.member_id=$1 ORDER BY lg.id DESC LIMIT 50`,[req.user.member_id]):Promise.resolve(empty),
+    organizationContext(req.user,{includeWorkspaces:false}),
+    buildAvailableWorkspaces(req.user)
   ]);
   const canSeeMemberFinancials=memberFinancialRoles.has(req.user.role);
   const canSeeMemberIdentity=memberIdentityRoles.has(req.user.role);
@@ -729,10 +736,10 @@ app.get("/api/bootstrap",auth,asyncRoute(async(req,res)=>{
     if(!canSeeMemberExtended)for(const field of ["occupation","employer","address","next_of_kin"])delete result[field];
     return result;
   });
-  let auditRows=[];
-  if((permissions[req.user.role]||[]).includes("audit:read")) auditRows=(await query(`SELECT a.id,a.action,a.entity_type AS "entityType",a.entity_id AS "entityId",a.details,a.ip_address AS ip,a.created_at AS time,
-    COALESCE(u.full_name,'System') AS actor,COALESCE(u.role,'System') AS role FROM audit_logs a LEFT JOIN users u ON u.id=a.user_id ORDER BY a.id DESC LIMIT 300`)).rows;
-  res.json({user:req.user,permissions:permissions[req.user.role]||[],roles:ROLES,organization:await organizationContext(req.user),workspaces:await buildAvailableWorkspaces(req.user),members:safeMembers,transactions:txResult.rows,loans:loansResult.rows,
+  // Audit trail is loaded on demand from the Audit page — not required to leave the splash screen.
+  const auditRows=[];
+  if(organization)organization.workspaces=workspaces;
+  res.json({user:req.user,permissions:permissions[req.user.role]||[],roles:ROLES,organization,workspaces,members:safeMembers,transactions:txResult.rows,loans:loansResult.rows,
     withdrawals:withdrawalsResult.rows,products:productsResult.rows,settings:Object.fromEntries(settingsResult.rows.map(s=>[s.key,s.value==="true"?true:s.value==="false"?false:s.value])),
     announcements:announcementsResult.rows,notifications:notificationsResult.rows,unreadMessages:unreadResult.rows[0].count,
     guarantorRequests:guarantorRequestsResult.rows,audit:auditRows});

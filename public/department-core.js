@@ -111,7 +111,15 @@
   const ui=window.DepartmentUi={configs,views:{},dashboards:{},settings:{},actions:{},binders:[],subtitles:{},quick:{},esc,date,badge,risk,panel,empty,table,options,go,modal,reload,download,effectiveConfig,dashboardGreeting};
 
   const baseRefresh=refreshData;
-  refreshData=async function(){await baseRefresh();const cfg=effectiveConfig();if(cfg&&(configs[state.role]||["welfare","legal","audit","supervisory"].includes(state.executiveWorkspace)))state[cfg.key==="audit"?"auditCenter":cfg.key]=await api(`/api/${cfg.key}/command-center`);};
+  refreshData=async function(seedUser=null,options={}){
+    await baseRefresh(seedUser,options);
+    if(options?.skipCenter)return;
+    const cfg=effectiveConfig();
+    if(!(cfg&&(configs[state.role]||["welfare","legal","audit","supervisory"].includes(state.executiveWorkspace))))return;
+    const key=cfg.key==="audit"?"auditCenter":cfg.key;
+    if(state[key])return;
+    state[key]=await api(`/api/${cfg.key}/command-center`);
+  };
 
   function deptSidebar(cfg){
     const data=state[cfg.key==="audit"?"auditCenter":cfg.key];

@@ -427,8 +427,10 @@ async function enterWorkspace(workspace,{skipRender=false,preserveNavigation=fal
   state.permissions=workspace.permissions||state.permissions||[];
   if(!preserveNavigation)state.page="dashboard";
   persistUiState();
-  await loadWorkspaceCenter(workspace.role);
+  // Paint the shell immediately so the splash does not wait on the department payload.
   if(!skipRender){render();window.scrollTo(0,0);}
+  await loadWorkspaceCenter(workspace.role);
+  if(!skipRender)render();
 }
 function workspacePickerView(workspaces,error=""){
   const cards=workspaces.map(item=>{
