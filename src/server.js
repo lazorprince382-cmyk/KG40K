@@ -4753,12 +4753,43 @@ app.post("/api/withdrawals/:id/process",auth,asyncRoute(async(req,res)=>{
   await audit({userId:req.user.id,action:"WITHDRAWAL_PROCESSED",entityType:"withdrawal",entityId:String(processed.wd.id),details:`${processed.wd.reference} - ${processed.tx.reference}`,...metadata(req)});
   res.json({ok:true,transactionReference:processed.tx.reference,receiptNumber:processed.tx.receipt_number,balance:Number(processed.balance)});
 }));
+const DOCUMENT_REGISTRY_ROLES=new Set(["Legal Officer","Executive Officer","System Admin"]);
+const DOCUMENT_LIBRARY_CODES=new Set(["credits","investment","finance","welfare","supervisory","audit","executive","general"]);
+async function ensureDocumentLibraryDepartment(code){
+  const normalized=String(code||"").trim().toLowerCase();
+  if(!DOCUMENT_LIBRARY_CODES.has(normalized))return null;
+  let department=await one("SELECT id,code,name,description,active FROM departments WHERE code=$1",[normalized]);
+  if(department?.active)return department;
+  if(department&&!department.active){
+    await query(`UPDATE departments SET active=true WHERE id=$1`,[department.id]);
+    return one("SELECT id,code,name,description FROM departments WHERE id=$1",[department.id]);
+  }
+  const org=await one("SELECT id FROM organizations ORDER BY id LIMIT 1");
+  if(!org)return null;
+  const names={
+    credits:"Credits Department",investment:"Investment",finance:"Finance",welfare:"Welfare",
+    supervisory:"Supervisory",audit:"Audit",executive:"Executive",general:"General"
+  };
+  const descriptions={
+    general:"Organization-wide documents used across almost every department.",
+    credits:"Member savings, loan applications and credit records.",
+    investment:"Projects and proposals.",finance:"Accounts and reports.",
+    welfare:"Support and contributions.",supervisory:"Oversight records.",
+    audit:"Assurance evidence.",executive:"Governance and minutes."
+  };
+  await query(
+    `INSERT INTO departments (organization_id,code,name,description,sort_order,active)
+     VALUES ($1,$2,$3,$4,$5,true)
+     ON CONFLICT (code) DO UPDATE SET active=true, name=EXCLUDED.name, description=EXCLUDED.description`,
+    [org.id,normalized,names[normalized]||normalized,descriptions[normalized]||`${names[normalized]||normalized} documents`,normalized==="general"?0:99]
+  );
+  return one("SELECT id,code,name,description FROM departments WHERE code=$1",[normalized]);
+}
 async function documentAccess(user,document,action="view") {
   const role=String(user?.role||"");
   if(role==="System Admin")return true;
-  // Legal and Executive may permanently archive any organization document.
-  if(action==="delete"&&["Legal Officer","Executive Officer","System Admin"].includes(role))return true;
-  if(role==="Legal Officer"&&["view","edit","delete"].includes(action))return true;
+  // Legal and Executive manage the organization document registry (create/edit/delete/view).
+  if(DOCUMENT_REGISTRY_ROLES.has(role)&&["view","edit","delete"].includes(action))return true;
   if(action==="view"&&["Auditor","Executive Officer","Supervisory Officer","Legal Officer"].includes(role))return true;
   const level=Number(document.visibility_level||2);
   const code=String(document.department_code||"executive").toLowerCase();
@@ -4777,7 +4808,7 @@ async function documentAccess(user,document,action="view") {
       return false;
     }
     // Selected departments
-    if(["Legal Officer","System Admin","Executive Officer"].includes(role))return true;
+    if(DOCUMENT_REGISTRY_ROLES.has(role))return true;
     const targets=audience.length?audience:[code];
     for(const target of targets){
       if(await departmentPermission(user,target,"view"))return true;
@@ -4815,10 +4846,20 @@ function normalizeDocumentAudience(body={},fallbackCode=""){
 async function documentCreateAccess(user,code){
   const normalized=String(code||"").trim().toLowerCase();
   if(!normalized)return null;
-  if(["Legal Officer","System Admin"].includes(user.role)){
-    const department=await one("SELECT id,code,name,description FROM departments WHERE code=$1 AND active=true",[normalized]);
+  const role=String(user?.role||"");
+  // Registry managers may file into any library shelf (including General).
+  if(DOCUMENT_REGISTRY_ROLES.has(role)){
+    const department=await ensureDocumentLibraryDepartment(normalized)
+      || await one("SELECT id,code,name,description FROM departments WHERE code=$1 AND active=true",[normalized]);
     if(!department)return null;
     return {...department,position_title:"Document registry",authority_level:5,can_view:true,can_create:true,can_edit:true,can_approve:true,is_head:false};
+  }
+  // Anyone with Legal create/edit may also upload into department libraries.
+  const legalWrite=await departmentPermission(user,"legal","create")||await departmentPermission(user,"legal","edit");
+  if(legalWrite&&DOCUMENT_LIBRARY_CODES.has(normalized)){
+    const department=await ensureDocumentLibraryDepartment(normalized);
+    if(!department)return null;
+    return {...department,position_title:"Document registry",authority_level:Number(legalWrite.authority_level||3),can_view:true,can_create:true,can_edit:true,can_approve:false,is_head:false};
   }
   return departmentPermission(user,normalized,"create");
 }
