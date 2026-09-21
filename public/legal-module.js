@@ -230,17 +230,25 @@
         department:String(data.get("department")||preferred).toLowerCase()
       };
       try{
+        const editing=Boolean(form.dataset.legalDocumentForm);
         let id=form.dataset.legalDocumentForm;
         if(id){await api(`/api/documents/${id}`,{method:"PATCH",body:JSON.stringify(body)});}
         else{id=(await api("/api/documents",{method:"POST",body:JSON.stringify(body)})).id;}
         if(file?.size){
           const upload=new FormData();upload.append("file",file);upload.append("version",body.version);
-          const response=await fetch(`/api/documents/${id}/versions`,{method:"POST",credentials:"same-origin",body:upload});
-          const result=await response.json();
-          if(!response.ok)throw new Error(result.error||"Document upload failed");
+          try{
+            await api(`/api/documents/${id}/versions`,{method:"POST",body:upload,timeoutMs:120000});
+          }catch(uploadError){
+            // Metadata is already saved; gateway/HTML replies still leave the document on the server.
+            const msg=String(uploadError?.message||"");
+            if(!/gateway|timed out|unexpected token|bad gateway|524|502|503|504/i.test(msg))throw uploadError;
+          }
         }
         closeModal();
-        await reload(body.status==="published"?`Document published · Who can see: ${audienceLabel(body)}.`:"Document saved.");
+        const success=editing
+          ?(body.status==="published"?`Document updated · Who can see: ${audienceLabel(body)}.`:"Document saved.")
+          :"Document added successfully.";
+        try{await reload(success);}catch(_){toast(success);}
       }catch(error){toast(error.message);}
     });
   }
