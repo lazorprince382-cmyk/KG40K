@@ -5036,33 +5036,172 @@ app.delete("/api/documents/:id",auth,loadDocumentAccess("delete"),asyncRoute(asy
     entityId:String(req.organizationDocument.id),details:`${req.organizationDocument.reference} - ${req.organizationDocument.title}`,...metadata(req)});
   res.json({ok:true,recoverable:true});
 }));
+
+const documentChunkSessions=new Map();
+const documentChunksRoot=path.join(uploadsDir,".chunks");
+fs.mkdirSync(documentChunksRoot,{recursive:true});
+function clearDocumentChunkSession(uploadId){
+  const session=documentChunkSessions.get(uploadId);
+  documentChunkSessions.delete(uploadId);
+  if(!session?.dir)return;
+  try{fs.rmSync(session.dir,{recursive:true,force:true});}catch(_){/* ignore */}
+}
+async function finalizeOrganizationDocumentVersion(req,{version,originalName,storedName,mimeType,fileSize,filePath,convertedFrom=null}){
+  const sha256=crypto.createHash("sha256").update(fs.readFileSync(filePath)).digest("hex");
+  const safeName=path.basename(String(originalName||storedName||"document.bin"));
+  const resolvedMime=effectiveDocumentMime({mime_type:mimeType,original_name:safeName,stored_name:storedName});
+  try{
+    const row=await transaction(async client=>{
+      const created=(await client.query(`INSERT INTO organization_document_versions
+        (document_id,version,original_name,stored_name,mime_type,file_size,sha256,uploaded_by)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+        [req.organizationDocument.id,version,safeName,storedName,resolvedMime,fileSize,sha256,req.user.id])).rows[0];
+      await client.query("UPDATE organization_documents SET version=$1,file_name=$2,updated_at=NOW() WHERE id=$3",
+        [version,safeName,req.organizationDocument.id]);
+      return created;
+    });
+    await audit({userId:req.user.id,action:"DOCUMENT_VERSION_UPLOADED",entityType:"organization_document",
+      entityId:String(req.organizationDocument.id),
+      details:`version=${version}; sha256=${sha256}${convertedFrom?`; convertedFrom=${convertedFrom}`:""}`,...metadata(req)});
+    return {id:row.id,version,sha256,convertedFrom,mimeType:resolvedMime,fileName:safeName};
+  }catch(error){
+    try{fs.unlinkSync(filePath);}catch(_){/* ignore */}
+    if(error.code==="23505"){
+      const conflict=new Error("That document version already exists");
+      conflict.status=409;
+      throw conflict;
+    }
+    throw error;
+  }
+}
+
 app.post("/api/documents/:id/versions",auth,loadDocumentAccess("edit"),upload.single("file"),asyncRoute(async(req,res)=>{
   if(!req.file)return res.status(400).json({error:"Choose a document file"});
   await maybeConvertUploadToPdf(req.file);
   const version=String(req.body.version||req.organizationDocument.version||"1.0").trim().slice(0,30);
-  const sha256=crypto.createHash("sha256").update(fs.readFileSync(req.file.path)).digest("hex");
   const mimeType=effectiveDocumentMime({
     mime_type:req.file.mimetype,
     original_name:req.file.originalname,
     stored_name:req.file.filename
   });
-  try {
-    const row=await transaction(async client=>{
-      const created=(await client.query(`INSERT INTO organization_document_versions
-        (document_id,version,original_name,stored_name,mime_type,file_size,sha256,uploaded_by)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
-        [req.organizationDocument.id,version,path.basename(req.file.originalname),req.file.filename,mimeType,req.file.size,sha256,req.user.id])).rows[0];
-      await client.query("UPDATE organization_documents SET version=$1,file_name=$2,updated_at=NOW() WHERE id=$3",[version,path.basename(req.file.originalname),req.organizationDocument.id]);
-      return created;
-    });
-    await audit({userId:req.user.id,action:"DOCUMENT_VERSION_UPLOADED",entityType:"organization_document",entityId:String(req.organizationDocument.id),details:`version=${version}; sha256=${sha256}${req.file.convertedFrom?`; convertedFrom=${req.file.convertedFrom}`:""}`,...metadata(req)});
-    res.status(201).json({id:row.id,version,sha256,convertedFrom:req.file.convertedFrom||null,mimeType,fileName:req.file.originalname});
-  } catch(error) {
+  const payload=await finalizeOrganizationDocumentVersion(req,{
+    version,
+    originalName:req.file.originalname,
+    storedName:req.file.filename,
+    mimeType,
+    fileSize:req.file.size,
+    filePath:req.file.path,
+    convertedFrom:req.file.convertedFrom||null
+  });
+  res.status(201).json(payload);
+}));
+
+/** Chunked upload — keeps each request under proxy body limits (nginx/Cloudflare 413). */
+app.post("/api/documents/:id/versions/chunks",auth,loadDocumentAccess("edit"),upload.single("file"),asyncRoute(async(req,res)=>{
+  if(!req.file)return res.status(400).json({error:"Choose a document file chunk"});
+  const uploadId=String(req.body.uploadId||"").trim().replace(/[^a-zA-Z0-9_-]/g,"").slice(0,80);
+  const index=Number(req.body.index);
+  const total=Number(req.body.total);
+  if(!uploadId||!Number.isInteger(index)||!Number.isInteger(total)||index<0||total<1||index>=total||total>400){
     fs.unlink(req.file.path,()=>{});
-    if(error.code==="23505")return res.status(409).json({error:"That document version already exists"});
+    return res.status(400).json({error:"Invalid upload chunk"});
+  }
+  if(req.file.size>768*1024){
+    fs.unlink(req.file.path,()=>{});
+    return res.status(400).json({error:"Upload chunk is too large"});
+  }
+  let session=documentChunkSessions.get(uploadId);
+  if(!session){
+    const dir=path.join(documentChunksRoot,`${req.user.id}-${req.organizationDocument.id}-${uploadId}`);
+    fs.mkdirSync(dir,{recursive:true});
+    session={
+      userId:req.user.id,
+      documentId:req.organizationDocument.id,
+      total,
+      received:new Set(),
+      bytes:0,
+      dir,
+      originalName:path.basename(String(req.body.originalName||req.file.originalname||"document.bin")),
+      mimeType:String(req.body.mimeType||req.file.mimetype||""),
+      version:String(req.body.version||req.organizationDocument.version||"1.0").trim().slice(0,30),
+      expiresAt:Date.now()+60*60*1000
+    };
+    documentChunkSessions.set(uploadId,session);
+  }
+  if(session.userId!==req.user.id||session.documentId!==req.organizationDocument.id){
+    fs.unlink(req.file.path,()=>{});
+    return res.status(403).json({error:"Upload session mismatch"});
+  }
+  if(session.total!==total){
+    fs.unlink(req.file.path,()=>{});
+    return res.status(400).json({error:"Upload chunk total mismatch"});
+  }
+  if(session.bytes+req.file.size>UPLOAD_MAX_BYTES){
+    fs.unlink(req.file.path,()=>{});
+    clearDocumentChunkSession(uploadId);
+    return res.status(400).json({error:`File is too large. Maximum upload size is ${Math.round(UPLOAD_MAX_BYTES/1024/1024)} MB.`});
+  }
+  const chunkPath=path.join(session.dir,`${index}.part`);
+  fs.renameSync(req.file.path,chunkPath);
+  session.received.add(index);
+  session.bytes+=req.file.size;
+  session.expiresAt=Date.now()+60*60*1000;
+  if(req.body.originalName)session.originalName=path.basename(String(req.body.originalName));
+  if(req.body.mimeType)session.mimeType=String(req.body.mimeType);
+  if(req.body.version)session.version=String(req.body.version).trim().slice(0,30);
+  res.json({ok:true,received:session.received.size,total:session.total});
+}));
+
+app.post("/api/documents/:id/versions/complete",auth,loadDocumentAccess("edit"),asyncRoute(async(req,res)=>{
+  const uploadId=String(req.body.uploadId||"").trim().replace(/[^a-zA-Z0-9_-]/g,"").slice(0,80);
+  const session=documentChunkSessions.get(uploadId);
+  if(!session||session.userId!==req.user.id||session.documentId!==req.organizationDocument.id){
+    return res.status(404).json({error:"Upload session not found. Try uploading again."});
+  }
+  if(session.expiresAt<Date.now()){
+    clearDocumentChunkSession(uploadId);
+    return res.status(410).json({error:"Upload session expired. Try uploading again."});
+  }
+  for(let i=0;i<session.total;i++){
+    if(!session.received.has(i)||!fs.existsSync(path.join(session.dir,`${i}.part`))){
+      return res.status(400).json({error:`Missing upload chunk ${i+1} of ${session.total}`});
+    }
+  }
+  const storedName=`${Date.now()}-${crypto.randomBytes(12).toString("hex")}${path.extname(session.originalName).toLowerCase().slice(0,20)||".bin"}`;
+  const filePath=path.join(uploadsDir,storedName);
+  await fs.promises.mkdir(uploadsDir,{recursive:true});
+  try{
+    for(let i=0;i<session.total;i++){
+      const chunk=await fs.promises.readFile(path.join(session.dir,`${i}.part`));
+      if(i===0)await fs.promises.writeFile(filePath,chunk);
+      else await fs.promises.appendFile(filePath,chunk);
+    }
+  }catch(error){
+    try{fs.unlinkSync(filePath);}catch(_){/* ignore */}
+    clearDocumentChunkSession(uploadId);
     throw error;
   }
+  clearDocumentChunkSession(uploadId);
+  const file={
+    path:filePath,
+    filename:storedName,
+    originalname:session.originalName,
+    mimetype:session.mimeType||mimeFromFilename(session.originalName),
+    size:fs.statSync(filePath).size
+  };
+  await maybeConvertUploadToPdf(file);
+  const payload=await finalizeOrganizationDocumentVersion(req,{
+    version:session.version,
+    originalName:file.originalname,
+    storedName:file.filename,
+    mimeType:file.mimetype,
+    fileSize:file.size,
+    filePath:file.path,
+    convertedFrom:file.convertedFrom||null
+  });
+  res.status(201).json(payload);
 }));
+
 app.post("/api/documents/:id/publication-decision",auth,asyncRoute(async(req,res)=>{
   if(req.user.role!=="Executive Officer")return res.status(403).json({error:"Executive authority is required"});
   const document=await one(`SELECT doc.*,d.code AS department_code FROM organization_documents doc

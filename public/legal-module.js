@@ -243,8 +243,7 @@
           createdId=id;
         }
         if(file instanceof File&&file.size){
-          const upload=new FormData();upload.append("file",file);upload.append("version",body.version);
-          await api(`/api/documents/${id}/versions`,{method:"POST",body:upload,timeoutMs:180000});
+          await uploadDocumentVersion(id,file,body.version);
         }
         closeModal();
         const success=editing

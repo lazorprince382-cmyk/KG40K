@@ -145,7 +145,12 @@ async function api(url, options = {}) {
       const plain=String(tagged?.[1]||text||"").replace(/<[^>]+>/g," ").replace(/\s+/g," ").trim();
       return {error:plain.slice(0,240)};
     });
-    if (!response.ok) throw new Error((typeof data==="string"?data:data?.error) || `Request failed (${response.status})`);
+    if (!response.ok) {
+      const statusTip=response.status===413
+        ?"Upload blocked by the host proxy (413). The app will retry in smaller pieces — refresh and try again if you still see this."
+        :null;
+      throw new Error(statusTip||(typeof data==="string"?data:data?.error)||`Request failed (${response.status})`);
+    }
     return data;
   }catch(error){
     if(error?.name==="AbortError")throw new Error("Request timed out. Check your connection and try again.");
@@ -153,6 +158,30 @@ async function api(url, options = {}) {
   }finally{
     if(timer)clearTimeout(timer);
   }
+}
+async function uploadDocumentVersion(documentId,file,version="1.0"){
+  if(!(file instanceof File)||!file.size)throw new Error("Choose a document file");
+  if(file.size>100*1024*1024)throw new Error("File is too large. Maximum upload size is 100 MB.");
+  const chunkSize=512*1024;
+  const total=Math.max(1,Math.ceil(file.size/chunkSize));
+  const uploadId=`${Date.now().toString(36)}${Math.random().toString(36).slice(2,10)}`;
+  for(let index=0;index<total;index++){
+    const chunk=file.slice(index*chunkSize,(index+1)*chunkSize);
+    const payload=new FormData();
+    payload.append("uploadId",uploadId);
+    payload.append("index",String(index));
+    payload.append("total",String(total));
+    payload.append("version",String(version||"1.0"));
+    payload.append("originalName",file.name||"document.bin");
+    payload.append("mimeType",file.type||"");
+    payload.append("file",chunk,file.name||"document.bin");
+    await api(`/api/documents/${documentId}/versions/chunks`,{method:"POST",body:payload,timeoutMs:120000});
+  }
+  return api(`/api/documents/${documentId}/versions/complete`,{
+    method:"POST",
+    body:JSON.stringify({uploadId,version:String(version||"1.0"),originalName:file.name||"document.bin",mimeType:file.type||"",total}),
+    timeoutMs:180000
+  });
 }
 async function uploadDepartmentFile(file,departmentCode) {
   if(!(file instanceof File)||!file.size)return null;
