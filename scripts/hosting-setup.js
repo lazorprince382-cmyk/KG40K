@@ -119,9 +119,10 @@ if (!dryRun && !skipVerify) {
 
 console.log("\nDone. Start the app with: npm start");
 console.log("Migrations (incl. unit_trust_movements) run automatically on start.");
-console.log("\nRecurring auto-update (schedule this — NOT dump import):");
+console.log("\nRecurring auto-update / SYSTEM UPDATE (pulls latest code + sync pack):");
 console.log("  npm run system:auto-update");
-console.log("  npm run system:auto-update -- --pull");
+console.log("  npm run system:auto-update -- --no-pull");
+console.log("  npm run system:auto-update -- --skip-sync");
 console.log("\nIndividual refresh commands:");
 console.log("  npm run db:sync-sep2026-dan");
 console.log("  npm run db:sync-dan-savings");
