@@ -3594,7 +3594,7 @@ async function uploadChatFiles(fileList) {
   const files=[...fileList];
   if(!files.length)return;
   if(files.length>5)return toast("You can share up to 5 files at once.");
-  if(files.some(file=>file.size>15*1024*1024))return toast("Each file must be 15 MB or smaller.");
+  if(files.some(file=>file.size>100*1024*1024))return toast("Each file must be 100 MB or smaller.");
   const form=new FormData();files.forEach(file=>form.append("files",file));form.append("caption","");
   toast(`Uploading ${files.length} file${files.length>1?"s":""}...`);
   try {

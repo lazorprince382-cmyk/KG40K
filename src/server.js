@@ -23,6 +23,24 @@ const { getRunningLoan, getSavingsTargetStatus, getGuarantorEligibility } = requ
 const { loadWelfareStanding, loadWelfareMonth, enforceOneMonthlyWelfareCharge } = require("./welfare-standing");
 const { isWordUpload, convertWordUploadToPdf } = require("./services/office-pdf");
 
+function mimeFromFilename(name="",fallback="application/octet-stream"){
+  const ext=path.extname(String(name||"")).toLowerCase();
+  const map={
+    ".pdf":"application/pdf",".png":"image/png",".jpg":"image/jpeg",".jpeg":"image/jpeg",".gif":"image/gif",".webp":"image/webp",
+    ".txt":"text/plain",".csv":"text/csv",".doc":"application/msword",
+    ".docx":"application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".xls":"application/vnd.ms-excel",".xlsx":"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".ppt":"application/vnd.ms-powerpoint",".pptx":"application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ".zip":"application/zip",".mp4":"video/mp4",".mp3":"audio/mpeg"
+  };
+  return map[ext]||fallback;
+}
+function effectiveDocumentMime(version){
+  const stored=String(version?.mime_type||"").toLowerCase();
+  if(stored&&stored!=="application/octet-stream"&&stored!=="binary/octet-stream")return stored;
+  return mimeFromFilename(version?.original_name||version?.stored_name,stored||"application/octet-stream");
+}
+
 function isMemberSavingsFinanceCategory(category="") {
   return /member\s*savings|^savings$|savings\s*deposit/i.test(String(category || "").trim());
 }
@@ -373,24 +391,15 @@ function resolveOrganizationDocumentFile(version){
   }
   return file;
 }
-const allowedFileTypes=new Set([
-  "image/jpeg","image/png","image/gif","image/webp","video/mp4","audio/mpeg","audio/ogg","audio/wav",
-  "application/pdf","application/zip","application/x-zip-compressed","text/plain","text/csv",
-  "application/msword","application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "application/vnd.ms-excel","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "application/vnd.ms-powerpoint","application/vnd.openxmlformats-officedocument.presentationml.presentation"
-]);
+/** Organization documents and evidence — accept any type; size capped at host/proxy practical max. */
+const UPLOAD_MAX_BYTES=100*1024*1024;
 const upload=multer({
   storage:multer.diskStorage({
     destination:(req,file,cb)=>cb(null,uploadsDir),
-    filename:(req,file,cb)=>cb(null,`${Date.now()}-${crypto.randomBytes(12).toString("hex")}${path.extname(file.originalname).toLowerCase().slice(0,10)}`)
+    filename:(req,file,cb)=>cb(null,`${Date.now()}-${crypto.randomBytes(12).toString("hex")}${path.extname(file.originalname).toLowerCase().slice(0,20)||".bin"}`)
   }),
-  limits:{fileSize:15*1024*1024,files:5},
-  fileFilter:(req,file,cb)=>{
-    const mime=String(file.mimetype||"").toLowerCase();
-    if(allowedFileTypes.has(mime)||mime.startsWith("image/"))return cb(null,true);
-    cb(new Error("This file type is not allowed"));
-  }
+  limits:{fileSize:UPLOAD_MAX_BYTES,files:10},
+  fileFilter:(req,file,cb)=>cb(null,true)
 });
 const typingPresence=new Map();
 
@@ -5032,17 +5041,22 @@ app.post("/api/documents/:id/versions",auth,loadDocumentAccess("edit"),upload.si
   await maybeConvertUploadToPdf(req.file);
   const version=String(req.body.version||req.organizationDocument.version||"1.0").trim().slice(0,30);
   const sha256=crypto.createHash("sha256").update(fs.readFileSync(req.file.path)).digest("hex");
+  const mimeType=effectiveDocumentMime({
+    mime_type:req.file.mimetype,
+    original_name:req.file.originalname,
+    stored_name:req.file.filename
+  });
   try {
     const row=await transaction(async client=>{
       const created=(await client.query(`INSERT INTO organization_document_versions
         (document_id,version,original_name,stored_name,mime_type,file_size,sha256,uploaded_by)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
-        [req.organizationDocument.id,version,path.basename(req.file.originalname),req.file.filename,req.file.mimetype,req.file.size,sha256,req.user.id])).rows[0];
+        [req.organizationDocument.id,version,path.basename(req.file.originalname),req.file.filename,mimeType,req.file.size,sha256,req.user.id])).rows[0];
       await client.query("UPDATE organization_documents SET version=$1,file_name=$2,updated_at=NOW() WHERE id=$3",[version,path.basename(req.file.originalname),req.organizationDocument.id]);
       return created;
     });
     await audit({userId:req.user.id,action:"DOCUMENT_VERSION_UPLOADED",entityType:"organization_document",entityId:String(req.organizationDocument.id),details:`version=${version}; sha256=${sha256}${req.file.convertedFrom?`; convertedFrom=${req.file.convertedFrom}`:""}`,...metadata(req)});
-    res.status(201).json({id:row.id,version,sha256,convertedFrom:req.file.convertedFrom||null,mimeType:req.file.mimetype,fileName:req.file.originalname});
+    res.status(201).json({id:row.id,version,sha256,convertedFrom:req.file.convertedFrom||null,mimeType,fileName:req.file.originalname});
   } catch(error) {
     fs.unlink(req.file.path,()=>{});
     if(error.code==="23505")return res.status(409).json({error:"That document version already exists"});
@@ -5072,7 +5086,8 @@ app.get("/api/documents/:id/download",auth,loadDocumentAccess("view"),asyncRoute
   const filePath=resolveOrganizationDocumentFile(version);
   if(!filePath)return res.status(410).json({error:"Document file is no longer available. Re-upload the file from Legal documents."});
   await audit({userId:req.user.id,action:"DOCUMENT_DOWNLOADED",entityType:"organization_document",entityId:String(req.organizationDocument.id),details:`version=${version.version}`,...metadata(req)});
-  res.type(version.mime_type);res.download(filePath,version.original_name);
+  const mime=effectiveDocumentMime(version);
+  res.type(mime);res.download(filePath,version.original_name);
 }));
 app.get("/api/documents/:id/content",auth,loadDocumentAccess("view"),asyncRoute(async(req,res)=>{
   let version=await one(`SELECT * FROM organization_document_versions WHERE document_id=$1
@@ -5084,7 +5099,8 @@ app.get("/api/documents/:id/content",auth,loadDocumentAccess("view"),asyncRoute(
   const content=await fs.promises.readFile(filePath);
   await audit({userId:req.user.id,action:"DOCUMENT_VIEWED_IN_APP",entityType:"organization_document",
     entityId:String(req.organizationDocument.id),details:`version=${version.version}`,...metadata(req)});
-  res.set("X-Document-Mime-Type",version.mime_type||"application/octet-stream");
+  const mime=effectiveDocumentMime(version);
+  res.set("X-Document-Mime-Type",mime);
   res.type("application/octet-stream").send(content);
 }));
 app.get("/api/documents/:id/view",auth,loadDocumentAccess("view"),asyncRoute(async(req,res)=>{
@@ -5100,8 +5116,9 @@ app.get("/api/documents/:id/view",auth,loadDocumentAccess("view"),asyncRoute(asy
   });
   await audit({userId:req.user.id,action:"DOCUMENT_VIEWED",entityType:"organization_document",
     entityId:String(req.organizationDocument.id),details:`version=${version.version}`,...metadata(req)});
+  const mime=effectiveDocumentMime(version);
   res.setHeader("Content-Disposition",`inline; filename="${path.basename(version.original_name).replaceAll('"',"")}"`);
-  res.type(version.mime_type).sendFile(path.resolve(filePath));
+  res.type(mime).sendFile(path.resolve(filePath));
 }));
 async function conversationForUser(conversationId,userId) {
   return one(`SELECT c.*,cm.member_role,cm.archived,cm.muted_until FROM conversations c
@@ -5805,9 +5822,17 @@ app.get("/{*splat}",(req,res)=>{
   res.sendFile(path.join(publicDir,"index.html"));
 });
 app.use((error,req,res,next)=>{
-  const status=error instanceof multer.MulterError||error.message==="This file type is not allowed"?400:Number(error.status)||500;
+  let status=Number(error.status)||500;
+  let message=error.message||"Request failed";
+  if(error instanceof multer.MulterError){
+    status=400;
+    if(error.code==="LIMIT_FILE_SIZE")message=`File is too large. Maximum upload size is ${Math.round(UPLOAD_MAX_BYTES/1024/1024)} MB.`;
+    else if(error.code==="LIMIT_FILE_COUNT")message="Too many files in one upload.";
+    else if(error.code==="LIMIT_UNEXPECTED_FILE")message="Unexpected upload field.";
+    else message=error.message||"Upload failed";
+  }
   if(status>=500)console.error(error);
-  res.status(status).json({error:status>=500&&production?"An unexpected server error occurred":error.message});
+  res.status(status).json({error:status>=500&&production?"An unexpected server error occurred":message});
 });
 initialize().then(async()=>{
   try{

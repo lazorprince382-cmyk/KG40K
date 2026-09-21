@@ -191,7 +191,7 @@
         <option value="pending_executive" ${current.status==="pending_executive"?"selected":""}>Request Executive publication</option>
       </select></div>
       <div class="field full doc-audience-picker" data-audience-departments ${mode==="departments"?"":"hidden"}><label>Select departments that can see it</label><div class="doc-audience-grid">${deptChecks}</div></div>
-      <div class="field full"><label>${existing?"Upload a new file version (optional)":"Choose document file"}</label><input name="file" type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,image/*" ${existing?"":"required"}></div>
+      <div class="field full"><label>${existing?"Upload a new file version (optional)":"Choose document file"}</label><input name="file" type="file" ${existing?"":"required"}><small>Any file type up to 100 MB. PDF and images open in the app; other types download for viewing.</small></div>
     </div>${formEnd(existing?(focusAccess?"Save who can see it":"Save document"):"Upload document")}</form>`);
     const form=document.querySelector("[data-legal-document-form]");
     form?.querySelector('[name="audienceMode"]')?.addEventListener("change",()=>syncAudiencePicker(form));
@@ -219,6 +219,9 @@
       const customType=String(data.get("customDocumentType")||"").trim();
       const documentType=typeChoice==="Other (type your own)"?customType:typeChoice;
       if(!documentType){toast("Enter a custom document type.");return;}
+      const editing=Boolean(form.dataset.legalDocumentForm);
+      if(!editing&&!(file instanceof File&&file.size)){toast("Choose a document file to upload.");return;}
+      if(file instanceof File&&file.size>100*1024*1024){toast("File is too large. Maximum upload size is 100 MB.");return;}
       const body={
         title:data.get("title"),
         documentType,
@@ -229,27 +232,32 @@
         visibilityLevel:audienceMode==="members"?1:audienceMode==="departments"?3:2,
         department:String(data.get("department")||preferred).toLowerCase()
       };
+      const submitBtn=form.querySelector('button[type="submit"]');
+      if(submitBtn){submitBtn.disabled=true;submitBtn.textContent=editing?"Saving…":"Uploading…";}
+      let createdId=null;
       try{
-        const editing=Boolean(form.dataset.legalDocumentForm);
         let id=form.dataset.legalDocumentForm;
         if(id){await api(`/api/documents/${id}`,{method:"PATCH",body:JSON.stringify(body)});}
-        else{id=(await api("/api/documents",{method:"POST",body:JSON.stringify(body)})).id;}
-        if(file?.size){
+        else{
+          id=(await api("/api/documents",{method:"POST",body:JSON.stringify(body)})).id;
+          createdId=id;
+        }
+        if(file instanceof File&&file.size){
           const upload=new FormData();upload.append("file",file);upload.append("version",body.version);
-          try{
-            await api(`/api/documents/${id}/versions`,{method:"POST",body:upload,timeoutMs:120000});
-          }catch(uploadError){
-            // Metadata is already saved; gateway/HTML replies still leave the document on the server.
-            const msg=String(uploadError?.message||"");
-            if(!/gateway|timed out|unexpected token|bad gateway|524|502|503|504/i.test(msg))throw uploadError;
-          }
+          await api(`/api/documents/${id}/versions`,{method:"POST",body:upload,timeoutMs:180000});
         }
         closeModal();
         const success=editing
           ?(body.status==="published"?`Document updated · Who can see: ${audienceLabel(body)}.`:"Document saved.")
           :"Document added successfully.";
         try{await reload(success);}catch(_){toast(success);}
-      }catch(error){toast(error.message);}
+      }catch(error){
+        if(createdId){
+          try{await api(`/api/documents/${createdId}`,{method:"DELETE"});}catch(_){/* keep toast focused on upload error */}
+        }
+        if(submitBtn){submitBtn.disabled=false;submitBtn.textContent=editing?"Save document":"Upload document";}
+        toast(error.message||"Document upload failed");
+      }
     });
   }
   function quick(type){
