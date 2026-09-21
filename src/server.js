@@ -435,12 +435,31 @@ const permissions = {
   "Executive Officer":["dashboard:read","member:read","loan:authorize","report:read","audit:read","announcement:manage","meeting:manage","document:manage","user:manage"],
   "Supervisory Officer":["dashboard:read","member:read","finance:read","transaction:read","loan:read","report:read","audit:read"]
 };
-const loginLimiter=asyncRoute(async(req,res,next)=>{
-  const recent=await one(`SELECT COUNT(*)::int AS count FROM audit_logs
-    WHERE action='LOGIN_FAILED' AND ip_address=$1 AND created_at>NOW()-INTERVAL '15 minutes'`,[req.ip]);
-  if(Number(recent?.count||0)>=20)return res.status(429).json({error:"Too many failed login attempts. Try again later."});
+const loginAttemptsByIp=new Map();
+function loginLimiter(req,res,next){
+  // In-memory limiter — never block sign-in on a slow audit_logs scan.
+  try{
+    const ip=String(req.ip||req.headers["x-forwarded-for"]||"unknown").split(",")[0].trim();
+    const now=Date.now();
+    const windowMs=15*60*1000;
+    const entry=loginAttemptsByIp.get(ip)||{fails:[],blockedUntil:0};
+    entry.fails=entry.fails.filter(ts=>now-ts<windowMs);
+    if(entry.blockedUntil>now||entry.fails.length>=20){
+      loginAttemptsByIp.set(ip,entry);
+      return res.status(429).json({error:"Too many failed login attempts. Try again later."});
+    }
+    req._loginRate={ip,entry};
+    loginAttemptsByIp.set(ip,entry);
+  }catch(_){/* never block login on limiter errors */}
   next();
-});
+}
+function noteLoginFailure(req){
+  const rate=req._loginRate;
+  if(!rate)return;
+  rate.entry.fails.push(Date.now());
+  if(rate.entry.fails.length>=20)rate.entry.blockedUntil=Date.now()+15*60*1000;
+  loginAttemptsByIp.set(rate.ip,rate.entry);
+}
 const safeUser=`u.id,u.full_name,u.email,u.phone,u.role,u.branch_id,u.member_id,u.active,u.must_change_password,u.last_login,u.token_version,`+`(u.profile_photo_stored_name IS NOT NULL) AS has_profile_photo,b.name AS branch_name`;
 const metadata=req=>({ip:req.ip,userAgent:String(req.headers["user-agent"]||"").slice(0,250)});
 const strongPassword=p=>typeof p==="string"&&p.length>=8&&/[A-Z]/.test(p)&&/[a-z]/.test(p)&&/\d/.test(p)&&/[^A-Za-z0-9]/.test(p);
@@ -628,26 +647,35 @@ app.get("/api/health",asyncRoute(async(req,res)=>{
 }));
 app.post("/api/auth/login",loginLimiter,asyncRoute(async(req,res)=>{
   const email=String(req.body.email||"").trim().toLowerCase(), password=String(req.body.password||"");
-  const user=await one(`SELECT u.* FROM users u
-    LEFT JOIN members m ON m.id=u.member_id
-    WHERE LOWER(u.email)=$1 OR LOWER(COALESCE(m.email,''))=$1
-    ORDER BY CASE WHEN LOWER(u.email)=$1 THEN 0 ELSE 1 END
-    LIMIT 1`,[email]);
-  if(!user) { await audit({action:"LOGIN_FAILED",details:`Unknown account: ${email}`,...metadata(req)}); return res.status(401).json({error:"Invalid email or password"}); }
+  if(!email||!password)return res.status(400).json({error:"Email and password are required"});
+  // Prefer indexed email match first; only then fall back to member email.
+  let user=await one(`SELECT u.* FROM users u WHERE LOWER(u.email)=$1 LIMIT 1`,[email]);
+  if(!user){
+    user=await one(`SELECT u.* FROM users u
+      JOIN members m ON m.id=u.member_id
+      WHERE LOWER(COALESCE(m.email,''))=$1
+      LIMIT 1`,[email]);
+  }
+  if(!user) {
+    noteLoginFailure(req);
+    audit({action:"LOGIN_FAILED",details:`Unknown account: ${email}`,...metadata(req)}).catch(()=>{});
+    return res.status(401).json({error:"Invalid email or password"});
+  }
   if(!user.active) return res.status(403).json({error:"This account has been deactivated"});
   if(user.locked_until&&new Date(user.locked_until)>new Date()) return res.status(423).json({error:"Account temporarily locked. Try again later."});
   if(!(await bcrypt.compare(password,user.password_hash))) {
-    const attempts=user.failed_attempts+1, lock=attempts>=5?new Date(Date.now()+15*60000):null;
-    await query("UPDATE users SET failed_attempts=$1,locked_until=$2 WHERE id=$3",[attempts>=5?0:attempts,lock,user.id]);
-    await audit({userId:user.id,action:"LOGIN_FAILED",details:`Failed attempt ${attempts}`,...metadata(req)});
+    noteLoginFailure(req);
+    const attempts=Number(user.failed_attempts||0)+1, lock=attempts>=5?new Date(Date.now()+15*60000):null;
+    query("UPDATE users SET failed_attempts=$1,locked_until=$2 WHERE id=$3",[attempts>=5?0:attempts,lock,user.id]).catch(()=>{});
+    audit({userId:user.id,action:"LOGIN_FAILED",details:`Failed attempt ${attempts}`,...metadata(req)}).catch(()=>{});
     return res.status(401).json({error:attempts>=5?"Account locked for 15 minutes":"Invalid email or password"});
   }
-  await query("UPDATE users SET failed_attempts=0,locked_until=NULL,last_login=NOW() WHERE id=$1",[user.id]);
-  audit({userId:user.id,action:"LOGIN",details:"Successful login",...metadata(req)}).catch(()=>{});
+  // Respond immediately — workspaces load from /api/boot right after sign-in.
   const safeUser={id:user.id,email:user.email,full_name:user.full_name,role:user.role,member_id:user.member_id,must_change_password:user.must_change_password,has_profile_photo:Boolean(user.profile_photo_stored_name)};
-  const workspaces=await buildAvailableWorkspaces(user);
   res.cookie("sacco_session",token(user),{httpOnly:true,sameSite:"strict",secure:production,maxAge:8*60*60*1000,path:"/"});
-  res.json({ok:true,user:safeUser,permissions:permissions[user.role]||[],workspaces});
+  res.json({ok:true,user:safeUser,permissions:permissions[user.role]||[],workspaces:[]});
+  query("UPDATE users SET failed_attempts=0,locked_until=NULL,last_login=NOW() WHERE id=$1",[user.id]).catch(()=>{});
+  audit({userId:user.id,action:"LOGIN",details:"Successful login",...metadata(req)}).catch(()=>{});
 }));
 app.post("/api/auth/logout",auth,asyncRoute(async(req,res)=>{
   await audit({userId:req.user.id,action:"LOGOUT",details:"User signed out",...metadata(req)});

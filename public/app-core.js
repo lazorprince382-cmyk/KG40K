@@ -566,13 +566,13 @@ async function login(event) {
   const button=event.currentTarget.querySelector("button[type=submit]"); button.disabled=true; button.innerHTML=`${icons.lock} Signing in...`;
   try {
     const values=Object.fromEntries(new FormData(event.currentTarget));
-    const session=await api("/api/auth/login",{method:"POST",body:JSON.stringify(values),timeoutMs:30000});
+    const session=await api("/api/auth/login",{method:"POST",body:JSON.stringify(values),timeoutMs:20000});
     state.user=session.user; state.role=session.user.role; state.permissions=session.permissions||[];
     state.primaryRole=session.user.role; state.activeWorkspace=null; state.memberContext=false; state.executiveWorkspace=null;
     persistWorkspaceChoice(null);
     document.getElementById("app").innerHTML=`<div class="loading-screen"><div class="loading-mark"><div class="brand-mark">${icons.logo}</div>Opening your workspace<div class="spinner"></div></div></div>`;
     await refreshData(session.user,{skipCenter:true,lite:true});
-    const workspaces=session.workspaces?.length?session.workspaces:availableWorkspaces();
+    const workspaces=(session.workspaces&&session.workspaces.length)?session.workspaces:availableWorkspaces();
     state.workspaces=workspaces;
     if(workspaceNeedsPicker(workspaces)){
       workspacePickerView(workspaces);

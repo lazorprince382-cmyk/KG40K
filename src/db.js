@@ -23,10 +23,11 @@ const ROLES = [
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  max: 15,
-  idleTimeoutMillis: 30000,
-  // Neon / hosted Postgres can sleep; allow a cold wake instead of failing login with a generic 500.
-  connectionTimeoutMillis: 30000
+  max: 10,
+  idleTimeoutMillis: 20000,
+  // Fail reasonably fast when the DB is asleep/overloaded (Neon cold start usually <10s).
+  connectionTimeoutMillis: 12000,
+  options: "-c statement_timeout=15000"
 });
 
 function isTransientDbError(error) {
