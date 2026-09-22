@@ -101,10 +101,83 @@
       <div><small>${esc(meta.name)}</small><strong>${count}</strong><em>${count===1?"document on file":"documents on file"}</em></div>
     </button>`;
   }
+  function documentSearchBar(value=""){
+    return `<div class="legal-doc-search" data-legal-doc-search-bar>
+      <label class="legal-doc-search-field"><span>${icons.search}</span>
+        <input type="search" name="legalDocQuery" value="${esc(value)}" placeholder="Search title, type, reference, department, file name..." autocomplete="off">
+      </label>
+      <button type="button" class="button primary" data-legal-doc-search>${icons.search}Search documents</button>
+    </div>`;
+  }
+  async function runLegalDocumentSearch(rawTerm){
+    const term=String(rawTerm||"").trim();
+    if(term.length<2){toast("Type at least 2 characters to search documents.");return;}
+    const q=term.toLowerCase();
+    const local=(L().documents||[]).filter(d=>{
+      const hay=[d.title,d.reference,d.documentType,d.fileName,d.departmentName,d.departmentCode,d.department,d.status,d.version,audienceLabel(d)].join(" ").toLowerCase();
+      return hay.includes(q);
+    }).map(d=>{
+      const code=String(d.departmentCode||d.department||"").toLowerCase();
+      const shelf=LIBRARY_DEPTS.find(x=>x.code===code);
+      return {
+        type:"Document",
+        id:String(d.id),
+        reference:d.reference,
+        title:d.title,
+        detail:`${d.departmentName||shelf?.name||code||"Organization"} · ${d.documentType} · ${d.status}`,
+        target:shelf?.page||"legal-documents",
+        hasFile:Boolean(d.hasFile),
+        documentType:d.documentType,
+        department:d.departmentName||shelf?.name||"",
+        fileName:d.fileName,
+        version:d.version,
+        status:d.status
+      };
+    });
+    let remote=[];
+    try{remote=((await api(`/api/legal/search?q=${encodeURIComponent(term)}`)).results||[]).filter(x=>String(x.type||"")==="Document");}catch(error){if(!local.length)throw error;}
+    const byKey=new Map();
+    [...local,...remote].forEach(row=>{
+      const key=String(row.id||row.reference||"");
+      if(!key)return;
+      const prev=byKey.get(key)||{};
+      byKey.set(key,{...prev,...row,hasFile:Boolean(prev.hasFile||row.hasFile)});
+    });
+    state.legalSearchTerm=term;
+    state.legalSearchResults=[...byKey.values()];
+    state.page="legal-search";
+    render();
+  }
+  function documentSearchResults(){
+    const term=state.legalSearchTerm||"";
+    const rows=state.legalSearchResults||[];
+    const docs=rows.filter(x=>String(x.type||"Document")==="Document");
+    const other=rows.filter(x=>String(x.type||"")!=="Document");
+    return `${documentSearchBar(term)}
+      ${panel("Document matches",`${docs.length} document${docs.length===1?"":"s"} found${term?` for “${esc(term)}”`:""}`,
+        docs.length?`<div class="legal-document-list">${docs.map(x=>`<article class="legal-document-card">
+          <div class="legal-document-copy"><small>${esc(x.reference||"")} · ${esc(x.documentType||"Document")}${x.version?` · v${esc(x.version)}`:""}${x.department?` · ${esc(x.department)}`:""}</small>
+            <strong>${esc(x.title)}</strong>
+            <span>${x.status?badge(x.status):""}<i>${esc(x.detail||"")}</i></span>
+            <p>${esc(x.fileName||(x.hasFile?"File on record":"No file uploaded"))}</p>
+          </div>
+          <div class="document-actions legal-document-actions">
+            ${x.hasFile&&x.id?`<a class="mini-btn" href="/api/documents/${esc(x.id)}/view" target="_blank" title="View">${icons.eye}<span>View</span></a>
+            <a class="mini-btn" href="/api/documents/${esc(x.id)}/download" title="Download">${icons.download}<span>Download</span></a>`:`<span class="status pending">No file</span>`}
+            ${x.target?`<button class="mini-btn" data-dept-target="${esc(x.target)}" title="Open library">${icons.file}<span>Open shelf</span></button>`:""}
+            ${canManageDocuments()&&x.id?`<button class="mini-btn" data-legal-document="${esc(x.id)}" title="Edit">${icons.refresh}<span>Edit</span></button>`:""}
+          </div>
+        </article>`).join("")}</div>`:empty(term?`No documents match “${term}”.`:"Search by document title, type, reference, department, or file name.")
+      )}
+      ${other.length?panel("Other Legal matches",`${other.length} related record${other.length===1?"":"s"}`,
+        table(["Type","Reference","Record","Detail","Open"],other.map(x=>`<tr><td>${badge(x.type)}</td><td><strong>${esc(x.reference)}</strong></td><td>${esc(x.title)}</td><td>${esc(x.detail)}</td><td><button class="mini-btn" data-dept-target="${esc(x.target)}">${icons.eye}</button></td></tr>`).join(""))
+      ):""}`;
+  }
   D.dashboards.legal=()=>{
     const shelves=libraryRows();
     return `${D.dashboardGreeting()}<div class="legal-command">
       <div class="legal-confidential">${icons.file}<div><strong>Organization document registry</strong></div><b>REGISTRY</b></div>
+      ${documentSearchBar(state.legalSearchTerm||"")}
       <div class="legal-stats">${shelves.map(departmentShelf).join("")}</div>
     </div>`;
   };
@@ -112,12 +185,12 @@
   function departmentDocumentsView(code){
     const meta=libraryMeta(code);
     const rows=docsForPage(meta.page);
-    return panel(`${meta.name} documents`,`${rows.length} document${rows.length===1?"":"s"} · ${esc(meta.note||"Department documents")}`,documentTable(rows));
+    return `${documentSearchBar(state.legalSearchTerm||"")}${panel(`${meta.name} documents`,`${rows.length} document${rows.length===1?"":"s"} · ${esc(meta.note||"Department documents")}`,documentTable(rows))}`;
   }
   LIBRARY_DEPTS.forEach(meta=>{D.views[meta.page]=()=>departmentDocumentsView(meta.code);});
-  D.views["legal-documents"]=()=>panel("All department documents","Every file held in the organization document registry",documentTable(L().documents||[]));
+  D.views["legal-documents"]=()=>`${documentSearchBar(state.legalSearchTerm||"")}${panel("All department documents","Every file held in the organization document registry",documentTable(L().documents||[]))}`;
   D.views["legal-notifications"]=()=>panel("Document notifications","Uploads, publication and registry alerts",`<div class="dept-notification-list large">${(L().notifications||[]).map(x=>`<button data-dept-target="${esc(x.target||"dashboard")}"><span class="${esc(x.level)}">${icons[x.level==="success"?"check":x.level==="info"?"info":"bell"]}</span><div><strong>${esc(x.title)}</strong><small>${esc(relativeTime(x.createdAt||x.time))}</small></div></button>`).join("")||empty("No alerts yet.")}</div>`);
-  D.views["legal-search"]=()=>panel("Document search results",`${(state.legalSearchResults||[]).length} records found`,table(["Type","Reference","Record","Detail","Open"],(state.legalSearchResults||[]).map(x=>`<tr><td>${badge(x.type)}</td><td><strong>${esc(x.reference)}</strong></td><td>${esc(x.title)}</td><td>${esc(x.detail)}</td><td><button class="mini-btn" data-dept-target="${esc(x.target)}">${icons.eye}</button></td></tr>`).join("")));
+  D.views["legal-search"]=()=>documentSearchResults();
   function caseTable(rows,action=true){return table(["Case","Subject / category","Department","Risk","Officer","Hearing","Status","Action"],rows.map(x=>`<tr><td><strong>${esc(x.caseNumber)}</strong></td><td class="wide-cell"><b>${esc(x.subject)}</b><small>${esc(x.category)}  -  ${esc(x.description)}</small></td><td>${esc(x.department||"Organization")}</td><td>${risk(x.riskLevel)}</td><td>${esc(x.assignedOfficer||"Unassigned")}</td><td>${date(x.nextHearingAt,true)}</td><td>${badge(x.status)}</td><td>${action?`<button class="mini-btn" data-legal-case="${x.id}">${icons.refresh}</button>`:" - "}</td></tr>`).join(""));}
   function contractTable(rows,action=true){return table(["Contract","Parties / department","Value","Start / end","Responsible","Status","Action"],rows.map(x=>`<tr><td class="wide-cell"><strong>${esc(x.contractNumber)}  -  ${esc(x.title)}</strong><small>${esc(x.contractType)}</small></td><td>${esc(x.parties)}<small>${esc(x.department||"Organization")}</small></td><td><strong>${money(x.contractValue)}</strong></td><td>${date(x.startsOn)}<small>Ends ${date(x.endsOn)}</small></td><td>${esc(x.responsibleOfficer||"Unassigned")}</td><td>${badge(x.status)}</td><td>${action&&["draft","submitted","under_review","information_requested"].includes(x.status)?`<button class="mini-btn" data-legal-contract="${x.id}">${icons.eye}</button>`:" - "}</td></tr>`).join(""));}
   D.views["legal-cases"]=()=>panel("Legal case register","Legacy case register",caseTable(L().cases,true));
@@ -135,8 +208,8 @@
   D.settings.legal=()=>`<div class="audit-settings-grid">${panel("Document authority","Central registry for all departments",`<div class="audit-permission-list"><div>${icons.check}<span><b>Upload documents for any department</b><small>Authority level ${L().access.authorityLevel}</small></span></div><div>${icons.check}<span><b>Set visibility</b><small>All departments, selected departments, or members</small></span></div></div>`)}${panel("Bio-data & settings","Member records stay available here",`<div class="audit-readonly-note">${icons.users}<div><strong>Bio Data remains in this workspace</strong><p>Member registration and bio-data stay under Legal Department administration.</p></div></div>`)}</div>`;
   D.actions.legal=()=>{
     const code=pageDeptCode();
-    if(state.page==="dashboard"||state.page==="legal-documents"||code){
-      return `<div class="head-actions"><button class="button primary" data-dept-modal="document">${icons.plus}${code?`Add ${libraryMeta(code).name} document`:"Upload document"}</button></div>`;
+    if(state.page==="dashboard"||state.page==="legal-documents"||state.page==="legal-search"||code){
+      return `<div class="head-actions"><button class="button secondary" data-legal-focus-search type="button">${icons.search}Search documents</button><button class="button primary" data-dept-modal="document">${icons.plus}${code?`Add ${libraryMeta(code).name} document`:"Upload document"}</button></div>`;
     }
     return "";
   };
@@ -266,8 +339,31 @@
   D.quick.legal=quick;
   D.binders.push(cfg=>{
     if(cfg.key!=="legal")return;
-    document.querySelectorAll("[data-legal-document]").forEach(x=>x.addEventListener("click",()=>documentForm(L().documents.find(d=>String(d.id)===x.dataset.legalDocument))));
-    document.querySelectorAll("[data-legal-access]").forEach(x=>x.addEventListener("click",()=>documentForm(L().documents.find(d=>String(d.id)===x.dataset.legalAccess),{},{focusAccess:true})));
+    document.querySelectorAll("[data-legal-document]").forEach(x=>x.addEventListener("click",()=>{
+      const doc=L().documents.find(d=>String(d.id)===String(x.dataset.legalDocument));
+      if(!doc)return toast("Open the document shelf first, then edit from there.");
+      documentForm(doc);
+    }));
+    document.querySelectorAll("[data-legal-access]").forEach(x=>x.addEventListener("click",()=>{
+      const doc=L().documents.find(d=>String(d.id)===String(x.dataset.legalAccess));
+      if(!doc)return toast("Open the document shelf first, then change who can see it.");
+      documentForm(doc,{},{focusAccess:true});
+    }));
+    const runFromBar=()=>{
+      const input=document.querySelector("[data-legal-doc-search-bar] input[name='legalDocQuery']");
+      runLegalDocumentSearch(input?.value||state.legalSearchTerm||"").catch(error=>toast(error.message));
+    };
+    document.querySelectorAll("[data-legal-doc-search]").forEach(btn=>btn.addEventListener("click",runFromBar));
+    document.querySelectorAll("[data-legal-focus-search]").forEach(btn=>btn.addEventListener("click",()=>{
+      const input=document.querySelector("[data-legal-doc-search-bar] input[name='legalDocQuery']")||document.getElementById("global-search");
+      if(input){input.focus();input.select?.();}
+      else runFromBar();
+    }));
+    document.querySelectorAll("[data-legal-doc-search-bar] input[name='legalDocQuery']").forEach(input=>{
+      input.addEventListener("keydown",event=>{
+        if(event.key==="Enter"){event.preventDefault();runFromBar();}
+      });
+    });
   });
   D.binders.push(cfg=>{if(cfg.key!=="legal")return;document.querySelectorAll("[data-legal-contract]").forEach(x=>x.addEventListener("click",async()=>{const decision=prompt("Decision: approve, reject, more_information","approve");if(!decision)return;const comment=prompt("Legal review note:","Legal requirements verified.")||"";try{await api(`/api/legal/contracts/${x.dataset.legalContract}/decision`,{method:"POST",body:JSON.stringify({decision,comment})});await reload("Contract review recorded.");}catch(error){toast(error.message);}}));document.querySelectorAll("[data-legal-case]").forEach(x=>x.addEventListener("click",async()=>{const status=prompt("Case status: open, investigation, hearing, appeal, resolved, closed","investigation");if(!status)return;const note=prompt("Timeline note or decision:","")||"";try{await api(`/api/legal/cases/${x.dataset.legalCase}/update`,{method:"POST",body:JSON.stringify({status,note})});await reload("Case timeline updated.");}catch(error){toast(error.message);}}));document.querySelectorAll("[data-legal-complaint]").forEach(x=>x.addEventListener("click",async()=>{const status=prompt("Complaint stage: submitted, legal_review, investigation, recommendation, decision, closed","legal_review");if(!status)return;const comment=prompt("Recommendation or decision note:","")||"";try{await api(`/api/legal/complaints/${x.dataset.legalComplaint}/advance`,{method:"POST",body:JSON.stringify({status,comment})});await reload("Complaint stage updated.");}catch(error){toast(error.message);}}));});
 })();

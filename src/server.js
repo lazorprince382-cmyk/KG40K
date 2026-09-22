@@ -3665,18 +3665,34 @@ app.get("/api/legal/command-center",auth,requireLegal("view"),asyncRoute(async(r
 app.get("/api/legal/search",auth,requireLegal("view"),asyncRoute(async(req,res)=>{
   const term=String(req.query.q||"").trim();if(term.length<2)return res.json({results:[]});const like=`%${term}%`;
   const results=await query(`SELECT * FROM (
-    SELECT 'Document' AS type,doc.reference,doc.title,COALESCE(d.name,'Organization')||' - '||doc.document_type||' - '||doc.status AS detail,
+    SELECT 'Document' AS type,doc.id::text AS id,doc.reference,doc.title,
+      COALESCE(d.name,'Organization')||' · '||doc.document_type||' · '||doc.status AS detail,
       CASE d.code
         WHEN 'credits' THEN 'docs-credits' WHEN 'investment' THEN 'docs-investment' WHEN 'finance' THEN 'docs-finance'
         WHEN 'welfare' THEN 'docs-welfare' WHEN 'supervisory' THEN 'docs-supervisory' WHEN 'audit' THEN 'docs-audit'
-        WHEN 'executive' THEN 'docs-executive' ELSE 'legal-documents' END AS target
+        WHEN 'executive' THEN 'docs-executive' WHEN 'general' THEN 'docs-general' ELSE 'legal-documents' END AS target,
+      EXISTS(SELECT 1 FROM organization_document_versions v WHERE v.document_id=doc.id) AS "hasFile",
+      doc.document_type AS "documentType",
+      COALESCE(d.name,'Organization') AS department,
+      COALESCE(d.code,'') AS "departmentCode",
+      doc.file_name AS "fileName",
+      doc.version,
+      doc.status
       FROM organization_documents doc LEFT JOIN departments d ON d.id=doc.department_id
-      WHERE doc.status<>'archived' AND (doc.reference ILIKE $1 OR doc.title ILIKE $1 OR doc.document_type ILIKE $1 OR COALESCE(doc.file_name,'') ILIKE $1 OR COALESCE(d.name,'') ILIKE $1)
-    UNION ALL SELECT 'Member Bio' AS type,m.member_number,m.full_name,COALESCE(m.phone,'')||' - '||COALESCE(b.home_district,m.address,'')||' - '||COALESCE(b.bio_status,'pending'),'legal-bio-data'
+      WHERE doc.status<>'archived' AND (
+        doc.reference ILIKE $1 OR doc.title ILIKE $1 OR doc.document_type ILIKE $1
+        OR COALESCE(doc.file_name,'') ILIKE $1 OR COALESCE(d.name,'') ILIKE $1 OR COALESCE(d.code,'') ILIKE $1
+        OR COALESCE(doc.status,'') ILIKE $1 OR COALESCE(doc.version,'') ILIKE $1
+      )
+    UNION ALL SELECT 'Member Bio' AS type,m.id::text AS id,m.member_number,m.full_name,
+      COALESCE(m.phone,'')||' · '||COALESCE(b.home_district,m.address,'')||' · '||COALESCE(b.bio_status,'pending'),
+      'legal-bio-data',false,NULL,NULL,NULL,NULL,NULL,NULL
       FROM members m LEFT JOIN member_bio_data b ON b.member_id=m.id
-      WHERE m.member_number ILIKE $1 OR m.full_name ILIKE $1 OR m.national_id ILIKE $1 OR m.phone ILIKE $1
+      WHERE m.deleted_at IS NULL AND (m.member_number ILIKE $1 OR m.full_name ILIKE $1 OR m.national_id ILIKE $1 OR m.phone ILIKE $1
         OR COALESCE(m.email,'') ILIKE $1 OR COALESCE(m.occupation,'') ILIKE $1 OR COALESCE(m.address,'') ILIKE $1
-        OR COALESCE(b.home_district,'') ILIKE $1 OR COALESCE(b.village,'') ILIKE $1 OR COALESCE(b.emergency_contact_name,'') ILIKE $1  ) legal_results LIMIT 80`,[like]);res.json({results:results.rows});
+        OR COALESCE(b.home_district,'') ILIKE $1 OR COALESCE(b.village,'') ILIKE $1 OR COALESCE(b.emergency_contact_name,'') ILIKE $1)
+  ) legal_results ORDER BY type,reference LIMIT 100`,[like]);
+  res.json({results:results.rows});
 }));
 app.post("/api/legal/cases",auth,requireLegal("create"),asyncRoute(async(req,res)=>{
   const b=req.body;if(!b.category||!b.subject||!b.description||!["low","medium","high","critical"].includes(b.riskLevel))
