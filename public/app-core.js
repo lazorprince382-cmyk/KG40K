@@ -38,7 +38,9 @@ const icons = {
   lock: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>`,
   building: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 10h1m4 0h1m-6 4h1m4 0h1m-4 7v-4h2v4"/></svg>`,
   refresh: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 6v5h-5M4 18v-5h5"/><path d="M18 9a7 7 0 0 0-12-2L4 11m16 2-2 4a7 7 0 0 1-12 0"/></svg>`
-  ,trash: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M9 7V4h6v3M6 7l1 14h10l1-14M10 11v6M14 11v6"/></svg>`
+  ,trash: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M9 7V4h6v3M6 7l1 14h10l1-14M10 11v6M14 11v6"/></svg>`,
+  maximize: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 3H5a2 2 0 0 0-2 2v4M15 3h4a2 2 0 0 1 2 2v4M9 21H5a2 2 0 0 1-2-2v-4M15 21h4a2 2 0 0 0 2-2v-4"/></svg>`,
+  minimize: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 9H5V5M15 9h4V5M9 15H5v4M15 15h4v4"/></svg>`
 };
 
 const roles = ["Member","Executive Officer","Finance Officer","Credits Officer","Investment Officer","Welfare Officer","Legal Officer","Auditor","Supervisory Officer","System Admin"];
@@ -4238,6 +4240,26 @@ function openModal(type) {
 }
 function closeModal() { document.getElementById("modal-backdrop")?.remove(); }
 function closeDocumentViewer(){ document.querySelector(".document-viewer-backdrop")?.remove(); }
+function toggleDocumentViewerMaximize(){
+  const backdrop=document.querySelector(".document-viewer-backdrop");
+  const modal=backdrop?.querySelector(".document-viewer-modal");
+  if(!backdrop||!modal)return;
+  const maximized=modal.classList.toggle("is-maximized");
+  backdrop.classList.toggle("is-maximized",maximized);
+  backdrop.querySelectorAll("[data-document-viewer-maximize]").forEach(button=>{
+    button.setAttribute("aria-label",maximized?"Restore preview size":"Maximize preview");
+    button.title=maximized?"Restore":"Maximize";
+    const label=button.querySelector("[data-maximize-label]");
+    if(label)label.textContent=maximized?"Restore":"Maximize";
+    const iconHtml=maximized?icons.minimize:icons.maximize;
+    if(label){
+      button.querySelector("svg")?.remove();
+      button.insertAdjacentHTML("afterbegin",iconHtml);
+    }else button.innerHTML=iconHtml;
+  });
+  const frame=modal.querySelector(".document-viewer-frame");
+  if(frame?.dataset.previewHref)renderSecurePreview(frame.dataset.previewHref,frame.dataset.previewTitle||"Document");
+}
 function canManageOrganizationDocuments(){
   return ["Legal Officer","Executive Officer","System Admin"].includes(state.role)
     ||Boolean(state.legal?.access?.canEdit||state.legal?.access?.canCreate);
@@ -4262,8 +4284,9 @@ function openSecureContentViewer(contentHref,title,{downloadHref=null,replaceMod
   const del=documentId&&canManageOrganizationDocuments()
     ?`<button class="button secondary document-viewer-delete" data-viewer-delete-document="${escapeHtml(documentId)}" data-document-title="${escapeHtml(documentTitle||title||"this document")}">${icons.trash}Delete</button>`
     :"";
-  document.body.insertAdjacentHTML("beforeend",`<div class="modal-backdrop document-viewer-backdrop" id="document-viewer-backdrop"><div class="modal document-viewer-modal" role="dialog" aria-modal="true" aria-labelledby="document-viewer-title"><div class="modal-head"><div><h2 id="document-viewer-title">${safeTitle}</h2><p>In-app document preview</p></div><button class="modal-close" data-document-viewer-close aria-label="Close preview">${icons.x}</button></div><div class="document-viewer-frame" aria-live="polite"><div class="document-viewer-loading"><span></span><strong>Loading document…</strong></div></div><div class="document-viewer-actions"><span>${icons.shield} Viewing stays inside the system</span>${dl}${del}<button class="button primary" data-document-viewer-close>Close</button></div></div></div>`);
+  document.body.insertAdjacentHTML("beforeend",`<div class="modal-backdrop document-viewer-backdrop" id="document-viewer-backdrop"><div class="modal document-viewer-modal" role="dialog" aria-modal="true" aria-labelledby="document-viewer-title"><div class="modal-head"><div><h2 id="document-viewer-title">${safeTitle}</h2><p>In-app document preview</p></div><div class="document-viewer-head-actions"><button class="modal-close document-viewer-maximize" data-document-viewer-maximize type="button" title="Maximize" aria-label="Maximize preview">${icons.maximize}</button><button class="modal-close" data-document-viewer-close aria-label="Close preview">${icons.x}</button></div></div><div class="document-viewer-frame" aria-live="polite"><div class="document-viewer-loading"><span></span><strong>Loading document…</strong></div></div><div class="document-viewer-actions"><span>${icons.shield} Viewing stays inside the system</span>${dl}${del}<button class="button secondary" data-document-viewer-maximize type="button">${icons.maximize}<span data-maximize-label>Maximize</span></button><button class="button primary" data-document-viewer-close>Close</button></div></div></div>`);
   document.querySelectorAll("[data-document-viewer-close]").forEach(button=>button.addEventListener("click",closeDocumentViewer));
+  document.querySelectorAll("[data-document-viewer-maximize]").forEach(button=>button.addEventListener("click",toggleDocumentViewerMaximize));
   document.querySelectorAll("[data-viewer-delete-document]").forEach(button=>button.addEventListener("click",()=>deleteOrganizationDocument(button.dataset.viewerDeleteDocument,button.dataset.documentTitle)));
   document.getElementById("document-viewer-backdrop")?.addEventListener("click",event=>{if(event.target.id==="document-viewer-backdrop")closeDocumentViewer();});
   renderSecurePreview(contentHref,title||"Document");
@@ -4271,6 +4294,8 @@ function openSecureContentViewer(contentHref,title,{downloadHref=null,replaceMod
 function renderDocumentPreview(href,title) { return renderSecurePreview(href.replace(/\/view$/,"/content"),title); }
 async function renderSecurePreview(contentHref,title) {
   const host=document.querySelector(".document-viewer-frame");if(!host)return;
+  host.dataset.previewHref=contentHref;
+  host.dataset.previewTitle=title||"Document";
   try {
     const response=await fetch(contentHref,{credentials:"same-origin"});
     if(!response.ok){
@@ -4287,7 +4312,7 @@ async function renderSecurePreview(contentHref,title) {
       if(!host.isConnected)return;host.innerHTML=`<div class="pdf-preview-toolbar"><strong>${escapeHtml(title)}</strong><span>${pdf.numPages} page${pdf.numPages===1?"":"s"}</span></div><div class="pdf-preview-pages"></div>`;
       const pages=host.querySelector(".pdf-preview-pages"),pixelRatio=Math.min(window.devicePixelRatio||1,2);
       for(let number=1;number<=pdf.numPages;number++) {
-        if(!host.isConnected)return;const page=await pdf.getPage(number),base=page.getViewport({scale:1}),available=Math.max(280,Math.min(980,host.clientWidth-42)),scale=Math.min(1.7,available/base.width),viewport=page.getViewport({scale});
+        if(!host.isConnected)return;const page=await pdf.getPage(number),base=page.getViewport({scale:1}),available=Math.max(280,Math.min(host.classList.contains("report-preview-frame")?980:1400,host.clientWidth-42)),scale=Math.min(2.1,available/base.width),viewport=page.getViewport({scale});
         const sheet=document.createElement("article"),label=document.createElement("span"),canvas=document.createElement("canvas"),context=canvas.getContext("2d",{alpha:false});label.textContent=`Page ${number} of ${pdf.numPages}`;sheet.className="pdf-preview-page";canvas.width=Math.floor(viewport.width*pixelRatio);canvas.height=Math.floor(viewport.height*pixelRatio);canvas.style.width=`${Math.floor(viewport.width)}px`;canvas.style.height=`${Math.floor(viewport.height)}px`;sheet.append(label,canvas);pages.appendChild(sheet);
         await page.render({canvasContext:context,viewport,transform:pixelRatio===1?null:[pixelRatio,0,0,pixelRatio,0,0]}).promise;
       }
