@@ -124,6 +124,8 @@ async function loadWelfareStanding() {
     .reduce((sum, row) => sum + Number(row.contributedSince || 0), 0);
   const currentStandingAfterAssistance = Math.max(0, grossCollectedSince - historicalAssistancePaid);
 
+  const enrichedStanding = enrichedMembers.filter((row) => !row.excluded && Number(row.contributedSince) > 0);
+
   return {
     sinceDate,
     sinceLabel,
@@ -134,8 +136,8 @@ async function loadWelfareStanding() {
     collectedAllTime: grossCollectedSince,
     grossCollectedSince,
     currentStandingAfterAssistance,
-    contributionRows: allOnRegister.length,
-    membersContributing: standingMembers.length,
+    contributionRows: enrichedStanding.length,
+    membersContributing: enrichedStanding.length,
     assistancePaid: historicalAssistancePaid,
     historicalAssistancePaid,
     closingBalance: currentStandingAfterAssistance,
@@ -145,7 +147,7 @@ async function loadWelfareStanding() {
     historicalSharePerMember,
     note: "Welfare standing since June 2024. Joshua Ssewanyana appears only in assistance history.",
     byMember: enrichedMembers,
-    standingMembers: enrichedMembers.filter((row) => !row.excluded && Number(row.contributedSince) > 0),
+    standingMembers: enrichedStanding,
     newMembers: enrichedMembers.filter((row) => row.isVicent || (row.isNewMember && !isOketcho(row.member))),
   };
 }

@@ -1254,7 +1254,10 @@ function executiveModuleView(module) {
       ?currentStanding
       :Math.max(0,sinceTotal-assistancePaid);
     const pending=Number(e.welfare?.pending||e.welfareProgress?.pendingRequests||0);
-    const standingRows=standingList.slice(0,40).map(x=>[
+    const standingRows=standingList
+      .slice()
+      .sort((a,b)=>String(a.member||"").localeCompare(String(b.member||"")))
+      .map(x=>[
       x.member,
       x.memberNumber||"",
       money(x.contributedSince||x.collected||0),
@@ -1485,7 +1488,10 @@ function financeWelfareStandingSection(f){
   const currentTotal=Number.isFinite(currentStanding)&&currentStanding>=0
     ?currentStanding
     :Math.max(0,sinceTotal-assistancePaid);
-  const standingRows=standingList.slice(0,40).map(x=>[
+  const standingRows=standingList
+    .slice()
+    .sort((a,b)=>String(a.member||"").localeCompare(String(b.member||"")))
+    .map(x=>[
     x.member,
     x.memberNumber||"",
     money(x.contributedSince||x.collected||0),
