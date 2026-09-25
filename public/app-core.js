@@ -1219,7 +1219,15 @@ function executiveDepartmentsView() {
     ["audit","Audit Department","Financial integrity","Open audit issues",e.audit.open,"Resolved issues",e.audit.resolved,"executive-audit","audit"],
     ["supervisory","Supervisory Department","Oversight and accountability","Pending follow-ups",e.supervisory.followups,"Recommendations",e.supervisory.recommendations,"executive-supervisory","supervisory"]
   ];
-  return `<div class="exec-department-cards" style="grid-template-columns:repeat(auto-fill,minmax(280px,1fr));margin-bottom:16px">${modules.map(m=>`<article class="exec-department-card"><div class="exec-dept-title"><span class="${m[0]==="finance"?"green":m[0]==="credits"?"blue":m[0]==="investment"?"violet":m[0]==="welfare"?"orange":m[0]==="legal"?"red":m[0]==="audit"?"teal":m[0]==="supervisory"?"amber":"blue"}">${icons[departmentIcon(m[0])]}</span><div><h3>${m[1]}</h3><p>${m[2]}</p></div></div><div class="exec-dept-values"><div><small>${m[3]}</small><strong>${m[4]}</strong><small>${m[5]}</small><strong>${m[6]}</strong></div></div><div class="exec-dept-actions"><button type="button" data-executive-page="${m[7]}">View summary <b>&gt;</b></button>${m[8]?`<button type="button" class="primary" data-executive-workspace="${m[8]}">Open desk <b>&gt;</b></button>`:""}</div></article>`).join("")}</div>`;
+  return `<div class="exec-department-cards" style="grid-template-columns:repeat(auto-fill,minmax(280px,1fr));margin-bottom:16px">${modules.map(m=>{
+    const metrics=[[m[3],m[4]],[m[5],m[6]]].filter(([,value])=>{
+      if(value==null||value==="")return false;
+      if(typeof value==="number")return value!==0;
+      const text=String(value).replace(/,/g,"").trim();
+      return !/^(UGX\s*)?0+(\.0+)?$/.test(text);
+    });
+    return `<article class="exec-department-card"><div class="exec-dept-title"><span class="${m[0]==="finance"?"green":m[0]==="credits"?"blue":m[0]==="investment"?"violet":m[0]==="welfare"?"orange":m[0]==="legal"?"red":m[0]==="audit"?"teal":m[0]==="supervisory"?"amber":"blue"}">${icons[departmentIcon(m[0])]}</span><div><h3>${m[1]}</h3><p>${m[2]}</p></div></div>${metrics.length?`<div class="exec-dept-values"><div>${metrics.map(([label,value])=>`<small>${label}</small><strong>${value}</strong>`).join("")}</div></div>`:""}<div class="exec-dept-actions"><button type="button" data-executive-page="${m[7]}">View summary <b>&gt;</b></button>${m[8]?`<button type="button" class="primary" data-executive-workspace="${m[8]}">Open desk <b>&gt;</b></button>`:""}</div></article>`;
+  }).join("")}</div>`;
 }
 function executiveModuleView(module) {
   const e=state.executive;
@@ -1460,24 +1468,12 @@ function financeDashboardView() {
     ${financePendingEntriesWidget(f)}
     ${financeSubscriptionProgressWidget(f)}
     ${financeWelfareStandingSection(f)}
-    ${financeHiddenPanelsSection(f)}
     <div class="finance-dashboard-grid">
       ${financeApprovalWidget(f)}
       ${financeIncomeWidget(f)}
-      ${financeExpenseWidget(f)}
     </div>
-    <div class="finance-lower-grid finance-lower-notifications">${financeNotificationsWidget(f)}${financeCashPositionWidget(f)}</div>
+    <div class="finance-lower-grid">${financeCashPositionWidget(f)}</div>
     ${financeQuickPanel()}`;
-}
-function financeHiddenPanelsSection(f){
-  if(!f)return "";
-  const open=state.financePanelOpen||{};
-  const panels=[
-    ["invoices","Invoices","Supplier invoices and liabilities",financeInvoicesView()],
-    ["assets","Assets","Organization asset register",financeAssetsView()],
-    ["reports","Reports","Financial reports and statements",financeReportsView()]
-  ];
-  return `<div class="finance-hidden-panels">${panels.map(([key,title,subtitle,body])=>welfareStandingReveal(`finance-${key}`,title,subtitle,body,Boolean(open[key]))).join("")}</div>`;
 }
 function financeWelfareStandingSection(f){
   const standing=f.welfareStanding||{};
@@ -1790,7 +1786,7 @@ function financeInvoicesView() {
 function financeBudgetsView() {
   const f=state.finance;
   const canEdit=Boolean(f.access?.canEdit||f.access?.canCreate);
-  return `<div class="finance-budget-cards">${f.budgets.map(b=>`<article class="${b.utilization>=100?"danger":b.utilization>=80?"warning":""}"><div><span>${b.department}</span>${status(b.status)}</div><h3>${money(b.allocated)}</h3><p>Used ${money(b.used)} - Remaining ${money(b.remaining)}</p>${progress("Budget utilization",`${b.utilization}%`,Math.min(100,b.utilization),b.utilization>=90?"amber":"lime")}<small>${b.utilization>=100?"Budget exceeded — spending must stop":b.utilization>=90?"Critical: 90% threshold reached":b.utilization>=80?"Warning: 80% threshold reached":"Within approved budget"}</small>${canEdit?`<div class="finance-account-actions"><button class="danger-action" data-finance-budget-delete="${b.id}">Delete budget</button></div>`:""}</article>`).join("")||`<div class="exec-empty">No department budgets for this period.</div>`}</div>`;
+  return `<div class="finance-budget-cards">${f.budgets.map(b=>`<article class="${b.utilization>=100?"danger":b.utilization>=80?"warning":""}"><div><span>${b.department}</span></div><h3>${money(b.allocated)}</h3><p>Used ${money(b.used)} - Remaining ${money(b.remaining)}</p>${progress("Budget utilization",`${b.utilization}%`,Math.min(100,b.utilization),b.utilization>=90?"amber":"lime")}<small>${b.utilization>=100?"Budget exceeded — spending must stop":b.utilization>=90?"Critical: 90% threshold reached":b.utilization>=80?"Warning: 80% threshold reached":"Within approved budget"}</small>${canEdit?`<div class="finance-account-actions"><button class="danger-action" data-finance-budget-delete="${b.id}">Delete budget</button></div>`:""}</article>`).join("")||`<div class="exec-empty">No department budgets for this period.</div>`}</div>`;
 }
 function financeBankView() {
   const f=state.finance;
@@ -3916,13 +3912,6 @@ function bind() {
     event.preventDefault();
     event.stopPropagation();
     const key=el.dataset.welfareStandingToggle||"finance";
-    if(key.startsWith("finance-")&&key!=="finance"){
-      if(!state.financePanelOpen)state.financePanelOpen={};
-      const panel=key.slice("finance-".length);
-      state.financePanelOpen[panel]=!Boolean(state.financePanelOpen[panel]);
-      render();
-      return;
-    }
     if(!state.welfareStandingOpen)state.welfareStandingOpen={};
     state.welfareStandingOpen[key]=!Boolean(state.welfareStandingOpen[key]);
     render();
