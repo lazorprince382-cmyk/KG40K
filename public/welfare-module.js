@@ -18,21 +18,24 @@
   const stat=(label,value,iconName,tone,note,target)=>{const payers=target==="welfare-month-payers";return `<button class="welfare-stat ${tone}" ${payers?"data-welfare-month-payers=\"1\"":`data-dept-target="${target}"`}><span>${icons[iconName]}</span><div><small>${label}</small><strong>${value}</strong><em>${note}</em></div></button>`;};
   function requestTable(rows,actions=false){return table(["Request","Member","Category","Amount","Urgency","Officer","Status","Action"],rows.map(x=>`<tr><td><strong>${esc(x.reference)}</strong><small>${date(x.createdAt)}</small></td><td>${esc(x.member)}<small>${esc(x.memberNumber)}</small></td><td>${esc(x.category)}</td><td><strong>${money(x.amount)}</strong></td><td>${risk(x.urgency)}</td><td>${esc(x.assignedOfficer)}</td><td>${badge(x.status)}</td><td>${actions&&!["approved","rejected","closed"].includes(x.status)?`<button class="mini-btn" data-welfare-review="${x.id}">${icons.eye}</button>`:" - "}</td></tr>`).join(""));}
   D.dashboards.welfare=()=>{
-    const w=W(),s=w.stats,standing=w.welfareStanding||w.fund||{},
+    const w=W();
+    if(!w||!w.stats)return `<div class="executive-loading">Loading Welfare workspace…</div>`;
+    const s=w.stats,standing=w.welfareStanding||w.fund||{},
       sinceTotal=Number(standing.collectedSince||standing.grossCollectedSince||s.collectedSince||0),
       assistancePaid=Number(standing.assistancePaid||standing.historicalAssistancePaid||w.fund?.assistancePaid||0),
       currentStanding=Number(standing.currentStandingAfterAssistance),
       currentTotal=Number.isFinite(currentStanding)&&currentStanding>=0?currentStanding:Math.max(0,sinceTotal-assistancePaid),
+      assistedPeople=Number(w.beneficiarySummary?.total??s.activeBeneficiaries??0),
       cards=[
       [`Welfare since June 2024`,money(sinceTotal),"receipt","violet","Standing collected since June 2024","welfare-contributions"],
       ["Current welfare standing",money(currentTotal),"wallet","green","After UGX 7M assistance paid","welfare-payments"],
       ["Assistance Paid This Month",money(s.assistancePaidMonth),"wallet","violet","Approved support","welfare-payments"],
+      ["Assistance given",assistedPeople,"users","blue","People who received welfare overall","welfare-beneficiaries"],
       ["Pending Welfare Requests",s.pendingRequests,"clock","orange","Awaiting progress","welfare-requests"],
-      ["Approved Requests",s.approvedRequests,"check","teal","Recorded decisions","welfare-requests"],
       ["Members contributing",s.membersContributing||standing.membersContributing||0,"users","blue","Since June 2024 standing","welfare-contributions"],
-      ["New members tracked",(standing.newMembers||[]).length,"plus","orange","e.g. Vicent since July 2026","welfare-contributions"],
+      ["New members tracked",(standing.newMembers||[]).length,"plus","orange","New during first year of membership","welfare-contributions"],
       ["Emergency Cases",s.emergencyCases,"bell","red","Immediate attention","welfare-emergencies"],
-      ["Active Beneficiaries",s.activeBeneficiaries,"users","blue","Members supported","welfare-beneficiaries"],
+      ["Approved Requests",s.approvedRequests,"check","teal","Recorded decisions","welfare-requests"],
       ["Members in Arrears",s.membersInArrears,"clock","orange","Contribution follow-up","welfare-contributions"],
       ["Remaining Available Balance",money(s.remainingBalance),"wallet","green","Fund position","welfare-payments"]];
     return `${D.dashboardGreeting()}<div class="welfare-command"><div class="welfare-stats">${cards.slice(0,8).map(x=>stat(...x)).join("")}</div></div>`;

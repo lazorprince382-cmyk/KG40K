@@ -103,7 +103,9 @@
   }
 
   D.dashboards.supervisory=()=>{
-    const s=S(),x=s.stats,cards=[
+    const s=S();
+    if(!s||!s.stats)return `<div class="executive-loading">Loading Supervisory workspace…</div>`;
+    const x=s.stats,cards=[
       ["Department Performance",pct(x.departmentPerformance),"reports","blue","Organization average","supervisory-performance"],
       ["Departments Below Target",x.departmentsBelowTarget,"bell","red","Below 85% target","supervisory-performance"],
       ["Recommendations Issued",x.recommendationsIssued,"approvals","violet","Corrective actions","supervisory-recommendations"],

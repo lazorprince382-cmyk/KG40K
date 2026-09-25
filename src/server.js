@@ -409,9 +409,9 @@ app.use(express.json({ limit: "1mb" }));
 app.use((req,res,next)=>{
   req.cookies=Object.fromEntries(String(req.headers.cookie||"").split(";").map(v=>v.trim().split("=")).filter(v=>v.length===2).map(([k,v])=>[decodeURIComponent(k),decodeURIComponent(v)]));
   res.set({
-    "X-Content-Type-Options":"nosniff","X-Frame-Options":"DENY","Referrer-Policy":"same-origin",
+    "X-Content-Type-Options":"nosniff","X-Frame-Options":"SAMEORIGIN","Referrer-Policy":"same-origin",
     "Permissions-Policy":"camera=(), microphone=(), geolocation=()",
-    "Content-Security-Policy":"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
+    "Content-Security-Policy":"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'",
     "Cache-Control":req.path.startsWith("/api/")?"no-store":"no-cache"
   });
   if(production)res.set("Strict-Transport-Security","max-age=31536000; includeSubDomains");
@@ -441,7 +441,7 @@ const permissions = {
   "Credits Officer":["dashboard:read","member:read","transaction:read","transaction:create","loan:read","loan:manage","withdrawal:approve","withdrawal:process","report:read"],
   "Legal Officer":["dashboard:read","member:read","member:manage","document:manage","report:read"],
   "Welfare Officer":["dashboard:read","member:read","report:read"],
-  "Executive Officer":["dashboard:read","member:read","loan:authorize","report:read","audit:read","announcement:manage","meeting:manage","document:manage","user:manage"],
+  "Executive Officer":["dashboard:read","member:read","member:manage","loan:authorize","report:read","audit:read","announcement:manage","meeting:manage","document:manage","user:manage"],
   "Supervisory Officer":["dashboard:read","member:read","finance:read","transaction:read","loan:read","report:read","audit:read"]
 };
 const loginAttemptsByIp=new Map();
@@ -746,8 +746,11 @@ app.get("/api/bootstrap",auth,asyncRoute(async(req,res)=>{
   const canSeeLoans=(!usesDepartmentCenter||req.user.role==="Credits Officer"||req.user.role==="Member")&&(req.user.role==="Member"||userPermissions.some(p=>p.startsWith("loan:"))||["approval:high","approval:delegated"].some(allowed));
   const canSeeWithdrawals=(!usesDepartmentCenter||req.user.role==="Credits Officer"||req.user.role==="Member")&&(req.user.role==="Member"||userPermissions.some(p=>p.startsWith("withdrawal:"))||allowed("finance:read"));
   // Department dashboards load their own command centers — skip the full member directory on boot.
-  const needsMemberDirectory=!usesDepartmentCenter&&(["Executive Officer","Credits Officer","Finance Officer","System Admin","Investment Officer"].includes(req.user.role)||req.user.role==="Member")
-    ||req.user.role==="Credits Officer"||req.user.role==="Member";
+  // Executive still needs the directory for the Members tab.
+  const needsMemberDirectory=req.user.role==="Executive Officer"
+    ||req.user.role==="Credits Officer"
+    ||req.user.role==="Member"
+    ||(!usesDepartmentCenter&&["Finance Officer","System Admin","Investment Officer"].includes(req.user.role));
   const empty={rows:[]};
   const [membersResult,txResult,loansResult,withdrawalsResult,productsResult,settingsResult,announcementsResult,notificationsResult,unreadResult,guarantorRequestsResult,organization,workspaces]=await Promise.all([
     needsMemberDirectory?query(`SELECT m.id AS "databaseId",m.member_number AS id,m.full_name AS name,m.email,CASE WHEN m.provisional THEN NULL ELSE m.phone END AS phone,CASE WHEN m.provisional THEN NULL ELSE m.national_id END AS national_id,m.occupation,m.employer,m.address,m.next_of_kin,
@@ -4034,6 +4037,38 @@ app.get("/api/users",auth,permit("user:manage"),asyncRoute(async(req,res)=>{
   res.json({users,roles:ROLES,departmentRoster,otherAccounts,
     branches:(await query("SELECT * FROM branches WHERE active=true")).rows,
     departments:(await query("SELECT id,code,name FROM departments WHERE active=true ORDER BY sort_order")).rows});
+}));
+app.post("/api/members",auth,permit("member:manage","user:manage"),asyncRoute(async(req,res)=>{
+  const b=req.body||{};
+  const fullName=String(b.fullName||"").trim();
+  const phone=String(b.phone||"").trim();
+  const nationalId=String(b.nationalId||"").trim();
+  const nextOfKin=String(b.nextOfKin||"").trim();
+  const email=String(b.email||"").trim().toLowerCase();
+  if(!fullName||fullName.length<2)return res.status(400).json({error:"Full legal name is required"});
+  if(!phone)return res.status(400).json({error:"Phone number is required"});
+  if(!nationalId)return res.status(400).json({error:"National ID is required"});
+  if(!nextOfKin)return res.status(400).json({error:"Next of kin is required"});
+  const memberNumber=`G40-${new Date().getFullYear()}-${crypto.randomUUID().replaceAll("-","").slice(0,8).toUpperCase()}`;
+  const savings=Math.max(0,Number(b.savings||0));
+  const shares=Math.max(0,Number(b.shares||0));
+  try{
+    const created=await transaction(async client=>{
+      const branchId=Number(b.branchId||req.user.branch_id||(await client.query(`SELECT id FROM branches WHERE active=true ORDER BY id LIMIT 1`)).rows[0]?.id||1);
+      return (await client.query(`INSERT INTO members
+        (member_number,full_name,email,phone,national_id,occupation,employer,address,next_of_kin,branch_id,savings_balance,share_capital,status,joined_at,created_by)
+        VALUES ($1,$2,NULLIF($3,''),$4,$5,NULLIF($6,''),NULLIF($7,''),NULLIF($8,''),$9,$10,$11,$12,'active',CURRENT_DATE,$13)
+        RETURNING id,member_number AS "memberNumber",full_name AS "fullName"`,
+        [memberNumber,fullName,email,phone,nationalId,String(b.occupation||"").trim(),String(b.employer||"").trim(),
+         String(b.address||"").trim(),nextOfKin,branchId,savings,shares,req.user.id])).rows[0];
+    });
+    await audit({userId:req.user.id,action:"MEMBER_CREATED",entityType:"member",entityId:String(created.id),
+      details:`${fullName} - ${created.memberNumber}`,...metadata(req)});
+    res.status(201).json({id:created.id,memberNumber:created.memberNumber,fullName:created.fullName});
+  }catch(error){
+    if(error.code==="23505")return res.status(409).json({error:"A member with this phone or National ID already exists"});
+    throw error;
+  }
 }));
 app.post("/api/users",auth,permit("user:manage"),asyncRoute(async(req,res)=>{
   const b=req.body||{};

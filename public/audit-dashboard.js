@@ -31,7 +31,9 @@
     return panel("Audit alerts","Risk and assurance updates",`<div class="dept-notification-list">${a.notifications.map(x=>`<button data-dept-target="${esc(x.target)}"><span class="${esc(x.level)}">${icons[x.level==="success"?"check":x.level==="info"?"info":"bell"]}</span><div><strong>${esc(x.title)}</strong><small>${esc(relativeTime(x.createdAt||x.time))}</small></div></button>`).join("")}</div>`,"audit-notifications-widget");
   }
   D.dashboards.audit=()=>{
-    const a=data(),s=a.stats,cards=[
+    const a=data();
+    if(!a||!a.stats)return `<div class="executive-loading">Loading Audit workspace…</div>`;
+    const s=a.stats,cards=[
       ["Total Audits Conducted",s.totalAuditsConducted,"audit","blue","Completed engagements","audits"],
       ["Audits in Progress",s.auditsInProgress,"clock","teal","Evidence review active","audits"],
       ["Pending Audits",s.pendingAudits,"clock","orange","Planned or scheduled","audit-plans"],

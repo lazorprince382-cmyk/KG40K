@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
+    "preview:phone": "node server.js",
     "seed": "node scripts/seed.js",
     "db:import-railway": "node scripts/import-railway-db.js",
     "db:export-system": "node scripts/export-system-dump.js",

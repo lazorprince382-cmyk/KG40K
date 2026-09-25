@@ -870,7 +870,7 @@ function financeSidebar() {
   const entryPending=(state.finance?.pendingEntries||state.finance?.entries||[]).filter(x=>x.status==="pending_finance_review").length+(state.finance?.pendingSavings||[]).length;
   const investmentPending=(state.finance?.investmentAnalyses||[]).length;
   const pages=rolePages[executiveWorkspaceRole()]||rolePages[state.role];
-  const sidebarPages=new Set(["dashboard","messages","finance-income","finance-expenses","finance-invoices","finance-budgets","finance-bank","finance-unit-trust","finance-assets","finance-approvals","finance-reports","finance-documents","settings"]);
+  const sidebarPages=new Set(["dashboard","messages","finance-income","finance-expenses","finance-budgets","finance-bank","finance-unit-trust","finance-approvals","finance-documents","settings"]);
   const alertFor=page=>page==="finance-approvals"&&(pending||entryPending||investmentPending)||page==="messages"&&state.unreadMessages;
   return `<aside class="sidebar executive-sidebar finance-sidebar" id="sidebar">
     <div class="executive-brand"><div class="executive-crest finance-crest">${icons.wallet}</div><div><strong>KASANGATI G40<br>KWAGALANA</strong><span>Finance</span></div></div>
@@ -1460,6 +1460,7 @@ function financeDashboardView() {
     ${financePendingEntriesWidget(f)}
     ${financeSubscriptionProgressWidget(f)}
     ${financeWelfareStandingSection(f)}
+    ${financeHiddenPanelsSection(f)}
     <div class="finance-dashboard-grid">
       ${financeApprovalWidget(f)}
       ${financeIncomeWidget(f)}
@@ -1467,6 +1468,16 @@ function financeDashboardView() {
     </div>
     <div class="finance-lower-grid finance-lower-notifications">${financeNotificationsWidget(f)}${financeCashPositionWidget(f)}</div>
     ${financeQuickPanel()}`;
+}
+function financeHiddenPanelsSection(f){
+  if(!f)return "";
+  const open=state.financePanelOpen||{};
+  const panels=[
+    ["invoices","Invoices","Supplier invoices and liabilities",financeInvoicesView()],
+    ["assets","Assets","Organization asset register",financeAssetsView()],
+    ["reports","Reports","Financial reports and statements",financeReportsView()]
+  ];
+  return `<div class="finance-hidden-panels">${panels.map(([key,title,subtitle,body])=>welfareStandingReveal(`finance-${key}`,title,subtitle,body,Boolean(open[key]))).join("")}</div>`;
 }
 function financeWelfareStandingSection(f){
   const standing=f.welfareStanding||{};
@@ -1773,7 +1784,8 @@ function financeReceiptsView() {
 }
 function financeInvoicesView() {
   const f=state.finance;
-  return `<div class="exec-module-metrics">${executiveModuleMetric("Total liabilities",money(f.stats.totalLiabilities),"red")}${executiveModuleMetric("Unpaid",f.invoices.filter(i=>i.status==="unpaid").length,"orange")}${executiveModuleMetric("Overdue",f.invoices.filter(i=>new Date(i.dueDate)<new Date()&&i.status!=="paid").length,"red")}${executiveModuleMetric("Part paid",f.invoices.filter(i=>i.status==="part_paid").length,"blue")}</div>${financeDataTable("Supplier invoices",["Invoice","Supplier","Description","Invoice date","Due date","Amount","Status"],f.invoices.map(i=>[i.invoiceNumber,i.supplier,i.description,new Date(i.invoiceDate).toLocaleDateString(),new Date(i.dueDate).toLocaleDateString(),money(i.amount),status(i.status)]))}`;
+  const invoices=f.invoices||[];
+  return `<div class="exec-module-metrics">${executiveModuleMetric("Total liabilities",money(f.stats?.totalLiabilities||0),"red")}${executiveModuleMetric("Unpaid",invoices.filter(i=>i.status==="unpaid").length,"orange")}${executiveModuleMetric("Overdue",invoices.filter(i=>new Date(i.dueDate)<new Date()&&i.status!=="paid").length,"red")}${executiveModuleMetric("Part paid",invoices.filter(i=>i.status==="part_paid").length,"blue")}</div>${financeDataTable("Supplier invoices",["Invoice","Supplier","Description","Invoice date","Due date","Amount","Status"],invoices.map(i=>[i.invoiceNumber,i.supplier,i.description,new Date(i.invoiceDate).toLocaleDateString(),new Date(i.dueDate).toLocaleDateString(),money(i.amount),status(i.status)]))}`;
 }
 function financeBudgetsView() {
   const f=state.finance;
@@ -1839,7 +1851,8 @@ function financeCashbookView() {
 }
 function financeAssetsView() {
   const f=state.finance;
-  return `<div class="exec-module-metrics">${executiveModuleMetric("Asset value",money(f.stats.totalAssets),"green")}${executiveModuleMetric("Registered assets",f.assets.length,"blue")}${executiveModuleMetric("Active",f.assets.filter(a=>a.status==="active").length,"violet")}${executiveModuleMetric("Departments",new Set(f.assets.map(a=>a.department)).size,"orange")}</div>${financeDataTable("Organization asset register",["Asset code","Asset","Type","Purchase date","Purchase value","Current value","Department","Location","Status"],f.assets.map(a=>[a.assetCode,a.assetName,a.assetType,new Date(a.purchaseDate).toLocaleDateString(),money(a.purchaseValue),money(a.currentValue),a.department||"?",a.location||"?",status(a.status)]))}`;
+  const assets=f.assets||[];
+  return `<div class="exec-module-metrics">${executiveModuleMetric("Asset value",money(f.stats?.totalAssets||0),"green")}${executiveModuleMetric("Registered assets",assets.length,"blue")}${executiveModuleMetric("Active",assets.filter(a=>a.status==="active").length,"violet")}${executiveModuleMetric("Departments",new Set(assets.map(a=>a.department)).size,"orange")}</div>${financeDataTable("Organization asset register",["Asset code","Asset","Type","Purchase date","Purchase value","Current value","Department","Location","Status"],assets.map(a=>[a.assetCode,a.assetName,a.assetType,new Date(a.purchaseDate).toLocaleDateString(),money(a.purchaseValue),money(a.currentValue),a.department||"?",a.location||"?",status(a.status)]))}`;
 }
 function financeProcurementView() {
   const stages=["department_request","finance_review","executive_approval","purchase_order","goods_received","invoice","payment","closed"];
@@ -2969,14 +2982,14 @@ async function openExecutiveWorkspace(code,landingPage) {
   const stateKeys={credits:"credits",finance:"finance",investment:"investment",welfare:"welfare",legal:"legal",audit:"auditCenter",supervisory:"supervisory"};
   const landingPages={credits:"credits-active",finance:"dashboard",investment:"dashboard",welfare:"dashboard",legal:"dashboard",audit:"dashboard",supervisory:"dashboard"};
   if(!endpoints[code]) return toast("That department dashboard is not available.");
-  state.executiveWorkspace=code;
-  state.page=landingPage||landingPages[code]||"dashboard";
-  render();
-  window.scrollTo(0,0);
   try{
     if(!state[stateKeys[code]])state[stateKeys[code]]=await api(endpoints[code]);
-    if(state.page==="finance-unit-trust")await loadFinanceUnitTrust(defaultUnitTrustMonth());
+    if(landingPage==="finance-unit-trust"||state.page==="finance-unit-trust")await loadFinanceUnitTrust(defaultUnitTrustMonth());
+    state.executiveWorkspace=code;
+    state.page=landingPage||landingPages[code]||"dashboard";
+    persistUiState();
     render();
+    window.scrollTo(0,0);
   }catch(error){toast(error.message||"Could not open that department dashboard.");}
 }
 async function openExecutiveUap(){
@@ -3241,8 +3254,11 @@ function activityList(items) {
 }
 
 function membersView() {
-  const rows = state.members.filter(m => `${m.name} ${m.id} ${m.phone||""}`.toLowerCase().includes(searchTerm.toLowerCase()));
-  return `<div class="card table-card"><div class="card-head"><div><h2 class="card-title">Member directory</h2><p class="card-subtitle">${rows.length} member records - open any member dashboard with the eye icon</p></div></div><div class="table-tools"><div class="filter-set"><button class="filter-chip active">All members</button><button class="filter-chip">Active</button><button class="filter-chip">Suspended</button></div></div><div class="table-scroll"><table><thead><tr><th>Member</th><th>Contact</th><th>Joined</th><th>Savings</th><th>Share capital</th><th>Status</th><th></th></tr></thead><tbody>${rows.map(m => `<tr><td><div class="member-cell"><div class="avatar green">${m.initials}</div><div><div class="cell-main">${escapeHtml(m.name)}</div><div class="cell-sub">${escapeHtml(m.id)}</div></div></div></td><td><div class="cell-main">${escapeHtml(m.phone||"Not recorded")}</div></td><td>${m.joined?new Date(m.joined).toLocaleDateString():"—"}</td><td class="cell-main mono">${money(m.savings)}</td><td class="mono">${money(m.shares)}</td><td>${status(m.status)}</td><td><div class="table-actions"><button class="mini-btn" title="Open member dashboard" data-open-member-dashboard="${m.databaseId||m.memberId||""}">${icons.eye}</button></div></td></tr>`).join("")}</tbody></table></div></div>`;
+  const rows = (state.members||[]).filter(m => `${m.name||""} ${m.id||""} ${m.phone||""}`.toLowerCase().includes(searchTerm.toLowerCase()));
+  if(!(state.members||[]).length){
+    return `<div class="card table-card"><div class="card-head"><div><h2 class="card-title">Member directory</h2><p class="card-subtitle">Loading member records…</p></div></div><div class="executive-loading">Fetching members…</div></div>`;
+  }
+  return `<div class="card table-card"><div class="card-head"><div><h2 class="card-title">Member directory</h2><p class="card-subtitle">${rows.length} member records - open any member dashboard with the eye icon</p></div></div><div class="table-tools"><div class="filter-set"><button class="filter-chip active">All members</button><button class="filter-chip">Active</button><button class="filter-chip">Suspended</button></div></div><div class="table-scroll"><table><thead><tr><th>Member</th><th>Contact</th><th>Joined</th><th>Savings</th><th>Share capital</th><th>Status</th><th></th></tr></thead><tbody>${rows.map(m => `<tr><td><div class="member-cell"><div class="avatar green">${m.initials||initials(m.name)}</div><div><div class="cell-main">${escapeHtml(m.name)}</div><div class="cell-sub">${escapeHtml(m.id)}</div></div></div></td><td><div class="cell-main">${escapeHtml(m.phone||"Not recorded")}</div></td><td>${m.joined?new Date(m.joined).toLocaleDateString():"—"}</td><td class="cell-main mono">${money(m.savings)}</td><td class="mono">${money(m.shares)}</td><td>${status(m.status)}</td><td><div class="table-actions"><button class="mini-btn" title="Open member dashboard" data-open-member-dashboard="${m.databaseId||m.memberId||""}">${icons.eye}</button></div></td></tr>`).join("")}</tbody></table></div></div>`;
 }
 
 function savingsView() {
@@ -3843,6 +3859,13 @@ function bind() {
     if(state.page==="users"&&!state.users) {
       try { const result=await api("/api/users"); applyUsersApiResult(result); render(); } catch(error) { toast(error.message); }
     }
+    if(state.page==="members"&&!(state.members||[]).length) {
+      try {
+        const boot=normalize(await api("/api/bootstrap"));
+        state.members=boot.members||[];
+        render();
+      } catch(error) { toast(error.message); }
+    }
   }));
   document.querySelectorAll("[data-department]").forEach(el=>el.addEventListener("click",async()=>{
     try {
@@ -3893,6 +3916,13 @@ function bind() {
     event.preventDefault();
     event.stopPropagation();
     const key=el.dataset.welfareStandingToggle||"finance";
+    if(key.startsWith("finance-")&&key!=="finance"){
+      if(!state.financePanelOpen)state.financePanelOpen={};
+      const panel=key.slice("finance-".length);
+      state.financePanelOpen[panel]=!Boolean(state.financePanelOpen[panel]);
+      render();
+      return;
+    }
     if(!state.welfareStandingOpen)state.welfareStandingOpen={};
     state.welfareStandingOpen[key]=!Boolean(state.welfareStandingOpen[key]);
     render();

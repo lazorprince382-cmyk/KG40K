@@ -1,18 +1,19 @@
 "use strict";
 /**
  * Shared welfare standing for Finance, Welfare and Executive.
- * Standard members (including Oketcho): UGX 650,000 welfare since June 2024.
+ * Standard members (including Oketcho and Baraza): UGX 650,000 welfare since June 2024.
  * Vicent: UGX 50,000 since July 2026 (also listed on the standing register).
- * Baraza remains excluded from standing.
+ * Members are tracked as "new" for their first year of membership.
  */
 const { query, one } = require("./db");
 
 const DEFAULT_SINCE = "2024-06-01";
 const VICENT_SINCE = "2026-07-01";
 const DEFAULT_MONTHLY = 25000;
+const NEW_MEMBER_DAYS = 365;
 
-function isExcluded(name) {
-  return /baraza/i.test(name || "") && /nakayiza|olivia/i.test(name || "");
+function isExcluded(_name) {
+  return false;
 }
 function isVicent(name) {
   return /vicent|vincent/i.test(name || "") && /gumisiriza/i.test(name || "");
@@ -78,7 +79,7 @@ async function loadWelfareStanding() {
       ...row,
       excluded,
       isVicent: vicent,
-      isNewMember: vicent || (row.joinedAt && new Date(row.joinedAt) >= new Date(Date.now() - 60 * 86400000)),
+      isNewMember: vicent || (row.joinedAt && new Date(row.joinedAt) >= new Date(Date.now() - NEW_MEMBER_DAYS * 86400000)),
       sinceDate: memberSinceDate,
       sinceLabel: memberSinceLabel,
     };

@@ -2,10 +2,8 @@
 "use strict";
 /**
  * Set member welfare standing balances:
- * - 15 standard members: UGX 650,000 each (since June 2024)
+ * - Standard members (including Oketcho and Baraza): UGX 650,000 each (since June 2024)
  * - Vicent Gumisiriza: UGX 50,000 (since July 2026), personal savings → 550,000
- * - Charles Oketcho: UGX 650,000 (since June 2024), on standing with everyone else
- * - Nakayiza Baraza Olivia: no welfare standing (excluded)
  */
 const { Pool } = require("pg");
 const path = require("path");
@@ -33,8 +31,8 @@ const VICENT_SINCE = "2026-07-01";
 const MARKER = "sync-welfare-member-balances";
 const HISTORICAL_PAYOUT_TOTAL = 7000000;
 
-function isExcluded(name) {
-  return /baraza/i.test(name) && /nakayiza|olivia/i.test(name);
+function isExcluded(_name) {
+  return false;
 }
 function isVicent(name) {
   return /vicent|vincent/i.test(name) && /gumisiriza/i.test(name);
