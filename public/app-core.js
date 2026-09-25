@@ -1265,7 +1265,13 @@ function executiveModuleView(module) {
       escapeHtml(x.sinceLabel||"June 2024")
     ]);
     const open=Boolean(state.welfareStandingOpen?.executive);
-    const body=`<div class="exec-module-metrics">${executiveModuleMetric("Since June 2024",money(sinceTotal),"violet")}${executiveModuleMetric("Current welfare standing",money(currentTotal),"green")}${executiveModuleMetric("Members on standing",standing.membersContributing||standingList.length,"blue")}${executiveModuleMetric("Pending requests",pending,"orange")}</div>
+    const metrics=[
+      executiveModuleMetric("Since June 2024",money(sinceTotal),"violet"),
+      executiveModuleMetric("Current welfare standing",money(currentTotal),"green"),
+      executiveModuleMetric("Members on standing",standing.membersContributing||standingList.length,"blue")
+    ];
+    if(pending>0)metrics.push(executiveModuleMetric("Pending requests",pending,"orange"));
+    const body=`<div class="exec-module-metrics">${metrics.join("")}</div>
       ${executiveRecordTable(`Welfare standing since June 2024 (${standing.membersContributing||standingList.length} members)`,["Member","Number","Welfare","Current balance","Since"],standingRows)}
       ${executiveRecordTable("Welfare assistance history",["Reference","Member","Request","Amount","Status"],(e.welfareRequests||[]).map(x=>[x.reference,x.member,x.requestType,money(x.amount),status(x.status)]))}`;
     return welfareStandingReveal("executive","Welfare overview","",body,open);
@@ -1500,11 +1506,14 @@ function financeWelfareStandingSection(f){
   ]);
   const pending=Number(f.welfareProgress?.pendingRequests??0);
   const open=Boolean(state.welfareStandingOpen?.finance);
+  const metrics=[
+      executiveModuleMetric("Since June 2024",money(sinceTotal),"violet"),
+      executiveModuleMetric("Current welfare standing",money(currentTotal),"green"),
+      executiveModuleMetric("Members on standing",standing.membersContributing||standingList.length,"blue")
+  ];
+  if(pending>0)metrics.push(executiveModuleMetric("Pending requests",pending,"orange"));
   const body=`<div class="exec-module-metrics" style="margin-bottom:14px">
-      ${executiveModuleMetric("Since June 2024",money(sinceTotal),"violet")}
-      ${executiveModuleMetric("Current welfare standing",money(currentTotal),"green")}
-      ${executiveModuleMetric("Members on standing",standing.membersContributing||standingList.length,"blue")}
-      ${executiveModuleMetric("Pending requests",pending,"orange")}
+      ${metrics.join("")}
     </div>
     ${executiveRecordTable(`Welfare standing since June 2024 (${standing.membersContributing||standingList.length} members)`,["Member","Number","Welfare","Current balance","Since"],standingRows)}`;
   return welfareStandingReveal("finance","Welfare overview","",body,open);
@@ -3883,6 +3892,17 @@ function bind() {
     state.executiveWorkspace=null;state.page=target;state.execQuickOpen=false;
     render();window.scrollTo(0,0);
     if(target==="executive-credits") ensureExecutiveCreditsDesk();
+    if(target==="executive-welfare"||target==="executive-finance"){
+      try{
+        state.executive=await api("/api/executive/command-center");
+        if(target==="executive-finance")state.finance=await api("/api/finance/command-center");
+        if(target==="executive-welfare"){
+          if(!state.welfareStandingOpen)state.welfareStandingOpen={};
+          state.welfareStandingOpen.executive=true;
+        }
+        render();
+      }catch(error){toast(error.message||"Could not refresh department summary.");}
+    }
   }));
   document.querySelectorAll("[data-exec-health-toggle]").forEach(el=>el.addEventListener("click",event=>{
     event.preventDefault();
@@ -3914,13 +3934,27 @@ function bind() {
   document.querySelectorAll("[data-unit-trust-download]").forEach(el=>el.addEventListener("click",()=>downloadUnitTrustReport(el.dataset.unitTrustDownload||"")));
   document.querySelector("[data-finance-fy]")?.addEventListener("change",async event=>{try{event.target.disabled=true;state.finance=await api(`/api/finance/command-center?fy=${encodeURIComponent(event.target.value)}`);render();}catch(error){toast(error.message);}});
   document.querySelector("[data-finance-subscriptions]")?.addEventListener("click",()=>openFinanceSubscriptionMembers());
-  document.querySelectorAll("[data-welfare-standing-toggle]").forEach(el=>el.addEventListener("click",event=>{
+  document.querySelectorAll("[data-welfare-standing-toggle]").forEach(el=>el.addEventListener("click",async event=>{
     event.preventDefault();
     event.stopPropagation();
     const key=el.dataset.welfareStandingToggle||"finance";
     if(!state.welfareStandingOpen)state.welfareStandingOpen={};
-    state.welfareStandingOpen[key]=!Boolean(state.welfareStandingOpen[key]);
+    const opening=!Boolean(state.welfareStandingOpen[key]);
+    state.welfareStandingOpen[key]=opening;
     render();
+    if(!opening)return;
+    try{
+      if(key==="finance"||state.executiveWorkspace==="finance"||state.role==="Finance Officer"){
+        state.finance=await api("/api/finance/command-center");
+      }
+      if(key==="executive"||state.role==="Executive Officer"){
+        state.executive=await api("/api/executive/command-center");
+      }
+      if(state.executiveWorkspace==="welfare"||state.role==="Welfare Officer"){
+        state.welfare=await api("/api/welfare/command-center");
+      }
+      render();
+    }catch(error){toast(error.message||"Could not refresh welfare standing.");}
   }));
   document.querySelectorAll("[data-finance-modal]").forEach(el=>el.addEventListener("click",()=>openFinanceModal(el.dataset.financeModal)));
   document.querySelectorAll("[data-finance-voucher]").forEach(el=>el.addEventListener("click",()=>financeVoucherDecision(el.dataset.financeVoucher,el.dataset.decision)));
