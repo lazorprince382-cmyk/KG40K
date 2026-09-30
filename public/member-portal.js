@@ -32,8 +32,14 @@
     const advanceNote=annualMet&&annualSurplus>0
       ?`<div class="member-policy-note member-advance-note"><b>Annual savings target met.</b> Extra ${money(annualSurplus)} remains as surplus toward future months.</div>`
       :"";
+    const sched=f.savingsSchedule;
+    const yearPaid=sched?Number(sched.savingsPaidTowardYear):savingsToward;
+    const yearNote=sched
+      ?`<div class="member-policy-note"><b>Remaining to save by 30 June ${esc(String(sched.yearEndLabel).split(" ").pop())}:</b> ${money(sched.remainingToYearEnd)} across ${sched.monthsLeftInYear} month${sched.monthsLeftInYear===1?"":"s"} (${esc(sched.monthLabel)} – ${esc(sched.yearEndLabel)}).</div>`
+      :"";
     return `<p class="member-reveal-sub">Annual targets for ${esc(f.fiscalYear)} · monthly savings ${money(f.monthlySavingsTarget)} <span class="member-policy-hint">(includes UGX 25,000 welfare share — shown as one savings figure)</span></p>
-      ${targetLine("Full-year savings target",savingsToward,f.annualSavingsTarget,{surplusLabel:"Surplus toward future months"})}
+      ${targetLine("Full-year savings target",yearPaid,f.annualSavingsTarget,{surplusLabel:"Surplus toward future months"})}
+      ${yearNote}
       ${targetLine("Annual share contribution",shareToward,f.annualShareTarget)}
       ${targetLine("Annual subscription fee",f.subscriptionPaid,f.annualSubscriptionFee)}
       ${targetLine("Combined annual contribution",Number(f.combinedAnnualPaid||0),Number(f.combinedAnnualTarget||0))}
@@ -117,6 +123,50 @@
         ${yearTabs}
         <div data-member-year-panel="current" ${current?"":"hidden"}>${currentContributionBody()}</div>
         <div data-member-year-panel="past" ${current?"hidden":""}>${pastContributionBody()}</div>
+      </div>
+    </section>`;
+  }
+  function savingsMonthBadge(){
+    const s=C()?.financialYearProgress?.savingsSchedule;
+    if(!s)return "";
+    const month=esc(String(s.monthLabel).split(" ")[0]);
+    if(Number(s.shortBy)>0.5)return `<b class="member-month-badge behind">Short by ${money(s.shortBy)} for ${month}</b>`;
+    const next=s.nextPaymentLabel?`<small class="member-month-next">Next payment: ${money(s.nextPaymentAmount)} for ${esc(s.nextPaymentLabel)}</small>`:"";
+    if(Number(s.surplus)>0.5)return `<b class="member-month-badge ahead">Surplus ${money(s.surplus)} for ${month}</b>${s.coveredThroughLabel?`<small class="member-month-next">Covered up to ${esc(s.coveredThroughLabel)}</small>`:""}${next}`;
+    return `<b class="member-month-badge met">Up to date for ${month}</b>${next}`;
+  }
+  function monthlySavingsStatusReveal(){
+    const s=C()?.financialYearProgress?.savingsSchedule;
+    if(!s)return "";
+    const short=Number(s.shortBy)>0.5,surplus=Number(s.surplus)>0.5;
+    const tone=short?"behind":surplus?"ahead":"met";
+    const headline=short
+      ?`You are short by ${money(s.shortBy)} for ${esc(s.monthLabel)}`
+      :surplus?`You have a surplus of ${money(s.surplus)} for ${esc(s.monthLabel)}`
+      :`You are up to date for ${esc(s.monthLabel)}`;
+    const advice=short
+      ?`Pay ${money(s.shortBy)} before the end of ${esc(s.monthLabel)} to be up to date.`
+      :surplus&&s.coveredThroughLabel
+        ?`Your savings cover you up to ${esc(s.coveredThroughLabel)}. Your next payment is ${money(s.nextPaymentAmount)} for ${esc(s.nextPaymentLabel)}.`
+        :surplus?`Your extra ${money(s.surplus)} counts toward ${esc(s.nextPaymentLabel)}, so you only need ${money(s.nextPaymentAmount)} for that month.`
+        :`Your next payment is ${money(s.nextPaymentAmount)} for ${esc(s.nextPaymentLabel)}.`;
+    return `<section class="member-reveal-card">
+      <button type="button" class="member-reveal-toggle" data-member-reveal="monthly-savings" aria-expanded="false">
+        <span>${icons.savings}</span>
+        <div><strong>This month's savings status</strong><small>Are you short or ahead for ${esc(s.monthLabel)}?</small></div>
+        <em data-member-reveal-chevron>Show</em>
+      </button>
+      <div class="member-reveal-panel" data-member-reveal-panel="monthly-savings" hidden>
+        <div class="member-target-line ${tone}"><div><strong>${headline}</strong><span>${advice}</span></div></div>
+        <div class="member-summary-grid compact">
+          ${metric(`Needed by end of ${s.monthLabel}`,money(s.requiredByMonthEnd),"receipt","member-savings","")}
+          ${metric("Your savings now",money(s.savingsBalance),"wallet","member-savings","")}
+          ${metric(short?"Short by":"Surplus",money(short?s.shortBy:s.surplus),"savings","member-savings","")}
+          ${metric(`Next payment · ${s.nextPaymentLabel}`,money(s.nextPaymentAmount),"clock","member-savings",s.coveredThroughLabel?`Covered up to ${esc(s.coveredThroughLabel)}`:"")}
+        </div>
+        <div class="member-policy-note">${s.joinedThisYear
+          ?`You joined in ${esc(s.joinLabel)}, so your target is ${money(s.monthlyTarget)} for each month from then.`
+          :`Everyone was expected to have ${money(s.benchmarkAmount)} by the ${esc(s.benchmarkLabel)}. Each month after that adds ${money(s.monthlyTarget)}.`}</div>
       </div>
     </section>`;
   }
@@ -205,7 +255,7 @@
       :`Since ${welfareSinceLabel}`;
     const welfareAmount=money(s.welfareContributedSince??s.welfare??0);
     return `${oversightBanner()}<div class="member-portal"><section class="member-welcome member-hero-card"><div class="member-welcome-top"><span>${g}</span><h2>${esc(m.fullName)}</h2></div>${loanNeedCta(c)}</section>
-      <div class="member-summary-grid">${metric("My Savings",money(s.savings),"savings","member-savings","Current carried-forward balance")}${metric("Share Capital",money(s.shares),"building","member-savings","Current share balance")}${metric("Personal Total Funds",money(s.personalTotalFunds??s.totalMemberFunds),"wallet","member-savings","Savings plus share capital")}${metric("Welfare",welfareAmount,"shield","member-welfare",welfareCardNote)}${metric("Active Loan Balance",money(s.activeLoanBalance),"loans","member-loans","Remaining total repayment including interest")}</div>
+      <div class="member-summary-grid">${metric("My Savings",money(s.savings),"savings","member-savings",`Current carried-forward balance${savingsMonthBadge()}`)}${metric("Share Capital",money(s.shares),"building","member-savings","Current share balance")}${metric("Personal Total Funds",money(s.personalTotalFunds??s.totalMemberFunds),"wallet","member-savings","Savings plus share capital")}${metric("Welfare",welfareAmount,"shield","member-welfare",welfareCardNote)}${metric("Active Loan Balance",money(s.activeLoanBalance),"loans","member-loans","Remaining total repayment including interest")}</div>
       <div class="member-summary-grid member-org-standing">${metric("UAP account",money(uap),"building","member-dashboard","Old Mutual unit trust standing amount")}${metric("Centenary bank account",money(bank),"wallet","member-dashboard","Company Centenary account")}${metric("Money in loans",money(loansOut),"loans","member-loans","Outstanding loan principal across members")}${metric("Total Company Funds",money(company),"reports","member-dashboard","UAP + Centenary + money in loans")}</div>
       ${dashboardNextUp(c)}
       <div class="member-dashboard-reveals">${contributionProgressReveal()}${welfareContributionsReveal()}${recentActivityReveal()}</div></div>`;
@@ -218,7 +268,7 @@
   function savings(){
     const c=C(),monthly=c.transactions.filter(x=>/deposit/i.test(x.type)&&x.status==="completed"&&new Date(x.createdAt).getMonth()===new Date().getMonth()).reduce((s,x)=>s+Number(x.amount),0);
     const rows=c.transactions.map(x=>`<tr><td><strong>${esc(x.reference)}</strong><small>${esc(x.externalReference||"")}</small></td><td>${esc(x.type)}</td><td>${esc(x.method)}</td><td>${money(x.amount)}</td><td>${esc(x.receiptNumber||"Issued after verification")}</td><td>${date(x.createdAt)}</td><td>${status(x.status)}</td><td><button class="button small secondary" data-member-transaction="${x.id}">${icons.eye}Details</button></td></tr>`).join("");
-    return `<div class="member-module"><div class="member-summary-grid compact">${metric("Current balance",money(c.member.savings),"savings","member-savings")}${metric("Verified this month",money(monthly),"receipt","member-savings")}${metric("Share capital",money(c.member.shares),"building","member-savings")}</div><div class="module-actions">${canActOnMember()?`<button class="button primary" data-member-action="deposit">${icons.plus}Submit deposit</button>`:""}${!readOnlyMember()?`<button class="button secondary" data-member-action="withdraw">${icons.arrowUp}Request withdrawal</button><a class="button secondary" href="/api/member/reports/transactions.csv">${icons.download}Download statement</a>`:""}</div>${panel("Savings history","Submitted evidence, verification decisions and official receipts",gridTable(["Reference","Type","Method","Amount","Official receipt","Submitted","Status","Actions"],rows))}</div>`;
+    return `<div class="member-module"><div class="member-summary-grid compact">${metric("Current balance",money(c.member.savings),"savings","member-savings")}${metric("Verified this month",money(monthly),"receipt","member-savings")}${metric("Share capital",money(c.member.shares),"building","member-savings")}</div><div class="module-actions">${canActOnMember()?`<button class="button primary" data-member-action="deposit">${icons.plus}Submit deposit</button>`:""}${!readOnlyMember()?`<button class="button secondary" data-member-action="withdraw">${icons.arrowUp}Request withdrawal</button><a class="button secondary" href="/api/member/reports/transactions.csv">${icons.download}Download statement</a>`:""}</div>${monthlySavingsStatusReveal()}${panel("Savings history","Submitted evidence, verification decisions and official receipts",gridTable(["Reference","Type","Method","Amount","Official receipt","Submitted","Status","Actions"],rows))}</div>`;
   }
   function requestAmount(x){
     const raw=String(x.notes||"");

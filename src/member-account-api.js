@@ -3,6 +3,7 @@ module.exports = function registerMemberAccountApi({
 }) {
   const { notifyCreditsVerificationQueue } = require("./credits-queue");
   const { loadWelfareStanding } = require("./welfare-standing");
+  const { loadMemberSchedule } = require("./savings-schedule");
   const imageTypes = new Set(["image/jpeg","image/png","image/webp","image/gif","image/jpg"]);
   const receiptTypes = new Set(["image/jpeg","image/png","image/webp","application/pdf"]);
   const removeStoredFile = storedName => {
@@ -399,8 +400,10 @@ module.exports = function registerMemberAccountApi({
     const annualSavingsTarget = monthlyTarget * 12;
     const annualShareTarget = Number(financialYear?.annualShareTarget || 0);
     const annualSubscriptionFee = Number(financialYear?.annualSubscriptionFee || 0);
+    const savingsSchedule = await loadMemberSchedule(memberId);
+    const savingsPaidTowardYear = Number(savingsSchedule?.savingsPaidTowardYear || 0);
     const combinedAnnualTarget = annualSavingsTarget + annualShareTarget + annualSubscriptionFee;
-    const combinedAnnualPaid = Math.min(annualSavingsTarget, savingsTowardTarget) + Math.min(annualShareTarget, sharePaidTowardTarget) + Math.min(annualSubscriptionFee, subscriptionPaid);
+    const combinedAnnualPaid = Math.min(annualSavingsTarget, savingsPaidTowardYear) + Math.min(annualShareTarget, sharePaidTowardTarget) + Math.min(annualSubscriptionFee, subscriptionPaid);
     const financialYearProgress = financialYear ? {
       ...financialYear,
       monthlySavingsTarget: monthlyTarget,
@@ -421,7 +424,8 @@ module.exports = function registerMemberAccountApi({
       subscriptionPaid,
       combinedAnnualTarget,
       combinedAnnualPaid,
-      combinedAnnualRemaining: Math.max(0, combinedAnnualTarget - (savingsTowardTarget + sharePaidTowardTarget + subscriptionPaid))
+      combinedAnnualRemaining: Math.max(0, combinedAnnualTarget - combinedAnnualPaid),
+      savingsSchedule
     } : null;
     const activeLoans = loans.rows.filter(item => ["active", "overdue"].includes(item.status));
     const contributionsTotal = welfareContributions.rows.filter(item => ["verified", "recorded", "completed"].includes(item.status)).reduce((sum, item) => sum + Number(item.amount), 0);

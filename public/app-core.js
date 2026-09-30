@@ -1284,7 +1284,8 @@ function executiveModuleView(module) {
   return executiveDashboardView();
 }
 function executiveFinanceSummary(e) {
-  const f=e.finance,c=f.cashPosition||{},accounts=f.accounts||[];
+  const f=e.finance,c=f.cashPosition||{};
+  const accounts=(f.accounts||[]).filter(a=>a.accountCode==="GL-4104"||a.accountCode==="GL-4500"||Number(a.balance)>0);
   const org=e.organizationStanding||e.stats||{};
   const uap=Number(org.uapBalance||e.stats?.uapBalance||0);
   const bank=Number(org.bankBalance||c.bankBalance||0);
@@ -1537,7 +1538,7 @@ function financeHistoricalSnapshot(f) {
   const cards=[
     ["UAP account",uap,"building","finance-unit-trust",""],
     ["Centenary bank account",bank,"wallet","finance-bank",""],
-    ["Money in loans",loans,"loans","finance-bank",""],
+    ["Money in loans",loans,"loans","credits-active",""],
     ["Total Company Funds",total,"reports","finance-bank",""]
   ];
   return `<section class="finance-snapshot-block"><div class="finance-period-heading"><div><strong>Company positions</strong></div><div class="head-actions"><button class="button secondary small" data-finance-page="finance-unit-trust">${icons.reports}Unit Trust</button><button class="button secondary small" data-finance-page="finance-bank">${icons.building}Bank accounts</button></div></div><div class="finance-snapshot-grid">${cards.map(([label,value,icon,target,note],index)=>`<button class="finance-snapshot-card" data-finance-page="${target}"><span class="${["blue","green","violet","orange"][index]}">${icons[icon]||icons.file}</span><div><small>${label}</small><strong>${money(value)}</strong>${note?`<em>${note}</em>`:""}</div></button>`).join("")}</div></section>`;
@@ -2758,6 +2759,7 @@ function loanPenaltyBanner(l){
   return `<div class="credits-danger-banner"><strong>${escapeHtml(l.member||"Member")} — installment past due</strong><small>From the day after the due date, a 5% penalty applies on unpaid principal.</small></div>`;
 }
 function creditsActiveLoansView() {
+  if(!state.credits?.loans)return `<div class="exec-empty">Loading active loans…</div>`;
   const rows=state.credits?.loans?.filter(l=>["active","overdue"].includes(l.status))||[];
   const penaltyWatch=rows.filter(l=>l.inDangerPeriod||l.status==="overdue"||loanLatePenaltyAmount(l)>0).length;
   return `<div class="exec-module-metrics">${executiveModuleMetric("Active loans",rows.length,"blue")}${executiveModuleMetric("Total amount remaining",money(rows.reduce((n,l)=>n+Math.max(0,Number(l.totalDue||l.amount||0)-Number(l.totalPaid||0)),0)),"violet")}${executiveModuleMetric("Total repayment",money(rows.reduce((n,l)=>n+Number(l.totalPaid||0),0)),"orange")}${executiveModuleMetric(penaltyWatch?"Late / penalty watch":"Cash disbursed",penaltyWatch?penaltyWatch:money(rows.reduce((n,l)=>n+Math.max(0,Number(l.amount||0)-Number(l.processingFee||0)),0)),penaltyWatch?"orange":"green")}</div>
@@ -3924,6 +3926,9 @@ function bind() {
     render();window.scrollTo(0,0);
     if(state.page==="finance-unit-trust"){
       try{await loadFinanceUnitTrust(state.unitTrust?.month||defaultUnitTrustMonth());render();}catch(error){toast(error.message);}
+    }
+    if(state.page==="credits-active"){
+      try{state.credits=await api("/api/credits/command-center");render();}catch(error){toast(error.message||"Could not load active loans.");}
     }
   }));
   document.querySelector("[data-unit-trust-month]")?.addEventListener("change",async event=>{

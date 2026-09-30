@@ -136,7 +136,6 @@ const LOANS = [
   { ref: "LN-HIST-JUDE-7M-20231015", member: "Jude Tadieus Kyobe", amount: 7000000, months: 2, method: "flat", fee: 0, interest: 560000, taken: "2023-10-15", sheetStatus: "CLEARED" },
   { ref: "LN-HIST-EZRA-10M-20231115", member: "Ezra Mujjabwami", amount: 10000000, months: 4, method: "flat", fee: 0, interest: 1600000, taken: "2023-11-15", sheetStatus: "CLEARED" },
   { ref: "LN-HIST-JUSTINE-15M-20231215", member: "Justine Kaudha Inhensiko", amount: 15000000, months: 4, method: "flat", fee: 0, interest: 2400000, taken: "2023-12-15", sheetStatus: "CLEARED" },
-  { ref: "LN-HIST-TABULA-10M-20240115", member: "Tabula Robert", amount: 10000000, months: 1, method: "flat", fee: 0, interest: 400000, taken: "2024-01-15", sheetStatus: "CLEARED" },
   { ref: "LN-HIST-JUDE-10M-20240215", member: "Jude Tadieus Kyobe", amount: 10000000, months: 1, method: "flat", fee: 0, interest: 400000, taken: "2024-02-15", sheetStatus: "CLEARED" },
   { ref: "LN-HIST-RITA-10M-20240315", member: "Ritah Nakyanzi", amount: 10000000, months: 1, method: "flat", fee: 0, interest: 400000, taken: "2024-03-15", sheetStatus: "CLEARED" },
   { ref: "LN-HIST-PAUL-6M-20240415", member: "Paul Kalemba", amount: 6000000, months: 1, method: "flat", fee: 0, interest: 240000, taken: "2024-04-15", sheetStatus: "CLEARED" },
@@ -146,10 +145,8 @@ const LOANS = [
   { ref: "LN-HIST-JUDE-10M-20240614", member: "Jude Tadieus Kyobe", amount: 10000000, months: 6, method: "flat", fee: 0, interest: 2400000, taken: "2024-06-14", sheetStatus: "CLEARED" },
   { ref: "LN-HIST-BRIAN-6M-20240624", member: "Brian Mutiga", amount: 6000000, months: 2, method: "flat", fee: 0, interest: 480000, taken: "2024-06-24", sheetStatus: "CLEARED" },
   { ref: "LN-HIST-JOSHUA-10M-20240628", member: "Joshua Ssewanyana", amount: 10000000, months: 2, method: "flat", fee: 0, interest: 800000, taken: "2024-06-28", sheetStatus: "CLEARED" },
-  { ref: "LN-HIST-TABULA-15M-20240702", member: "Tabula Robert", amount: 15000000, months: 2, method: "flat", fee: 0, interest: 1200000, taken: "2024-07-02", sheetStatus: "CLEARED" },
   { ref: "LN-HIST-RITA-15M-20250104", member: "Ritah Nakyanzi", amount: 15000000, months: 1, method: "reducing", fee: 300000, interest: 600000, taken: "2025-01-04", sheetStatus: "CLEARED" },
   { ref: "LN-HIST-MARY-15M-20250104", member: "Mary Babirye", amount: 15000000, months: 5, method: "reducing", fee: 300000, interest: 1800000, taken: "2025-01-04", sheetStatus: "CLEARED" },
-  { ref: "LN-HIST-TABULA-15M-20250105", member: "Tabula Robert", amount: 15000000, months: 5, method: "reducing", fee: 300000, interest: 1800000, taken: "2025-01-05", sheetStatus: "CLEARED" },
   { ref: "LN-HIST-JUSTINE-15M-20250110", member: "Justine Kaudha Inhensiko", amount: 15000000, months: 5, method: "reducing", fee: 300000, interest: 1800000, taken: "2025-01-10", sheetStatus: "CLEARED" },
   { ref: "LN-HIST-RALPH-5M-20250508", member: "Ralph Masaba", amount: 5000000, months: 5, method: "reducing", fee: 100000, interest: 600000, taken: "2025-05-08", sheetStatus: "CLEARED" },
 

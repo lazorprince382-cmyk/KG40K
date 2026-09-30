@@ -21,6 +21,7 @@ const {
 } = require("./loan-security");
 const { getRunningLoan, getSavingsTargetStatus, getGuarantorEligibility } = require("./loan-eligibility");
 const { loadWelfareStanding, loadWelfareMonth, enforceOneMonthlyWelfareCharge } = require("./welfare-standing");
+const { chargeWelfareFromCoveredSavings } = require("./savings-schedule");
 const { isWordUpload, convertWordUploadToPdf } = require("./services/office-pdf");
 
 function mimeFromFilename(name="",fallback="application/octet-stream"){
@@ -2391,14 +2392,18 @@ app.get("/api/finance/search",auth,requireFinance("view"),asyncRoute(async(req,r
   res.json({results:results.rows});
 }));
 
-function requireCredits(action="view") {
+function requireCredits(action="view",{allowFinanceView=false}={}) {
   return asyncRoute(async(req,res,next)=>{
-    const access=await departmentPermission(req.user,"credits",action);
+    let access=await departmentPermission(req.user,"credits",action);
+    if(!access&&allowFinanceView&&action==="view"){
+      const finance=await departmentPermission(req.user,"finance","view");
+      if(finance)access={...finance,can_view:true,can_create:false,can_edit:false,can_approve:false,is_head:false,position_title:"Finance oversight"};
+    }
     if(!access) return res.status(403).json({error:`Your Credits assignment does not allow ${action} access`});
     req.creditsAccess=access;next();
   });
 }
-app.get("/api/credits/command-center",auth,requireCredits("view"),asyncRoute(async(req,res)=>{
+app.get("/api/credits/command-center",auth,requireCredits("view",{allowFinanceView:true}),asyncRoute(async(req,res)=>{
   const [members,transactionsResult,loansResult,guarantors,recovery,charges,documents,summary,depositSummary,portfolioSummary,guarantorSummary]=await Promise.all([
     query(`SELECT m.id,m.member_number AS "memberNumber",m.full_name AS name,m.email,CASE WHEN m.provisional THEN NULL ELSE m.phone END AS phone,m.status,
       m.savings_balance::float AS savings,m.share_capital::float AS shares,m.joined_at AS "joinedAt",
@@ -4725,8 +4730,12 @@ app.post("/api/loans/:id/disburse",auth,asyncRoute(async(req,res)=>{
   const [guarantors,events,schedule,repayments,disbursement,creditsProgress,executiveProgress,supportingDocuments]=await Promise.all([
     query(`SELECT lg.id,m.full_name AS name,m.member_number AS "memberNumber",lg.status,lg.response_note AS note,lg.responded_at AS "respondedAt"
       FROM loan_guarantors lg JOIN members m ON m.id=lg.member_id WHERE lg.loan_id=$1`,[loan.id]),
-    query(`SELECT e.id,e.stage,e.action,e.comment,e.created_at AS "createdAt",COALESCE(u.full_name,'System') AS actor
-      FROM loan_workflow_events e LEFT JOIN users u ON u.id=e.actor_id WHERE e.loan_id=$1 ORDER BY e.id`,[loan.id]),
+    query(`SELECT e.id,e.stage,e.action,e.comment,e.created_at AS "createdAt",
+      CASE WHEN e.stage='application' AND e.action='submitted' THEN COALESCE(m.full_name,u.full_name,'System')
+        ELSE COALESCE(u.full_name,'System') END AS actor
+      FROM loan_workflow_events e LEFT JOIN users u ON u.id=e.actor_id
+      LEFT JOIN loans l ON l.id=e.loan_id LEFT JOIN members m ON m.id=l.member_id
+      WHERE e.loan_id=$1 ORDER BY e.id`,[loan.id]),
     query(`SELECT s.id AS "scheduleId",s.installment_number AS installment,s.due_date AS "dueDate",
       s.opening_balance::float AS "openingBalance",s.principal::float,s.interest::float,
       s.total_due::float AS "totalDue",s.paid_amount::float AS "paidAmount",
@@ -5946,6 +5955,8 @@ async function runScheduledMaintenance() {
   await transaction(async client=>{
     await accrueUnitTrustInterest(client);
     await enforceOneMonthlyWelfareCharge(client);
+    const charged=await chargeWelfareFromCoveredSavings(client);
+    if(charged.length)console.log(`Monthly welfare taken from covered savings: ${charged.map(x=>`${x.name} (${x.period})`).join(", ")}`);
   });
   const graceDays=0;
   await transaction(async client=>{

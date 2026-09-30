@@ -1825,3 +1825,6 @@ tr.pending-receipt{background:#f8fafc;color:#64748b}
 .audit-readonly-note p,
 .permission-picker + small,
 .form .field small{display:none!important}
+
+.member-month-badge{display:block;margin-top:6px;font-style:normal;font-weight:800;font-size:13px}.member-month-badge.behind{color:#c0392b}.member-month-badge.ahead{color:#1e8449}.member-month-badge.met{color:#0b3b70}
+.member-month-next{display:block;margin-top:3px;font-style:normal;font-weight:600;font-size:12px;color:#51607a}
