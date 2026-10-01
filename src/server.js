@@ -131,6 +131,33 @@ async function postReceiptToCentenary(client,{grossAmount,memberName,method,desc
   await syncOrganizationBankBalanceSetting(client,account.id);
   return {...inserted,accountName:account.account_name,accountId:account.id};
 }
+const REPAYMENT_BANK_POSTING_FROM="2026-09-01";
+async function postRepaymentToCentenary(client,transactionId,userId){
+  const row=(await client.query(`SELECT t.id,t.reference,t.amount::float AS amount,t.method,t.created_at,t.finance_entry_id,t.recorded_by,
+      m.full_name,l.reference AS loan_reference
+    FROM transactions t JOIN members m ON m.id=t.member_id LEFT JOIN loans l ON l.id=t.loan_id
+    WHERE t.id=$1 AND t.type='Loan repayment' AND t.status='completed' FOR UPDATE OF t`,[transactionId])).rows[0];
+  if(!row||row.finance_entry_id||String(row.loan_reference||"").startsWith("LN-HIST-"))return null;
+  const posted=await postReceiptToCentenary(client,{
+    grossAmount:Number(row.amount),memberName:row.full_name,method:row.method,
+    description:`${row.reference} | Loan repayment UGX ${Number(row.amount).toLocaleString()} from ${row.full_name}${row.loan_reference?` on ${row.loan_reference}`:""}.`,
+    onDate:row.created_at||new Date(),userId:userId||row.recorded_by,category:"Loan repayment"
+  });
+  if(posted?.id)await client.query("UPDATE transactions SET finance_entry_id=$1 WHERE id=$2",[posted.id,row.id]);
+  return posted;
+}
+async function backfillRepaymentsToCentenary(client){
+  const pending=(await client.query(`SELECT t.id FROM transactions t LEFT JOIN loans l ON l.id=t.loan_id
+    WHERE t.type='Loan repayment' AND t.status='completed' AND t.finance_entry_id IS NULL
+      AND t.created_at>=$1::date AND COALESCE(l.reference,'') NOT LIKE 'LN-HIST-%'
+    ORDER BY t.created_at,t.id`,[REPAYMENT_BANK_POSTING_FROM])).rows;
+  const posted=[];
+  for(const {id} of pending){
+    const entry=await postRepaymentToCentenary(client,id,null);
+    if(entry)posted.push(entry.reference);
+  }
+  return posted;
+}
 function welfareTakenFrom(text){
   const raw=String(text||"");
   if(/welfare already (paid|taken)/i.test(raw))return 0;
@@ -2913,13 +2940,14 @@ app.post("/api/credits/repayments",auth,optionalReceiptUpload,asyncRoute(async(r
       const result=await applyLoanRepayment(client,loanId,amount,{settleEarlyFull});
       const noteParts=[String(b.notes||"").trim(),settleEarlyFull?settlementMarker:"",
         `charges=${result.chargeApplied.toFixed(2)}, interest=${result.interestApplied.toFixed(2)}, principal=${result.principalApplied.toFixed(2)}`].filter(Boolean);
-      await client.query(`INSERT INTO transactions
+      const inserted=(await client.query(`INSERT INTO transactions
         (reference,receipt_number,member_id,loan_id,type,method,amount,status,external_reference,notes,recorded_by,verified_by,verified_at,
          submission_source,evidence_stored_name,evidence_original_name,evidence_mime_type)
-        VALUES ($1,$2,$3,$4,'Loan repayment',$5,$6,'completed',$7,$8,$9,$9,NOW(),'staff',$10,$11,$12)`,
+        VALUES ($1,$2,$3,$4,'Loan repayment',$5,$6,'completed',$7,$8,$9,$9,NOW(),'staff',$10,$11,$12) RETURNING id`,
       [txRef,receipt,result.loan.member_id,result.loan.id,method,amount,externalReference||null,
         noteParts.join(" | ").slice(0,1000),req.user.id,
-        req.file?.filename||null,req.file?.originalname||null,req.file?.mimetype||null]);
+        req.file?.filename||null,req.file?.originalname||null,req.file?.mimetype||null])).rows[0];
+      await postRepaymentToCentenary(client,inserted.id,req.user.id);
       return result;
     });
   }catch(error){
@@ -4198,6 +4226,7 @@ app.post("/api/transactions/:id/verify",auth,asyncRoute(async(req,res,next)=>{
       receipt_number=$4,notes=CASE WHEN $5::text IS NOT NULL THEN TRIM(BOTH FROM COALESCE(notes,'')||' | '||$5) ELSE notes END WHERE id=$6 AND status='pending' RETURNING id`,
     [statusValue,req.user.id,comment||(decision==="approve"?"Funds received and evidence verified":null),receipt,allocationNotes,locked.id]);
     if(updated.rowCount!==1) { const error=new Error("Transaction has already been processed"); error.status=409; throw error; }
+    if(decision==="approve"&&locked.type==="Loan repayment") await postRepaymentToCentenary(client,locked.id,req.user.id);
     if(decision==="approve"&&locked.type==="Savings deposit"){
       const member=(await client.query("SELECT id,full_name FROM members WHERE id=$1",[locked.member_id])).rows[0];
       const split=await applyMonthlySavingsSplit(client,{
@@ -5957,6 +5986,10 @@ async function runScheduledMaintenance() {
     await enforceOneMonthlyWelfareCharge(client);
     const charged=await chargeWelfareFromCoveredSavings(client);
     if(charged.length)console.log(`Monthly welfare taken from covered savings: ${charged.map(x=>`${x.name} (${x.period})`).join(", ")}`);
+  });
+  await transaction(async client=>{
+    const posted=await backfillRepaymentsToCentenary(client);
+    if(posted.length)console.log(`Loan repayments posted to Centenary: ${posted.join(", ")}`);
   });
   const graceDays=0;
   await transaction(async client=>{
