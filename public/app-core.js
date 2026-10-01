@@ -1129,9 +1129,9 @@ function executiveDashboardView() {
         ["Loans in default",e.loans.defaults],["Money in loans",money(loansOut)]])}
       ${(state.execHealthVisible||{}).investment===false?"":executiveHealthCard("Investment","executive-investments","reports",[
         ["UAP account",money(e.investment.unitTrust?.balance??e.investment.current_value)],
-        ["Profit so far",money(e.investment.unitTrust?.profitThisMonth||0)],
-        ["Profit by month end",money(e.investment.unitTrust?.profitByMonthEnd||0)],
-        ["Still to accrue",money(e.investment.unitTrust?.projectedProfit||0)]])}
+        ["Interest this month",money(e.investment.unitTrust?.profitThisMonth||0)],
+        ["Last interest entered",money(e.investment.unitTrust?.lastInterestAmount||0)],
+        ["Total interest earned",money(e.investment.unitTrust?.totalInterest||0)]])}
       ${(state.execHealthVisible||{}).audit===false?"":executiveHealthCard("Audit","executive-audit","audit",[
         ["Open audit issues",e.audit.open],["Resolved issues",e.audit.resolved],["Departments under review",e.audit.departmentsUnderReview],
         ["Compliance",`${e.audit.compliance}%`]])}
@@ -1388,8 +1388,8 @@ function executiveProjectsView() {
   const projects=e.investmentProjects||[];
   const u=e.investment.unitTrust;
   const others=projects.filter(p=>!(p.isUnitTrust||/unit trust|old mutual|INV-FUND-OM/i.test(`${p.reference||""} ${p.name||""}`)));
-  return `<div class="exec-module-metrics">${financeUnitTrustMetric("UAP account",money(u?.balance??e.investment.current_value),"Live balance through today","violet")}${financeUnitTrustMetric("Profit so far",money(u?.profitThisMonth||0),"Interest already earned this month","green")}${financeUnitTrustMetric("Profit by month end",money(u?.profitByMonthEnd||0),"Profit so far plus interest still to come","blue")}${financeUnitTrustMetric("Still to accrue",money(u?.projectedProfit||0),"Estimate only. Posted when each day arrives","orange")}</div>
-    <section class="exec-panel executive-project-note"><div>${icons.shield}<div><strong>Same live Unit Trust as Finance</strong><span>Only days that have arrived are posted. Tomorrow's interest is not calculated until tomorrow.</span></div><button class="button secondary" data-executive-page="finance-unit-trust">Open movement</button></div></section>
+  return `<div class="exec-module-metrics">${financeUnitTrustMetric("UAP account",money(u?.balance??e.investment.current_value),"Balance including interest entered","violet")}${financeUnitTrustMetric("Interest this month",money(u?.profitThisMonth||0),"Interest entered for this month","green")}${financeUnitTrustMetric("Last interest entered",money(u?.lastInterestAmount||0),u?.lastInterestMonth||"No month entered yet","blue")}${financeUnitTrustMetric("Total interest earned",money(u?.totalInterest||0),"All interest recorded on UAP","orange")}</div>
+    <section class="exec-panel executive-project-note"><div>${icons.shield}<div><strong>Same Unit Trust as Finance</strong><span>Finance enters the final interest from the UAP statement once a month.</span></div><button class="button secondary" data-executive-page="finance-unit-trust">Open movement</button></div></section>
     ${others.length?`<div class="exec-project-grid executive-governance-projects">${others.map(p=>`<article class="exec-project-card"><div><span>${escapeHtml(p.reference)} - ${escapeHtml(p.category||"Investment")}</span>${status(p.status)}</div><h3>${escapeHtml(p.name)}</h3><p>${escapeHtml(p.description)}</p><div class="exec-project-values"><span>Current value<strong>${money(p.currentValue)}</strong></span><span>Net position<strong>${money(p.profit||0)}</strong></span></div><button data-executive-project="${p.id}">${icons.eye} Open governance summary</button></article>`).join("")}</div>`:""}`;
 }
 async function openExecutiveProject(id) {
@@ -1838,20 +1838,22 @@ function financeUnitTrustView(){
   const canEdit=Boolean(state.finance?.access?.canEdit||state.finance?.access?.canCreate);
   const monthOptions=(report.availableMonths||[]).map(m=>`<option value="${m}" ${report.month===m?"selected":""}>${m}</option>`).join("");
   const monthLabel=report.month||"All months";
-  return `<div class="finance-title-strip"><div><p class="eyebrow">Unit Trust / Old Mutual</p><h2>UAP account movement</h2><p>Each day that arrives, that day's interest is calculated and added. Future days are not shown.</p></div>
+  const lastInterestLabel=s.lastInterestMonth?new Date(`${s.lastInterestMonth}-01T00:00:00`).toLocaleDateString("en-GB",{month:"long",year:"numeric"}):"No month entered yet";
+  return `<div class="finance-title-strip"><div><p class="eyebrow">Unit Trust / Old Mutual</p><h2>UAP account movement</h2><p>Enter the final interest earned from the UAP statement once each month. The balance updates from that figure.</p></div>
     <div class="dashboard-year-control"><label>Month</label><select data-unit-trust-month><option value="">All months</option>${monthOptions}</select></div></div>
     <div class="module-actions" style="margin-bottom:14px">
-      <button class="button primary" data-finance-modal="transfer-uap">${icons.arrowUp||icons.plus}Transfer to UAP</button>
+      ${canEdit?`<button class="button primary" data-finance-modal="uap-interest">${icons.plus}Record month interest</button>`:""}
+      <button class="button secondary" data-finance-modal="transfer-uap">${icons.arrowUp||icons.plus}Transfer to UAP</button>
       <button class="button secondary" data-finance-modal="withdraw-uap">${icons.withdraw}Withdraw from UAP</button>
       <button class="button secondary" data-unit-trust-view="${escapeHtml(report.month||"")}">${icons.eye}View report</button>
       <button class="button secondary" data-unit-trust-download="${escapeHtml(report.month||"")}">${icons.download}Download report</button>
       <button class="button secondary" data-finance-page="finance-bank">${icons.building}Open company bank</button>
     </div>
     <div class="exec-module-metrics">
-      ${financeUnitTrustMetric("UAP account",money(s.currentBalance||s.closingBalance),"Live balance. Today's interest posts when the day arrives","violet")}
-      ${financeUnitTrustMetric("Profit so far",money(s.profitThisMonth??s.interestEarned),"Interest already earned this month","green")}
-      ${financeUnitTrustMetric("Profit by month end",money(s.profitByMonthEnd??s.interestEarned),"Profit so far plus interest still to come","blue")}
-      ${financeUnitTrustMetric("Still to accrue",money(s.projectedProfit||0),"Estimate only. Not posted until each day arrives","orange")}
+      ${financeUnitTrustMetric("UAP account",money(s.currentBalance||s.closingBalance),"Balance including interest entered","violet")}
+      ${financeUnitTrustMetric("Interest this month",money(s.profitThisMonth??s.interestEarned),"Interest entered for the month shown","green")}
+      ${financeUnitTrustMetric("Last interest entered",money(s.lastInterestAmount||0),lastInterestLabel,"blue")}
+      ${financeUnitTrustMetric("Total interest earned",money(s.totalInterest||0),"All interest recorded on UAP","orange")}
     </div>
     <section class="finance-panel"><div class="finance-panel-head"><div><h3>UAP account · ${escapeHtml(report.account?.accountName||"Old Mutual Unit Trust")}</h3><p>${escapeHtml(report.account?.accountNumber||"99171-CKA1073440")} · ${escapeHtml(report.account?.bankName||"Old Mutual Investment Group")} · month ${escapeHtml(monthLabel)}</p></div><strong>${money(s.currentBalance||s.closingBalance)}</strong></div>
     <div class="table-scroll"><table><thead><tr><th>Date</th><th>Description</th><th>Deposit</th><th>Interest</th><th>Withdrawal</th><th>Rate</th><th>Balance</th>${canEdit?"<th>Actions</th>":""}</tr></thead>
@@ -1922,6 +1924,7 @@ function openFinanceModal(type) {
     asset:["Register organization asset","Maintain the official asset register",`<form class="form" data-finance-form="asset"><div class="form-grid"><div class="field"><label>Asset code</label><input name="assetCode" required></div><div class="field"><label>Asset name</label><input name="assetName" required></div><div class="field"><label>Asset type</label><select name="assetType"><option>Land</option><option>Building</option><option>Vehicle</option><option>Furniture</option><option>Computers</option><option>Project Equipment</option></select></div><div class="field"><label>Purchase date</label><input name="purchaseDate" type="date" required></div><div class="field"><label>Purchase value</label><input name="purchaseValue" type="number" min="1" required></div><div class="field"><label>Current value</label><input name="currentValue" type="number" min="0"></div><div class="field"><label>Assigned department</label><select name="departmentId"><option value="">Organization-wide</option>${financeDepartmentOptions()}</select></div><div class="field"><label>Location</label><input name="location"></div><div class="field full"><label>Custodian</label><input name="custodian"></div></div>${formActions("Register asset")}</form>`],
     procurement:["Create procurement request","Begin the controlled request-to-payment workflow",`<form class="form" data-finance-form="procurement"><div class="form-grid"><div class="field"><label>Department</label><select name="departmentId">${financeDepartmentOptions()}</select></div><div class="field"><label>Estimated amount (UGX)</label><input name="estimatedAmount" type="number" min="1" required></div><div class="field full"><label>Item or service description</label><textarea name="itemDescription" required></textarea></div><div class="field full"><label>Suggested supplier</label><input name="supplier"></div></div>${formActions("Create procurement request")}</form>`],
     "transfer-uap":["Transfer to UAP / Unit Trust","Move surplus company bank funds into Old Mutual Unit Trust. Finance keeps a running UAP balance with movement history.",`<form class="form" data-finance-form="transfer-uap"><div class="form-grid"><div class="field"><label>From company account</label><select name="fromAccountId" required>${(state.finance?.accounts||[]).filter(a=>a.accountCode!=="GL-4500"&&a.accountType==="bank").map(a=>`<option value="${a.id}">${escapeHtml(a.accountName)} - ${money(a.balance)}</option>`).join("")}</select></div><div class="field"><label>Amount (UGX)</label><input name="amount" type="number" min="1" step="1000" required placeholder="e.g. 10000000"></div><div class="field"><label>Transfer date</label><input name="date" type="date" value="${new Date().toISOString().slice(0,10)}" required></div><div class="field full"><label>Note</label><textarea name="note" placeholder="e.g. Surplus Centenary balance moved to Unit Trust"></textarea></div></div>${formActions("Transfer to UAP")}</form>`],
+    "uap-interest":["Record UAP interest for a month","Enter the final interest earned from the UAP statement. It replaces any interest already on the ledger for that month and updates the UAP balance.",`<form class="form" data-finance-form="uap-interest"><div class="form-grid"><div class="field"><label>Month</label><input name="month" type="month" min="2026-09" max="${new Date().toISOString().slice(0,7)}" value="${(()=>{const d=new Date();d.setDate(1);d.setMonth(d.getMonth()-1);const m=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;return m<"2026-09"?"2026-09":m;})()}" required></div><div class="field"><label>Interest earned (UGX)</label><input name="amount" type="number" min="0" step="0.01" required placeholder="e.g. 1450000"></div></div>${formActions("Save month interest")}</form>`],
     "withdraw-uap":["Withdraw from UAP / Unit Trust","Move Unit Trust funds back into the company Centenary bank account. This updates the live UAP balance and movement history.",`<form class="form" data-finance-form="withdraw-uap"><div class="form-grid"><div class="field"><label>To company account</label><select name="toAccountId" required>${(state.finance?.accounts||[]).filter(a=>a.accountCode!=="GL-4500"&&a.accountType==="bank").map(a=>`<option value="${a.id}">${escapeHtml(a.accountName)} - ${money(a.balance)}</option>`).join("")}</select></div><div class="field"><label>Amount (UGX)</label><input name="amount" type="number" min="1" step="1000" required placeholder="e.g. 5000000"></div><div class="field"><label>Withdrawal date</label><input name="date" type="date" value="${new Date().toISOString().slice(0,10)}" required></div><div class="field full"><label>Note</label><textarea name="note" placeholder="e.g. Withdrawal from Unit Trust to Centenary for operations"></textarea></div></div>${formActions("Withdraw from UAP")}</form>`]
   };
   const [title,subtitle,form]=forms[type]||forms.income;
@@ -1967,6 +1970,19 @@ function configureFinanceIncomeAccounts(form) {
 }
 async function submitFinanceForm(event) {
   event.preventDefault();const form=event.currentTarget,type=form.dataset.financeForm;
+  if(type==="uap-interest"){
+    const button=form.querySelector("button[type=submit]");button.disabled=true;button.textContent="Saving…";
+    try{
+      const data=Object.fromEntries(new FormData(form).entries());
+      const result=await api("/api/finance/unit-trust/monthly-interest",{method:"POST",body:JSON.stringify(data)});
+      closeModal();
+      state.finance=await api("/api/finance/command-center");
+      state.unitTrust=await loadFinanceUnitTrust(result.month);
+      render();
+      toast(`UAP interest for ${result.month} saved: ${money(result.amount)}. UAP balance ${money(result.balance)}.`);
+    }catch(error){button.disabled=false;button.textContent="Try again";toast(error.message);}
+    return;
+  }
   if(type==="transfer-uap"||type==="withdraw-uap"){
     const button=form.querySelector("button[type=submit]");button.disabled=true;button.textContent=type==="withdraw-uap"?"Withdrawing…":"Transferring…";
     try{
@@ -2045,7 +2061,7 @@ async function deleteFinanceBudget(id){
   }catch(error){toast(error.message);}
 }
 async function deleteUnitTrustMovement(id){
-  if(!await confirmDialog("Delete this Unit Trust movement row? The live UAP balance is not auto-recalculated from daily interest rows."))return;
+  if(!await confirmDialog("Delete this Unit Trust movement row? Deleting an interest row recalculates the UAP balance."))return;
   try{
     await api(`/api/finance/unit-trust/movements/${id}`,{method:"DELETE"});
     await loadFinanceUnitTrust(state.unitTrust?.month||"");
@@ -2137,7 +2153,7 @@ async function openUnitTrustReportView(month){
     }
     closeModal();
     const monthLabel=unitTrustReportMonthLabel(report.month||viewMonth);
-    document.body.insertAdjacentHTML("beforeend",`<div class="modal-backdrop document-viewer-backdrop" id="modal-backdrop"><div class="modal document-viewer-modal unit-trust-report-modal" role="dialog" aria-modal="true" aria-labelledby="unit-trust-report-title"><div class="modal-head"><div><h2 id="unit-trust-report-title">UAP Unit Trust movement report</h2><p>${escapeHtml(monthLabel)} — daily interest, transfers and balance</p></div><button class="modal-close" data-report-preview-close aria-label="Close report">${icons.x}</button></div><div class="document-viewer-frame report-preview-frame" aria-live="polite">${unitTrustStatementHtml(report)}</div><div class="document-viewer-actions"><span>${icons.reports} Live Old Mutual / UAP ledger</span><button class="button secondary" data-unit-trust-download-modal="${escapeHtml(report.month||viewMonth||"")}">${icons.download}Download CSV</button><button class="button secondary" data-unit-trust-print>Print</button><button class="button primary" data-report-preview-close>Close</button></div></div></div>`);
+    document.body.insertAdjacentHTML("beforeend",`<div class="modal-backdrop document-viewer-backdrop" id="modal-backdrop"><div class="modal document-viewer-modal unit-trust-report-modal" role="dialog" aria-modal="true" aria-labelledby="unit-trust-report-title"><div class="modal-head"><div><h2 id="unit-trust-report-title">UAP Unit Trust movement report</h2><p>${escapeHtml(monthLabel)} — interest, transfers and balance</p></div><button class="modal-close" data-report-preview-close aria-label="Close report">${icons.x}</button></div><div class="document-viewer-frame report-preview-frame" aria-live="polite">${unitTrustStatementHtml(report)}</div><div class="document-viewer-actions"><span>${icons.reports} Live Old Mutual / UAP ledger</span><button class="button secondary" data-unit-trust-download-modal="${escapeHtml(report.month||viewMonth||"")}">${icons.download}Download CSV</button><button class="button secondary" data-unit-trust-print>Print</button><button class="button primary" data-report-preview-close>Close</button></div></div></div>`);
     document.querySelectorAll("[data-report-preview-close]").forEach(button=>button.addEventListener("click",closeModal));
     document.querySelector("[data-unit-trust-download-modal]")?.addEventListener("click",()=>downloadUnitTrustReport(report.month||viewMonth||""));
     document.querySelector("[data-unit-trust-print]")?.addEventListener("click",()=>{
@@ -2298,7 +2314,7 @@ function executiveReportPreviewContent(name) {
     columns=["Loan","Member","Product","Amount","Balance","Status"];
     rows=e.recentLoans.map(x=>[x.reference,x.member,x.product,money(x.amount),money(x.balance),x.status]);
   } else if(name==="Investment Report") {
-    metrics=[["UAP account",money(e.investment.unitTrust?.balance??e.investment.current_value)],["Profit so far",money(e.investment.unitTrust?.profitThisMonth||0)],["Profit by month end",money(e.investment.unitTrust?.profitByMonthEnd||0)],["Still to accrue",money(e.investment.unitTrust?.projectedProfit||0)]];
+    metrics=[["UAP account",money(e.investment.unitTrust?.balance??e.investment.current_value)],["Interest this month",money(e.investment.unitTrust?.profitThisMonth||0)],["Last interest entered",money(e.investment.unitTrust?.lastInterestAmount||0)],["Total interest earned",money(e.investment.unitTrust?.totalInterest||0)]];
     columns=["Project","Name","Status","Performance","Current value","Expected return"];
     rows=e.investmentProjects.map(x=>[x.reference,x.name,x.status,x.performanceStatus,money(x.currentValue),money(x.expectedReturn)]);
   } else if(name==="Welfare Report") {
@@ -2351,10 +2367,10 @@ function investmentDashboardView() {
   const i=state.investment;if(!i)return `<div class="executive-loading">Loading Investment workspace?</div>`;
   const s=i.stats,u=i.unitTrust;
   const cards=u?[
-    ["UAP account",money(u.balance),"building","investment-projects","Live balance through today"],
-    ["Profit so far",money(u.profitThisMonth),"arrowUp","investment-projects","Interest already earned this month"],
-    ["Profit by month end",money(u.profitByMonthEnd),"clock","investment-projects","Profit so far plus interest still to come"],
-    ["Still to accrue",money(u.projectedProfit),"reports","investment-projects","Estimate only. Posted when each day arrives"]
+    ["UAP account",money(u.balance),"building","investment-projects","Balance including interest entered"],
+    ["Interest this month",money(u.profitThisMonth),"arrowUp","investment-projects","Interest entered for this month"],
+    ["Last interest entered",money(u.lastInterestAmount||0),"clock","investment-projects",u.lastInterestMonth||"No month entered yet"],
+    ["Total interest earned",money(u.totalInterest||0),"reports","investment-projects","All interest recorded on UAP"]
   ]:[
     ["Total Portfolio",money(s.totalPortfolio),"building","investment-portfolio","Current portfolio value"],
     ["Active Projects",s.activeProjects,"reports","investment-projects","Income-generating projects"],
@@ -2380,7 +2396,7 @@ function investmentPortfolioWidget(i) {
   let cursor=0;const stops=i.categories.map((x,index)=>{const start=cursor;cursor+=x.value/total*100;return `${["#2372d8","#d89b00","#724bdc","#ed8e09","#ec3349","#0aa0a8"][index%6]} ${start}% ${cursor}%`}).join(",");
   return `<section class="finance-panel investment-portfolio-panel"><div class="finance-panel-head"><div><h3>Investment Portfolio Overview</h3><p>Capital allocation and current value</p></div><button data-investment-page="investment-portfolio">Open portfolio &gt;</button></div>
     <div class="investment-portfolio-layout"><div class="investment-donut" style="background:radial-gradient(circle,#fff 0 52%,transparent 53%),conic-gradient(${stops||"#ddd 0 100%"})"><strong>${money(i.portfolio.portfolioValue)}</strong><span>Total portfolio</span></div><div class="investment-allocation">${i.categories.map((x,index)=>`<div><i class="${colors[index%colors.length]}"></i><span>${x.category}</span><strong>${money(x.value)} - ${Math.round(x.value/total*100)}%</strong></div>`).join("")}</div></div>
-    <div class="investment-portfolio-metrics"><span>UAP account<strong>${money(i.unitTrust?.balance??i.portfolio.portfolioValue)}</strong></span><span>Profit so far<strong>${money(i.unitTrust?.profitThisMonth??i.portfolio.profit)}</strong></span><span>Still to accrue<strong>${money(i.unitTrust?.projectedProfit??0)}</strong></span></div></section>`;
+    <div class="investment-portfolio-metrics"><span>UAP account<strong>${money(i.unitTrust?.balance??i.portfolio.portfolioValue)}</strong></span><span>Interest this month<strong>${money(i.unitTrust?.profitThisMonth??i.portfolio.profit)}</strong></span><span>Total interest earned<strong>${money(i.unitTrust?.totalInterest??0)}</strong></span></div></section>`;
 }
 function investmentActiveProjectsWidget(i) {
   return `<section class="finance-panel"><div class="finance-panel-head"><div><h3>Active Projects</h3><p>Live unit trust first, then other projects</p></div><button data-investment-page="investment-projects">View all ></button></div><div class="investment-project-mini">${i.projects.slice(0,4).map(p=>{

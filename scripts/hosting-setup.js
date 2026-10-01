@@ -65,10 +65,6 @@ if (!skipSync) {
     "scripts/clarify-centenary-uap-flow.js",
     ...dry,
   ]);
-  run("Live cleanup + Sep UAP 12.96% interest + loans 45.5M", "node", [
-    "scripts/sync-sep2026-live-cleanup.js",
-    ...dry,
-  ]);
   run("Vicent join date + welfare collection start June 2024", "node", [
     "scripts/sync-vicent-welfare-start.js",
     ...dry,

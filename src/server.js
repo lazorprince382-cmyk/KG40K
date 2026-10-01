@@ -146,6 +146,29 @@ async function postRepaymentToCentenary(client,transactionId,userId){
   if(posted?.id)await client.query("UPDATE transactions SET finance_entry_id=$1 WHERE id=$2",[posted.id,row.id]);
   return posted;
 }
+async function removeDuplicateBabiryeRepayment(client){
+  const done=(await client.query("SELECT value FROM settings WHERE key='fixBabiryeDuplicateRepayment20261001'")).rows[0];
+  if(done)return [];
+  const rows=(await client.query(`SELECT t.* FROM transactions t JOIN members m ON m.id=t.member_id LEFT JOIN loans l ON l.id=t.loan_id
+    WHERE t.type='Loan repayment' AND t.status='completed' AND t.amount=4000000 AND m.full_name ILIKE '%babirye%'
+      AND (t.created_at AT TIME ZONE 'Africa/Kampala')::date='2026-10-01' AND COALESCE(l.reference,'') NOT LIKE 'LN-HIST-%'
+    ORDER BY t.created_at,t.id FOR UPDATE OF t`)).rows;
+  if(rows.length<2)return [];
+  const removed=[];
+  for(const tx of rows.slice(1)){
+    const entry=tx.finance_entry_id?(await client.query("SELECT * FROM organization_finance_entries WHERE id=$1 FOR UPDATE",[tx.finance_entry_id])).rows[0]:null;
+    if(entry){
+      await reverseIncomeReceipt(client,entry);
+      await client.query("DELETE FROM organization_finance_entries WHERE id=$1",[entry.id]);
+    }else{
+      await reverseLoanRepayment(client,tx);
+    }
+    removed.push(tx.reference);
+  }
+  await client.query(`INSERT INTO settings (key,value) VALUES ('fixBabiryeDuplicateRepayment20261001',$1)
+    ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value,updated_at=NOW()`,[removed.join(",")]);
+  return removed;
+}
 async function backfillRepaymentsToCentenary(client){
   const pending=(await client.query(`SELECT t.id FROM transactions t LEFT JOIN loans l ON l.id=t.loan_id
     WHERE t.type='Loan repayment' AND t.status='completed' AND t.finance_entry_id IS NULL
@@ -315,6 +338,13 @@ async function reverseIncomeReceipt(client,entry){
       if(error.code!=="23503")throw error;
       await client.query("UPDATE welfare_contributions SET status='voided',amount=0,finance_entry_id=NULL,verification_comment=TRIM(BOTH FROM COALESCE(verification_comment,'')||' | Voided when finance receipt was deleted') WHERE id=$1",[row.id]);
     }
+  }
+  const repayments=(await client.query(`SELECT * FROM transactions WHERE finance_entry_id=$1 AND type='Loan repayment' FOR UPDATE`,[entry.id])).rows;
+  for(const tx of repayments){
+    await client.query("UPDATE transactions SET finance_entry_id=NULL WHERE id=$1",[tx.id]);
+    const undone=await reverseLoanRepayment(client,tx);
+    effects.loanReversed=(effects.loanReversed||0)+undone.amount;
+    effects.loanReference=undone.loanReference;
   }
   await client.query("UPDATE investment_transactions SET finance_entry_id=NULL WHERE finance_entry_id=$1",[entry.id]);
   await client.query("UPDATE member_investment_applications SET finance_entry_id=NULL WHERE finance_entry_id=$1",[entry.id]);
@@ -1798,6 +1828,7 @@ app.delete("/api/finance/income/:id",auth,asyncRoute(async(req,res,next)=>{
   let message=`Receipt ${result.entry.receipt_number||result.entry.reference} deleted. UGX ${amount.toLocaleString()} deducted from ${account}.`;
   if(result.effects.savingsReversed>0)message+=` Member savings reduced by UGX ${result.effects.savingsReversed.toLocaleString()}.`;
   if(result.effects.welfareReversed>0)message+=` Welfare reduced by UGX ${result.effects.welfareReversed.toLocaleString()}.`;
+  if(result.effects.loanReversed>0)message+=` Loan repayment of UGX ${result.effects.loanReversed.toLocaleString()} removed from ${result.effects.loanReference||"the loan"}.`;
   if(isMemberSavingsFinanceCategory(result.entry.category)&&!result.effects.savingsMatched)message+=" No matching savings record was found, so the member savings balance was left unchanged.";
   await audit({userId:req.user.id,action:"FINANCE_INCOME_DELETED",entityType:"organization_finance",entityId:String(result.entry.id),
     details:`${result.entry.receipt_number||result.entry.reference} - UGX ${amount} reversed from ${account}`,...metadata(req)});
@@ -2300,19 +2331,16 @@ app.get("/api/finance/unit-trust",auth,requireFinance("view"),asyncRoute(async(r
   const arrived=ordered.filter(row=>!kampala||String(row.date).slice(0,10)<=kampala);
   const monthInterest=arrived.filter(row=>String(row.date).slice(0,7)===viewMonth).reduce((sum,row)=>sum+Number(row.interest||0),0);
   const liveBalance=arrived.length?Number(arrived.at(-1).balance):closing;
-  const forecast=viewMonth&&kampala&&viewMonth===kampala.slice(0,7)
-    ?forecastUnitTrustRemainder(liveBalance,arrived.at(-1)?.rate,kampala)
-    :{projectedProfit:0,projectedClosing:liveBalance};
+  const totals=await unitTrustInterestTotals({query},kampala);
   const months=(await query(`SELECT to_char(date_trunc('month',movement_date),'YYYY-MM') AS month
     FROM unit_trust_movements WHERE movement_date<=$1::date GROUP BY 1 ORDER BY 1 DESC`,[kampala])).rows.map(r=>r.month);
   res.json({
     account,month:monthStart?month:null,availableMonths:months,movements:arrived,
     summary:{openingBalance:opening,closingBalance:liveBalance,interestEarned:monthInterest,deposits,withdrawals,
-      profitThisMonth:monthInterest,projectedProfit:forecast.projectedProfit,
-      profitByMonthEnd:Math.round((monthInterest+forecast.projectedProfit)*100)/100,
-      projectedClosing:forecast.projectedClosing,
+      profitThisMonth:monthInterest,projectedProfit:0,profitByMonthEnd:monthInterest,projectedClosing:liveBalance,
+      ...totals,viewMonth,
       balanceIfNoWithdrawal:closing+withdrawals,currentBalance:Number(account?.balance||closing),
-      accruesDaily:true,asOf:kampala}
+      accruesDaily:false,asOf:kampala}
   });
 }));
 app.get("/api/finance/unit-trust/export.csv",auth,requireFinance("view"),asyncRoute(async(req,res)=>{
@@ -2341,6 +2369,32 @@ app.get("/api/finance/unit-trust/export.csv",auth,requireFinance("view"),asyncRo
   await audit({userId:req.user.id,action:"UNIT_TRUST_REPORT_EXPORTED",entityType:"unit_trust",details:`month=${stamp}`,...metadata(req)});
   res.type("text/csv").attachment(`uap-unit-trust-${stamp}.csv`).send(lines.join("\r\n"));
 }));
+app.post("/api/finance/unit-trust/monthly-interest",auth,requireFinance("create"),asyncRoute(async(req,res)=>{
+  const month=String(req.body.month||"").trim(),amount=Number(req.body.amount);
+  if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(month))return res.status(400).json({error:"Choose the month the interest was earned"});
+  if(!Number.isFinite(amount)||amount<0)return res.status(400).json({error:"Enter the interest earned for the month (0 or more)"});
+  if(month<"2026-09")return res.status(400).json({error:"Months before September 2026 come from the reconciled UAP statement"});
+  const result=await transaction(async client=>{
+    const account=(await client.query(`SELECT id FROM finance_accounts WHERE account_code='GL-4500' AND active=true LIMIT 1 FOR UPDATE`)).rows[0];
+    if(!account){const error=new Error("UAP account not found");error.status=404;throw error;}
+    const dates=(await client.query(`SELECT (CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date::text AS today,
+      (date_trunc('month',$1::date)+INTERVAL '1 month - 1 day')::date::text AS month_end`,[`${month}-01`])).rows[0];
+    if(`${month}-01`>dates.today){const error=new Error("You cannot enter interest for a month that has not started");error.status=400;throw error;}
+    const day=dates.month_end>dates.today?dates.today:dates.month_end;
+    const replaced=(await client.query(`DELETE FROM unit_trust_movements
+      WHERE description='Interest' AND movement_date>=$1::date AND movement_date<($1::date+INTERVAL '1 month')
+      RETURNING interest_amount::float AS interest`,[`${month}-01`])).rows;
+    await client.query(`INSERT INTO unit_trust_movements
+      (movement_date,description,deposit_amount,interest_amount,withdrawal_amount,rate_percent,balance_after,source_reference,created_by)
+      VALUES ($1::date,'Interest',0,$2,0,NULL,0,$3,$4)`,[day,amount,`uap-monthly-interest-${month}`,req.user.id]);
+    await recomputeUnitTrustBalances(client,`${month}-01`);
+    const balance=await syncUnitTrustAccount(client);
+    return {month,amount,day,balance,replacedRows:replaced.length,replacedAmount:replaced.reduce((s,r)=>s+Number(r.interest||0),0)};
+  });
+  await audit({userId:req.user.id,action:"UNIT_TRUST_MONTHLY_INTEREST",entityType:"unit_trust",entityId:month,
+    details:`UGX ${amount} interest for ${month} (replaced ${result.replacedRows} rows, UGX ${result.replacedAmount})`,...metadata(req)});
+  res.status(201).json(result);
+}));
 app.delete("/api/finance/unit-trust/movements/:id",auth,requireFinance("edit"),asyncRoute(async(req,res)=>{
   const id=Number(req.params.id);
   if(!Number.isInteger(id))return res.status(400).json({error:"Invalid movement id"});
@@ -2348,7 +2402,13 @@ app.delete("/api/finance/unit-trust/movements/:id",auth,requireFinance("edit"),a
     interest_amount::float AS interest,withdrawal_amount::float AS withdrawal,balance_after::float AS balance,
     source_reference AS "sourceReference" FROM unit_trust_movements WHERE id=$1`,[id]);
   if(!row)return res.status(404).json({error:"Unit Trust movement not found"});
-  await query(`DELETE FROM unit_trust_movements WHERE id=$1`,[id]);
+  await transaction(async client=>{
+    const deleted=(await client.query(`DELETE FROM unit_trust_movements WHERE id=$1 RETURNING movement_date::text AS day,description`,[id])).rows[0];
+    if(deleted?.description==="Interest"){
+      await recomputeUnitTrustBalances(client,deleted.day);
+      await syncUnitTrustAccount(client);
+    }
+  });
   await audit({userId:req.user.id,action:"UNIT_TRUST_MOVEMENT_DELETED",entityType:"unit_trust_movement",entityId:String(id),
     details:`${row.date} · ${row.description} · bal ${row.balance}`,...metadata(req)});
   res.json({ok:true,id});
@@ -2858,6 +2918,48 @@ async function applyLoanRepayment(client,loanId,amount,options={}){
   const completed=newBalance<0.005&&Number(outstanding.total)<0.005;
   await client.query("UPDATE loans SET balance=$1,status=$2 WHERE id=$3",[newBalance,completed?"completed":"active",loan.id]);
   return {loan,chargeApplied,interestApplied,principalApplied,newBalance,settledPrincipalOnly:false};
+}
+async function reverseLoanRepayment(client,tx){
+  const loan=(await client.query("SELECT * FROM loans WHERE id=$1 FOR UPDATE",[tx.loan_id])).rows[0];
+  const amount=Number(tx.amount);
+  const allocation=String(tx.notes||"").match(/charges=([\d.]+),\s*interest=([\d.]+),\s*principal=([\d.]+)/);
+  let charges=allocation?Number(allocation[1]):0,interest=allocation?Number(allocation[2]):0,principal=allocation?Number(allocation[3]):0;
+  let unknown=allocation?0:amount;
+  if(loan){
+    const paidCharges=(await client.query(`SELECT * FROM loan_charges WHERE loan_id=$1 AND paid_amount>0
+      ORDER BY COALESCE(settled_at,assessed_at) DESC,id DESC FOR UPDATE`,[loan.id])).rows;
+    for(const charge of paidCharges){
+      if(charges<=0.005)break;
+      const undo=Math.min(charges,Number(charge.paid_amount));
+      const paid=Number(charge.paid_amount)-undo;
+      await client.query("UPDATE loan_charges SET paid_amount=$1,status=$2,settled_at=NULL WHERE id=$3",[paid,paid>0.005?"partial":"outstanding",charge.id]);
+      charges-=undo;
+    }
+    const rows=(await client.query(`SELECT *,due_date::text AS due_text FROM loan_repayment_schedule WHERE loan_id=$1 AND paid_amount>0
+      ORDER BY installment_number DESC FOR UPDATE`,[loan.id])).rows;
+    const today=(await client.query(`SELECT (CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date::text AS day`)).rows[0].day;
+    let principalReversed=0;
+    for(const row of rows){
+      if(principal<=0.005&&interest<=0.005&&unknown<=0.005)break;
+      let principalPaid=Number(row.principal_paid||0),interestPaid=Number(row.interest_paid||0);
+      const undoInterest=Math.min(interest,interestPaid);interestPaid-=undoInterest;interest-=undoInterest;
+      const undoPrincipal=Math.min(principal,principalPaid);principalPaid-=undoPrincipal;principal-=undoPrincipal;principalReversed+=undoPrincipal;
+      if(unknown>0.005){
+        const fromPrincipal=Math.min(unknown,principalPaid);principalPaid-=fromPrincipal;unknown-=fromPrincipal;principalReversed+=fromPrincipal;
+        const fromInterest=Math.min(unknown,interestPaid);interestPaid-=fromInterest;unknown-=fromInterest;
+      }
+      const paidAmount=Math.round((principalPaid+interestPaid)*100)/100;
+      const due=String(row.due_text).slice(0,10);
+      const fullyPaid=principalPaid>=Number(row.principal)-0.005&&interestPaid>=Number(row.interest)-0.005;
+      const status=fullyPaid?"paid":due<today?"overdue":due===today?"due":paidAmount>0?"partial":"upcoming";
+      await client.query(`UPDATE loan_repayment_schedule SET principal_paid=$1,interest_paid=$2,paid_amount=$3,status=$4,
+        paid_at=CASE WHEN $4='paid' THEN paid_at ELSE NULL END WHERE id=$5`,[principalPaid,interestPaid,paidAmount,status,row.id]);
+    }
+    const newBalance=Math.min(Number(loan.amount),Number(loan.balance)+principalReversed);
+    await client.query(`UPDATE loans SET balance=$1,status=CASE WHEN status='completed' AND $1>0.005 THEN 'active' ELSE status END WHERE id=$2`,[newBalance,loan.id]);
+  }
+  await removeTransactionRow(client,tx.id);
+  return {loanReference:loan?.reference||null,amount};
 }
 const optionalReceiptUpload=(req,res,next)=>{
   if(String(req.headers["content-type"]||"").includes("multipart/form-data")) return upload.single("receipt")(req,res,next);
@@ -5887,60 +5989,49 @@ app.patch("/api/settings/:key",auth,permit("system:manage"),asyncRoute(async(req
   await audit({userId:req.user.id,action:"SETTING_UPDATED",entityType:"setting",entityId:req.params.key,details:String(req.body.value),...metadata(req)}); res.json({ok:true});
 }));
 
-async function accrueUnitTrustInterest(client){
-  const rate=12.96;
-  const account=(await client.query(`SELECT id FROM finance_accounts WHERE account_code='GL-4500' AND active=true LIMIT 1 FOR UPDATE`)).rows[0];
-  if(!account)return;
-  const today=(await client.query(`SELECT (CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date::text AS day`)).rows[0].day;
-  await client.query(`DELETE FROM unit_trust_movements
-    WHERE movement_date>$1::date AND description='Interest'
-      AND (source_reference LIKE 'live-uap-interest-%' OR source_reference LIKE 'sync-sep2026-uap-interest-int-%')`,[today]);
-  const latest=(await client.query(`SELECT movement_date::text AS day, balance_after::float AS balance, rate_percent::float AS rate
-    FROM unit_trust_movements WHERE movement_date<=$1::date ORDER BY movement_date DESC, id DESC LIMIT 1`,[today])).rows[0];
-  if(!latest?.day)return;
-  const usedRate=Number(latest.rate)>0?Number(latest.rate):rate;
-  let cursor=latest.day;
-  let balance=Number(latest.balance);
-  let guard=0;
-  while(cursor<today&&guard<40){
-    const next=(await client.query(`SELECT ($1::date+INTERVAL '1 day')::date::text AS day`,[cursor])).rows[0].day;
-    const existing=(await client.query(`SELECT balance_after::float AS balance FROM unit_trust_movements
-      WHERE movement_date=$1::date AND description='Interest' LIMIT 1`,[next])).rows[0];
-    if(existing){
-      balance=Number(existing.balance);
-    }else{
-      const interest=Math.round(balance*usedRate/100/365*100)/100;
-      balance=Math.round((balance+interest)*100)/100;
-      await client.query(`INSERT INTO unit_trust_movements
-        (movement_date,description,deposit_amount,interest_amount,withdrawal_amount,rate_percent,balance_after,source_reference)
-        VALUES ($1::date,'Interest',0,$2,0,$3,$4,$5)`,
-        [next,interest,usedRate,balance,`live-uap-interest-${next}`]);
-    }
-    cursor=next;
-    guard+=1;
+const UAP_MONTHLY_INTEREST_FROM="2026-10-01";
+async function recomputeUnitTrustBalances(client,fromDate){
+  const anchor=(await client.query(`SELECT balance_after::float AS balance FROM unit_trust_movements
+    WHERE movement_date<$1::date ORDER BY movement_date DESC,id DESC LIMIT 1`,[fromDate])).rows[0];
+  const rows=(await client.query(`SELECT id,description,deposit_amount::float AS deposit,interest_amount::float AS interest,
+      withdrawal_amount::float AS withdrawal,balance_after::float AS balance
+    FROM unit_trust_movements WHERE movement_date>=$1::date ORDER BY movement_date,id`,[fromDate])).rows;
+  let running=anchor?Number(anchor.balance):null;
+  for(const row of rows){
+    const opening=row.description==="Opening Balance";
+    if(running===null)running=opening?Number(row.balance):Number(row.balance)-Number(row.deposit||0)-Number(row.interest||0)+Number(row.withdrawal||0);
+    if(!opening)running=Math.round((running+Number(row.deposit||0)+Number(row.interest||0)-Number(row.withdrawal||0))*100)/100;
+    if(Math.abs(running-Number(row.balance))>0.004)
+      await client.query("UPDATE unit_trust_movements SET balance_after=$1 WHERE id=$2",[running,row.id]);
   }
+}
+async function syncUnitTrustAccount(client){
+  const account=(await client.query(`SELECT id FROM finance_accounts WHERE account_code='GL-4500' AND active=true LIMIT 1 FOR UPDATE`)).rows[0];
+  if(!account)return null;
+  const today=(await client.query(`SELECT (CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date::text AS day`)).rows[0].day;
   const posted=(await client.query(`SELECT balance_after::float AS balance FROM unit_trust_movements
     WHERE movement_date<=$1::date ORDER BY movement_date DESC, id DESC LIMIT 1`,[today])).rows[0];
-  const live=Number(posted?.balance??balance);
+  if(!posted)return null;
+  const live=Number(posted.balance);
   await client.query(`UPDATE finance_accounts SET balance=$1, updated_at=NOW() WHERE id=$2`,[live,account.id]);
   await client.query(`INSERT INTO settings (key,value) VALUES ('organizationUapBalance',$1)
     ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()`,[String(live)]);
+  await client.query(`UPDATE investment_fund_accounts SET current_value=$1,updated_at=NOW()
+    WHERE reference IN ('FUND-OLD-MUTUAL-2025','FUND-UAP-UMBRELLA')`,[live]);
+  return live;
 }
-function forecastUnitTrustRemainder(balance,rate,asOf){
-  const day=String(asOf||"").slice(0,10);
-  if(!/^\d{4}-\d{2}-\d{2}$/.test(day))return {projectedProfit:0,projectedClosing:Number(balance)||0};
-  const cursor=new Date(`${day}T00:00:00Z`);
-  const end=new Date(Date.UTC(cursor.getUTCFullYear(),cursor.getUTCMonth()+1,0));
-  let running=Number(balance)||0;
-  const used=Number(rate)>0?Number(rate):12.96;
-  let interest=0;
-  for(let step=0;step<40&&cursor<end;step+=1){
-    cursor.setUTCDate(cursor.getUTCDate()+1);
-    const dayInterest=Math.round(running*used/100/365*100)/100;
-    interest=Math.round((interest+dayInterest)*100)/100;
-    running=Math.round((running+dayInterest)*100)/100;
-  }
-  return {projectedProfit:interest,projectedClosing:running};
+async function accrueUnitTrustInterest(client){
+  const removed=await client.query(`DELETE FROM unit_trust_movements
+    WHERE description='Interest' AND source_reference LIKE 'live-uap-interest-%' AND movement_date>=$1::date`,[UAP_MONTHLY_INTEREST_FROM]);
+  if(removed.rowCount)await recomputeUnitTrustBalances(client,UAP_MONTHLY_INTEREST_FROM);
+  await syncUnitTrustAccount(client);
+}
+async function unitTrustInterestTotals(runner,asOf){
+  const last=(await runner.query(`SELECT to_char(movement_date,'YYYY-MM') AS month,SUM(interest_amount)::float AS amount
+    FROM unit_trust_movements WHERE description='Interest' AND movement_date<=$1::date
+    GROUP BY 1 HAVING SUM(interest_amount)>0 ORDER BY 1 DESC LIMIT 1`,[asOf])).rows[0];
+  const total=(await runner.query(`SELECT COALESCE(SUM(interest_amount),0)::float AS total FROM unit_trust_movements WHERE movement_date<=$1::date`,[asOf])).rows[0];
+  return {lastInterestMonth:last?.month||null,lastInterestAmount:Number(last?.amount||0),totalInterest:Number(total?.total||0)};
 }
 function isUnitTrustRecord(project){
   return /unit trust|old mutual|\buap\b|INV-FUND-OM/i.test(`${project?.reference||""} ${project?.name||""} ${project?.category||""}`);
@@ -5960,15 +6051,12 @@ async function liveUnitTrustPosition(){
   const last=posted.at(-1)||await one(`SELECT movement_date::text AS date, balance_after::float AS balance, rate_percent::float AS rate
     FROM unit_trust_movements WHERE movement_date<=$1::date ORDER BY movement_date DESC,id DESC LIMIT 1`,[kampala||"2026-09-14"]);
   const balance=Number(last?.balance||account?.balance||0);
-  const rate=Number(last?.rate||12.96);
-  const forecast=forecastUnitTrustRemainder(balance,rate,kampala);
-  const totalInterest=Number((await one(`SELECT COALESCE(SUM(interest_amount),0)::float AS total FROM unit_trust_movements WHERE movement_date<=$1::date`,[kampala||"2026-09-14"]))?.total||0);
-  const capital=Math.max(0,Math.round((balance-totalInterest)*100)/100);
+  const totals=await unitTrustInterestTotals({query},kampala||"2026-09-14");
+  const capital=Math.max(0,Math.round((balance-totals.totalInterest)*100)/100);
   return {
-    balance,capital,totalInterest,profitThisMonth:monthInterest,projectedProfit:forecast.projectedProfit,
-    profitByMonthEnd:Math.round((monthInterest+forecast.projectedProfit)*100)/100,
-    projectedClosing:forecast.projectedClosing,
-    rate,asOf:kampala,accruesDaily:true
+    balance,capital,...totals,profitThisMonth:monthInterest,projectedProfit:0,
+    profitByMonthEnd:monthInterest,projectedClosing:balance,
+    rate:null,asOf:kampala,accruesDaily:false
   };
 }
 function withLiveUnitTrust(project,position){
@@ -5988,6 +6076,8 @@ async function runScheduledMaintenance() {
     if(charged.length)console.log(`Monthly welfare taken from covered savings: ${charged.map(x=>`${x.name} (${x.period})`).join(", ")}`);
   });
   await transaction(async client=>{
+    const duplicates=await removeDuplicateBabiryeRepayment(client);
+    if(duplicates.length)console.log(`Duplicate Babirye loan repayment removed: ${duplicates.join(", ")}`);
     const posted=await backfillRepaymentsToCentenary(client);
     if(posted.length)console.log(`Loan repayments posted to Centenary: ${posted.join(", ")}`);
   });
