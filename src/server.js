@@ -2329,14 +2329,18 @@ app.get("/api/finance/unit-trust",auth,requireFinance("view"),asyncRoute(async(r
   const kampala=(await one(`SELECT (CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date::text AS day`))?.day;
   const viewMonth=monthStart?month:String(kampala||"").slice(0,7);
   const arrived=ordered.filter(row=>!kampala||String(row.date).slice(0,10)<=kampala);
-  const monthInterest=arrived.filter(row=>String(row.date).slice(0,7)===viewMonth).reduce((sum,row)=>sum+Number(row.interest||0),0);
   const liveBalance=arrived.length?Number(arrived.at(-1).balance):closing;
+  const monthInterest=monthStart&&arrived.length
+    ?Math.round((liveBalance-opening-deposits+withdrawals)*100)/100
+    :(await unitTrustMonthInterest({query},viewMonth));
   const totals=await unitTrustInterestTotals({query},kampala);
-  const months=(await query(`SELECT to_char(date_trunc('month',movement_date),'YYYY-MM') AS month
-    FROM unit_trust_movements WHERE movement_date<=$1::date GROUP BY 1 ORDER BY 1 DESC`,[kampala])).rows.map(r=>r.month);
+  const months=(await query(`SELECT to_char(m,'YYYY-MM') AS month FROM (
+      SELECT date_trunc('month',movement_date) AS m FROM unit_trust_movements WHERE movement_date<=$1::date
+      UNION SELECT generate_series($2::date,date_trunc('month',$1::date),INTERVAL '1 month')
+    ) x GROUP BY 1 ORDER BY 1 DESC`,[kampala,`${UAP_FIRST_ENTRY_MONTH}-01`])).rows.map(r=>r.month);
   res.json({
     account,month:monthStart?month:null,availableMonths:months,movements:arrived,
-    summary:{openingBalance:opening,closingBalance:liveBalance,interestEarned:monthInterest,deposits,withdrawals,
+    summary:{openingBalance:opening,closingBalance:liveBalance,interestEarned:monthStart?monthInterest:interest,deposits,withdrawals,
       profitThisMonth:monthInterest,projectedProfit:0,profitByMonthEnd:monthInterest,projectedClosing:liveBalance,
       ...totals,viewMonth,
       balanceIfNoWithdrawal:closing+withdrawals,currentBalance:Number(account?.balance||closing),
@@ -2373,7 +2377,7 @@ app.post("/api/finance/unit-trust/monthly-interest",auth,requireFinance("create"
   const month=String(req.body.month||"").trim(),amount=Number(req.body.amount);
   if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(month))return res.status(400).json({error:"Choose the month the interest was earned"});
   if(!Number.isFinite(amount)||amount<0)return res.status(400).json({error:"Enter the interest earned for the month (0 or more)"});
-  if(month<"2026-09")return res.status(400).json({error:"Months before September 2026 come from the reconciled UAP statement"});
+  if(month<UAP_FIRST_ENTRY_MONTH)return res.status(400).json({error:"Months before September 2026 come from the reconciled UAP statement"});
   const result=await transaction(async client=>{
     const account=(await client.query(`SELECT id FROM finance_accounts WHERE account_code='GL-4500' AND active=true LIMIT 1 FOR UPDATE`)).rows[0];
     if(!account){const error=new Error("UAP account not found");error.status=404;throw error;}
@@ -5990,6 +5994,7 @@ app.patch("/api/settings/:key",auth,permit("system:manage"),asyncRoute(async(req
 }));
 
 const UAP_MONTHLY_INTEREST_FROM="2026-10-01";
+const UAP_FIRST_ENTRY_MONTH="2026-09";
 async function recomputeUnitTrustBalances(client,fromDate){
   const anchor=(await client.query(`SELECT balance_after::float AS balance FROM unit_trust_movements
     WHERE movement_date<$1::date ORDER BY movement_date DESC,id DESC LIMIT 1`,[fromDate])).rows[0];
@@ -6023,15 +6028,27 @@ async function syncUnitTrustAccount(client){
 async function accrueUnitTrustInterest(client){
   const removed=await client.query(`DELETE FROM unit_trust_movements
     WHERE description='Interest' AND source_reference LIKE 'live-uap-interest-%' AND movement_date>=$1::date`,[UAP_MONTHLY_INTEREST_FROM]);
-  if(removed.rowCount)await recomputeUnitTrustBalances(client,UAP_MONTHLY_INTEREST_FROM);
+  await recomputeUnitTrustBalances(client,UAP_MONTHLY_INTEREST_FROM);
   await syncUnitTrustAccount(client);
 }
+async function unitTrustMonthInterest(runner,month){
+  if(!/^\d{4}-\d{2}$/.test(String(month||"")))return 0;
+  const row=(await runner.query(`WITH m AS (SELECT $1::date AS start,($1::date+INTERVAL '1 month')::date AS finish)
+    SELECT
+      (SELECT balance_after FROM unit_trust_movements,m WHERE movement_date>=m.start AND movement_date<m.finish ORDER BY movement_date DESC,id DESC LIMIT 1)::float AS closing,
+      (SELECT balance_after FROM unit_trust_movements,m WHERE movement_date<m.start ORDER BY movement_date DESC,id DESC LIMIT 1)::float AS opening,
+      (SELECT COALESCE(SUM(deposit_amount),0)-COALESCE(SUM(withdrawal_amount),0) FROM unit_trust_movements,m WHERE movement_date>=m.start AND movement_date<m.finish)::float AS net,
+      (SELECT COALESCE(SUM(interest_amount),0) FROM unit_trust_movements,m WHERE movement_date>=m.start AND movement_date<m.finish)::float AS summed`,[`${month}-01`])).rows[0];
+  if(row?.closing==null||row?.opening==null)return Number(row?.summed||0);
+  return Math.round((Number(row.closing)-Number(row.opening)-Number(row.net||0))*100)/100;
+}
 async function unitTrustInterestTotals(runner,asOf){
-  const last=(await runner.query(`SELECT to_char(movement_date,'YYYY-MM') AS month,SUM(interest_amount)::float AS amount
+  const last=(await runner.query(`SELECT to_char(movement_date,'YYYY-MM') AS month
     FROM unit_trust_movements WHERE description='Interest' AND movement_date<=$1::date
     GROUP BY 1 HAVING SUM(interest_amount)>0 ORDER BY 1 DESC LIMIT 1`,[asOf])).rows[0];
   const total=(await runner.query(`SELECT COALESCE(SUM(interest_amount),0)::float AS total FROM unit_trust_movements WHERE movement_date<=$1::date`,[asOf])).rows[0];
-  return {lastInterestMonth:last?.month||null,lastInterestAmount:Number(last?.amount||0),totalInterest:Number(total?.total||0)};
+  const lastInterestAmount=last?.month?await unitTrustMonthInterest(runner,last.month):0;
+  return {lastInterestMonth:last?.month||null,lastInterestAmount,totalInterest:Number(total?.total||0)};
 }
 function isUnitTrustRecord(project){
   return /unit trust|old mutual|\buap\b|INV-FUND-OM/i.test(`${project?.reference||""} ${project?.name||""} ${project?.category||""}`);

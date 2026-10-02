@@ -1129,8 +1129,8 @@ function executiveDashboardView() {
         ["Loans in default",e.loans.defaults],["Money in loans",money(loansOut)]])}
       ${(state.execHealthVisible||{}).investment===false?"":executiveHealthCard("Investment","executive-investments","reports",[
         ["UAP account",money(e.investment.unitTrust?.balance??e.investment.current_value)],
-        ["Interest this month",money(e.investment.unitTrust?.profitThisMonth||0)],
-        ["Last interest entered",money(e.investment.unitTrust?.lastInterestAmount||0)],
+        [`Interest · ${uapMonthName(e.investment.unitTrust?.lastInterestMonth)||"—"}`,money(e.investment.unitTrust?.lastInterestAmount||0)],
+        ["Next month to record",uapMonthName(uapNextMonth(e.investment.unitTrust?.lastInterestMonth))||"—"],
         ["Total interest earned",money(e.investment.unitTrust?.totalInterest||0)]])}
       ${(state.execHealthVisible||{}).audit===false?"":executiveHealthCard("Audit","executive-audit","audit",[
         ["Open audit issues",e.audit.open],["Resolved issues",e.audit.resolved],["Departments under review",e.audit.departmentsUnderReview],
@@ -1388,7 +1388,7 @@ function executiveProjectsView() {
   const projects=e.investmentProjects||[];
   const u=e.investment.unitTrust;
   const others=projects.filter(p=>!(p.isUnitTrust||/unit trust|old mutual|INV-FUND-OM/i.test(`${p.reference||""} ${p.name||""}`)));
-  return `<div class="exec-module-metrics">${financeUnitTrustMetric("UAP account",money(u?.balance??e.investment.current_value),"Balance including interest entered","violet")}${financeUnitTrustMetric("Interest this month",money(u?.profitThisMonth||0),"Interest entered for this month","green")}${financeUnitTrustMetric("Last interest entered",money(u?.lastInterestAmount||0),u?.lastInterestMonth||"No month entered yet","blue")}${financeUnitTrustMetric("Total interest earned",money(u?.totalInterest||0),"All interest recorded on UAP","orange")}</div>
+  return `<div class="exec-module-metrics">${financeUnitTrustMetric("UAP account",money(u?.balance??e.investment.current_value),"Balance as per the last UAP statement recorded","violet")}${financeUnitTrustMetric(`Interest · ${uapMonthName(u?.lastInterestMonth)||"—"}`,money(u?.lastInterestAmount||0),"From the UAP statement","green")}${financeUnitTrustMetric("Next month to record",uapMonthName(uapNextMonth(u?.lastInterestMonth))||"—","Finance records it when the statement arrives","blue")}${financeUnitTrustMetric("Total interest earned",money(u?.totalInterest||0),"All interest recorded on UAP","orange")}</div>
     <section class="exec-panel executive-project-note"><div>${icons.shield}<div><strong>Same Unit Trust as Finance</strong><span>Finance enters the final interest from the UAP statement once a month.</span></div><button class="button secondary" data-executive-page="finance-unit-trust">Open movement</button></div></section>
     ${others.length?`<div class="exec-project-grid executive-governance-projects">${others.map(p=>`<article class="exec-project-card"><div><span>${escapeHtml(p.reference)} - ${escapeHtml(p.category||"Investment")}</span>${status(p.status)}</div><h3>${escapeHtml(p.name)}</h3><p>${escapeHtml(p.description)}</p><div class="exec-project-values"><span>Current value<strong>${money(p.currentValue)}</strong></span><span>Net position<strong>${money(p.profit||0)}</strong></span></div><button data-executive-project="${p.id}">${icons.eye} Open governance summary</button></article>`).join("")}</div>`:""}`;
 }
@@ -1831,15 +1831,30 @@ async function loadFinanceUnitTrust(month){
 function financeUnitTrustMetric(label,value,note,color){
   return `<div class="exec-module-metric ${color}"><small>${label}</small><strong>${value}</strong><span>${note||"Live position"}</span></div>`;
 }
+function uapMonthName(month){
+  return month?new Date(`${month}-01T00:00:00`).toLocaleDateString("en-GB",{month:"long",year:"numeric"}):"";
+}
+function uapNextMonth(month){
+  if(!month)return null;
+  const [y,m]=month.split("-").map(Number);
+  return m===12?`${y+1}-01`:`${y}-${String(m+1).padStart(2,"0")}`;
+}
 function financeUnitTrustView(){
   const report=state.unitTrust;
   if(!report)return `<div class="executive-loading">Loading Unit Trust movement…</div>`;
   const s=report.summary||{},rows=report.movements||[];
   const canEdit=Boolean(state.finance?.access?.canEdit||state.finance?.access?.canCreate);
-  const monthOptions=(report.availableMonths||[]).map(m=>`<option value="${m}" ${report.month===m?"selected":""}>${m}</option>`).join("");
-  const monthLabel=report.month||"All months";
-  const lastInterestLabel=s.lastInterestMonth?new Date(`${s.lastInterestMonth}-01T00:00:00`).toLocaleDateString("en-GB",{month:"long",year:"numeric"}):"No month entered yet";
-  return `<div class="finance-title-strip"><div><p class="eyebrow">Unit Trust / Old Mutual</p><h2>UAP account movement</h2><p>Enter the final interest earned from the UAP statement once each month. The balance updates from that figure.</p></div>
+  const monthOptions=(report.availableMonths||[]).map(m=>`<option value="${m}" ${report.month===m?"selected":""}>${uapMonthName(m)}</option>`).join("");
+  const monthLabel=report.month?uapMonthName(report.month):"All months";
+  const shownMonth=report.month||s.lastInterestMonth;
+  const shownInterest=report.month?Number(s.interestEarned||0):Number(s.lastInterestAmount||0);
+  const nextMonth=uapNextMonth(s.lastInterestMonth);
+  const interestRows=rows.filter(r=>r.description==="Interest").length;
+  const thisMonth=new Date().toISOString().slice(0,7);
+  const recordMonth=report.month&&report.month>="2026-09"&&report.month<=thisMonth?report.month:null;
+  const recordPanel=canEdit&&recordMonth?`<section class="finance-panel uap-record-panel"><div class="finance-panel-head"><div><h3>Interest earned in ${escapeHtml(uapMonthName(recordMonth))}</h3><p>${interestRows?`Recorded: ${money(shownInterest)}${interestRows>1?` across ${interestRows} daily statement rows`:""}. Saving a new figure replaces ${interestRows>1?"those rows with one monthly entry":"it"}.`:"Not recorded yet. Enter the total interest or profit UAP paid for this month from its statement."}</p></div></div>
+    <form class="uap-record-form" data-uap-inline-form data-month="${recordMonth}"><input name="amount" type="number" min="0" step="0.01" required placeholder="Interest earned (UGX)" aria-label="Interest earned in ${escapeHtml(uapMonthName(recordMonth))}"><button class="button primary" type="submit">${icons.plus}Save ${escapeHtml(uapMonthName(recordMonth))} interest</button></form></section>`:"";
+  return `<div class="finance-title-strip"><div><p class="eyebrow">Unit Trust / Old Mutual</p><h2>UAP account movement</h2><p>Choose a month and record the interest UAP paid for it from the statement. No daily interest is calculated.</p></div>
     <div class="dashboard-year-control"><label>Month</label><select data-unit-trust-month><option value="">All months</option>${monthOptions}</select></div></div>
     <div class="module-actions" style="margin-bottom:14px">
       ${canEdit?`<button class="button primary" data-finance-modal="uap-interest">${icons.plus}Record month interest</button>`:""}
@@ -1850,11 +1865,12 @@ function financeUnitTrustView(){
       <button class="button secondary" data-finance-page="finance-bank">${icons.building}Open company bank</button>
     </div>
     <div class="exec-module-metrics">
-      ${financeUnitTrustMetric("UAP account",money(s.currentBalance||s.closingBalance),"Balance including interest entered","violet")}
-      ${financeUnitTrustMetric("Interest this month",money(s.profitThisMonth??s.interestEarned),"Interest entered for the month shown","green")}
-      ${financeUnitTrustMetric("Last interest entered",money(s.lastInterestAmount||0),lastInterestLabel,"blue")}
+      ${financeUnitTrustMetric("UAP account",money(s.currentBalance||s.closingBalance),"Balance as per the last UAP statement recorded","violet")}
+      ${financeUnitTrustMetric(`Interest · ${shownMonth?uapMonthName(shownMonth):"—"}`,money(shownInterest),shownInterest?"From the UAP statement":"Not recorded yet","green")}
+      ${financeUnitTrustMetric("Next month to record",nextMonth?uapMonthName(nextMonth):"—","Record it when that month's UAP statement arrives","blue")}
       ${financeUnitTrustMetric("Total interest earned",money(s.totalInterest||0),"All interest recorded on UAP","orange")}
     </div>
+    ${recordPanel}
     <section class="finance-panel"><div class="finance-panel-head"><div><h3>UAP account · ${escapeHtml(report.account?.accountName||"Old Mutual Unit Trust")}</h3><p>${escapeHtml(report.account?.accountNumber||"99171-CKA1073440")} · ${escapeHtml(report.account?.bankName||"Old Mutual Investment Group")} · month ${escapeHtml(monthLabel)}</p></div><strong>${money(s.currentBalance||s.closingBalance)}</strong></div>
     <div class="table-scroll"><table><thead><tr><th>Date</th><th>Description</th><th>Deposit</th><th>Interest</th><th>Withdrawal</th><th>Rate</th><th>Balance</th>${canEdit?"<th>Actions</th>":""}</tr></thead>
     <tbody>${rows.map(r=>`<tr class="${r.projected?"pending-receipt":""}"><td>${new Date(r.date).toLocaleDateString("en-GB")}</td><td>${escapeHtml(r.description)}${r.projected?" <small>Not posted yet</small>":""}</td><td>${Number(r.deposit)?money(r.deposit):"—"}</td><td>${Number(r.interest)?money(r.interest):"—"}</td><td class="${Number(r.withdrawal)?"negative":""}">${Number(r.withdrawal)?money(r.withdrawal):"—"}</td><td>${r.rate!=null?`${Number(r.rate).toFixed(2)}%`:"—"}</td><td><strong>${money(r.balance)}</strong></td>${canEdit?`<td>${r.projected||!r.id?"—":`<button class="danger-action" data-unit-trust-delete="${r.id}">Delete</button>`}</td>`:""}</tr>`).join("")||`<tr><td colspan="${canEdit?8:7}">No Unit Trust movements for this period. Choose another month or record a transfer.</td></tr>`}</tbody></table></div></section>`;
@@ -2177,10 +2193,10 @@ function defaultUnitTrustMonth(available){
   const months=available||[];
   const now=new Date();
   const current=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
-  if(months.includes("2026-09"))return "2026-09";
-  if(months.includes("2026-08"))return "2026-08";
+  const previous=now.getMonth()===0?`${now.getFullYear()-1}-12`:`${now.getFullYear()}-${String(now.getMonth()).padStart(2,"0")}`;
+  if(!months.length||months.includes(previous))return previous;
   if(months.includes(current))return current;
-  return months[0]||current;
+  return months[0];
 }
 async function processFinanceVoucher(id) {
   const voucher=state.finance.vouchers.find(v=>String(v.id)===String(id));if(!voucher)return;
@@ -2314,7 +2330,7 @@ function executiveReportPreviewContent(name) {
     columns=["Loan","Member","Product","Amount","Balance","Status"];
     rows=e.recentLoans.map(x=>[x.reference,x.member,x.product,money(x.amount),money(x.balance),x.status]);
   } else if(name==="Investment Report") {
-    metrics=[["UAP account",money(e.investment.unitTrust?.balance??e.investment.current_value)],["Interest this month",money(e.investment.unitTrust?.profitThisMonth||0)],["Last interest entered",money(e.investment.unitTrust?.lastInterestAmount||0)],["Total interest earned",money(e.investment.unitTrust?.totalInterest||0)]];
+    metrics=[["UAP account",money(e.investment.unitTrust?.balance??e.investment.current_value)],[`Interest · ${uapMonthName(e.investment.unitTrust?.lastInterestMonth)||"—"}`,money(e.investment.unitTrust?.lastInterestAmount||0)],["Next month to record",uapMonthName(uapNextMonth(e.investment.unitTrust?.lastInterestMonth))||"—"],["Total interest earned",money(e.investment.unitTrust?.totalInterest||0)]];
     columns=["Project","Name","Status","Performance","Current value","Expected return"];
     rows=e.investmentProjects.map(x=>[x.reference,x.name,x.status,x.performanceStatus,money(x.currentValue),money(x.expectedReturn)]);
   } else if(name==="Welfare Report") {
@@ -2368,8 +2384,8 @@ function investmentDashboardView() {
   const s=i.stats,u=i.unitTrust;
   const cards=u?[
     ["UAP account",money(u.balance),"building","investment-projects","Balance including interest entered"],
-    ["Interest this month",money(u.profitThisMonth),"arrowUp","investment-projects","Interest entered for this month"],
-    ["Last interest entered",money(u.lastInterestAmount||0),"clock","investment-projects",u.lastInterestMonth||"No month entered yet"],
+    [`Interest · ${uapMonthName(u.lastInterestMonth)||"—"}`,money(u.lastInterestAmount||0),"arrowUp","investment-projects","From the UAP statement"],
+    ["Next month to record",uapMonthName(uapNextMonth(u.lastInterestMonth))||"—","clock","investment-projects","Finance records it when the statement arrives"],
     ["Total interest earned",money(u.totalInterest||0),"reports","investment-projects","All interest recorded on UAP"]
   ]:[
     ["Total Portfolio",money(s.totalPortfolio),"building","investment-portfolio","Current portfolio value"],
@@ -2396,7 +2412,7 @@ function investmentPortfolioWidget(i) {
   let cursor=0;const stops=i.categories.map((x,index)=>{const start=cursor;cursor+=x.value/total*100;return `${["#2372d8","#d89b00","#724bdc","#ed8e09","#ec3349","#0aa0a8"][index%6]} ${start}% ${cursor}%`}).join(",");
   return `<section class="finance-panel investment-portfolio-panel"><div class="finance-panel-head"><div><h3>Investment Portfolio Overview</h3><p>Capital allocation and current value</p></div><button data-investment-page="investment-portfolio">Open portfolio &gt;</button></div>
     <div class="investment-portfolio-layout"><div class="investment-donut" style="background:radial-gradient(circle,#fff 0 52%,transparent 53%),conic-gradient(${stops||"#ddd 0 100%"})"><strong>${money(i.portfolio.portfolioValue)}</strong><span>Total portfolio</span></div><div class="investment-allocation">${i.categories.map((x,index)=>`<div><i class="${colors[index%colors.length]}"></i><span>${x.category}</span><strong>${money(x.value)} - ${Math.round(x.value/total*100)}%</strong></div>`).join("")}</div></div>
-    <div class="investment-portfolio-metrics"><span>UAP account<strong>${money(i.unitTrust?.balance??i.portfolio.portfolioValue)}</strong></span><span>Interest this month<strong>${money(i.unitTrust?.profitThisMonth??i.portfolio.profit)}</strong></span><span>Total interest earned<strong>${money(i.unitTrust?.totalInterest??0)}</strong></span></div></section>`;
+    <div class="investment-portfolio-metrics"><span>UAP account<strong>${money(i.unitTrust?.balance??i.portfolio.portfolioValue)}</strong></span><span>Interest · ${uapMonthName(i.unitTrust?.lastInterestMonth)||"—"}<strong>${money(i.unitTrust?.lastInterestAmount??i.portfolio.profit)}</strong></span><span>Total interest earned<strong>${money(i.unitTrust?.totalInterest??0)}</strong></span></div></section>`;
 }
 function investmentActiveProjectsWidget(i) {
   return `<section class="finance-panel"><div class="finance-panel-head"><div><h3>Active Projects</h3><p>Live unit trust first, then other projects</p></div><button data-investment-page="investment-projects">View all ></button></div><div class="investment-project-mini">${i.projects.slice(0,4).map(p=>{
@@ -3949,6 +3965,18 @@ function bind() {
   }));
   document.querySelector("[data-unit-trust-month]")?.addEventListener("change",async event=>{
     try{event.target.disabled=true;await loadFinanceUnitTrust(event.target.value||"");render();}catch(error){toast(error.message);}
+  });
+  document.querySelector("[data-uap-inline-form]")?.addEventListener("submit",async event=>{
+    event.preventDefault();
+    const form=event.currentTarget,button=form.querySelector("button[type=submit]"),month=form.dataset.month;
+    button.disabled=true;button.textContent="Saving…";
+    try{
+      const result=await api("/api/finance/unit-trust/monthly-interest",{method:"POST",body:JSON.stringify({month,amount:form.elements.amount.value})});
+      state.finance=await api("/api/finance/command-center");
+      await loadFinanceUnitTrust(month);
+      render();
+      toast(`UAP interest for ${uapMonthName(month)} saved: ${money(result.amount)}. UAP balance ${money(result.balance)}.`);
+    }catch(error){button.disabled=false;button.textContent="Try again";toast(error.message);}
   });
   document.querySelectorAll("[data-unit-trust-view]").forEach(el=>el.addEventListener("click",()=>openUnitTrustReportView(el.dataset.unitTrustView||"")));
   document.querySelectorAll("[data-unit-trust-delete]").forEach(el=>el.addEventListener("click",()=>deleteUnitTrustMovement(el.dataset.unitTrustDelete)));
