@@ -2337,8 +2337,9 @@ app.get("/api/finance/unit-trust",auth,requireFinance("view"),asyncRoute(async(r
       SELECT date_trunc('month',movement_date) AS m FROM unit_trust_movements WHERE movement_date<=$1::date
       UNION SELECT generate_series($2::date,date_trunc('month',$1::date),INTERVAL '1 month')
     ) x GROUP BY 1 ORDER BY 1 DESC`,[kampala,`${UAP_FIRST_ENTRY_MONTH}-01`])).rows.map(r=>r.month);
+  const canRecord=Boolean(await departmentPermission(req.user,"finance","create"));
   res.json({
-    account,month:monthStart?month:null,availableMonths:months,movements:arrived,
+    account,month:monthStart?month:null,availableMonths:months,movements:arrived,canRecord,
     summary:{openingBalance:opening,closingBalance:liveBalance,interestEarned:monthStart?monthInterest:interest,deposits,withdrawals,
       profitThisMonth:monthInterest,projectedProfit:0,profitByMonthEnd:monthInterest,projectedClosing:liveBalance,
       ...totals,viewMonth,

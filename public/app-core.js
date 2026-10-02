@@ -1853,7 +1853,7 @@ function financeUnitTrustView(){
     return `<div class="executive-loading">Loading Unit Trust movement…</div>`;
   }
   const s=report.summary||{},rows=report.movements||[];
-  const canEdit=Boolean(state.finance?.access?.canEdit||state.finance?.access?.canCreate);
+  const canEdit=Boolean(report.canRecord||state.finance?.access?.canEdit||state.finance?.access?.canCreate);
   const monthOptions=(report.availableMonths||[]).map(m=>`<option value="${m}" ${report.month===m?"selected":""}>${uapMonthName(m)}</option>`).join("");
   const monthLabel=report.month?uapMonthName(report.month):"All months";
   const shownMonth=report.month||s.lastInterestMonth;
