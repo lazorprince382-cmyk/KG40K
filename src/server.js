@@ -2296,7 +2296,6 @@ app.post("/api/finance/withdraw-from-uap",auth,requireFinance("create"),asyncRou
   res.status(201).json(result);
 }));
 app.get("/api/finance/unit-trust",auth,requireFinance("view"),asyncRoute(async(req,res)=>{
-  await transaction(async client=>{await accrueUnitTrustInterest(client);});
   const month=String(req.query.month||"").trim();
   const monthStart=month&&/^\d{4}-\d{2}$/.test(month)?`${month}-01`:null;
   const account=await one(`SELECT id,account_code AS "accountCode",account_name AS "accountName",balance::float,
@@ -6086,8 +6085,8 @@ function withLiveUnitTrust(project,position){
     performanceStatus:Number(position.profitThisMonth)>0?"profitable":"active",unitTrust:position};
 }
 async function runScheduledMaintenance() {
+  await transaction(async client=>{await accrueUnitTrustInterest(client);});
   await transaction(async client=>{
-    await accrueUnitTrustInterest(client);
     await enforceOneMonthlyWelfareCharge(client);
     const charged=await chargeWelfareFromCoveredSavings(client);
     if(charged.length)console.log(`Monthly welfare taken from covered savings: ${charged.map(x=>`${x.name} (${x.period})`).join(", ")}`);

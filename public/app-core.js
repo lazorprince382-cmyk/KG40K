@@ -1826,6 +1826,7 @@ function financeBankView() {
 async function loadFinanceUnitTrust(month){
   const q=month?`?month=${encodeURIComponent(month)}`:"";
   state.unitTrust=await api(`/api/finance/unit-trust${q}`);
+  state.unitTrustError=null;
   return state.unitTrust;
 }
 function financeUnitTrustMetric(label,value,note,color){
@@ -1841,7 +1842,16 @@ function uapNextMonth(month){
 }
 function financeUnitTrustView(){
   const report=state.unitTrust;
-  if(!report)return `<div class="executive-loading">Loading Unit Trust movement…</div>`;
+  if(!report){
+    if(state.unitTrustError)return `<div class="executive-loading">Could not load Unit Trust: ${escapeHtml(state.unitTrustError)} <button class="button secondary small" data-finance-page="finance-unit-trust">Try again</button></div>`;
+    if(!state.unitTrustLoading){
+      state.unitTrustLoading=true;
+      loadFinanceUnitTrust(defaultUnitTrustMonth())
+        .catch(error=>{state.unitTrustError=error.message||"Request failed";})
+        .finally(()=>{state.unitTrustLoading=false;if(state.page==="finance-unit-trust")render();});
+    }
+    return `<div class="executive-loading">Loading Unit Trust movement…</div>`;
+  }
   const s=report.summary||{},rows=report.movements||[];
   const canEdit=Boolean(state.finance?.access?.canEdit||state.finance?.access?.canCreate);
   const monthOptions=(report.availableMonths||[]).map(m=>`<option value="${m}" ${report.month===m?"selected":""}>${uapMonthName(m)}</option>`).join("");
