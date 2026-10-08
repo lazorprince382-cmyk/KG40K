@@ -6,6 +6,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const projectRoot = path.resolve(__dirname,"..");
+const LOAN_PRINCIPAL_LEFT_SQL=`LEAST(loans.balance,COALESCE((SELECT SUM(GREATEST(s.principal-s.principal_paid,0)) FROM loan_repayment_schedule s WHERE s.loan_id=loans.id),loans.balance))`;
 const RUNNING_BUILD=(()=>{try{return require("child_process").execSync("git rev-parse --short HEAD",{cwd:projectRoot,stdio:["ignore","pipe","ignore"]}).toString().trim();}catch{return "unknown";}})();
 const { query, one, transaction, audit, initialize, ROLES } = require("./db");
 const { officialMemberDepts, officialDeptCodes } = require("./official-department-roster");
@@ -277,6 +278,68 @@ async function fixOctober7Disbursement(client){
     }
   }
   await client.query(`INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value,updated_at=NOW()`,[key,summary]);
+  return summary;
+}
+let muhooziReconcileStatus="not run yet";
+async function committeeVoters(client,bodyCode,deptCode){
+  const rows=(await client.query(`SELECT u.id,u.full_name,g.position_title FROM governance_appointments g
+    JOIN governance_bodies b ON b.id=g.body_id JOIN members m ON m.id=g.linked_member_id JOIN users u ON u.member_id=m.id
+    WHERE b.code=$1 AND g.status='active' AND u.active=true`,[bodyCode])).rows;
+  if(rows.length)return rows;
+  return (await client.query(`SELECT u.id,u.full_name,da.position_title FROM department_assignments da JOIN departments d ON d.id=da.department_id
+    JOIN users u ON u.id=da.user_id WHERE d.code=$1 AND da.active=true AND u.active=true AND (da.can_edit=true OR da.can_approve=true)`,[deptCode])).rows;
+}
+async function reconcileMuhooziLoanOctober2026(client){
+  const key="fixMuhooziReconcile20261008";
+  if((await client.query("SELECT 1 FROM settings WHERE key=$1",[key])).rows[0])return null;
+  const loan=(await client.query(`SELECT l.id,l.reference FROM loans l JOIN members m ON m.id=l.member_id
+    WHERE m.full_name ILIKE '%christopher%' AND m.full_name ILIKE '%muhoozi%' AND l.reference LIKE 'LN-CHRIS-7M-%' ORDER BY l.id DESC LIMIT 1`)).rows[0];
+  if(!loan){muhooziReconcileStatus="waiting: Christopher Muhoozi's loan not created yet";return null;}
+  const done=[];
+  const isChair=row=>/chairperson/i.test(row.position_title||"")&&!/vice/i.test(row.position_title||"")||/tabula\s*robert/i.test(row.full_name||"");
+  for(const [stage,body,dept,day] of [["credits","credit-committee","credits","2026-10-04T16:00:00+03:00"],["executive","exco","executive","2026-10-05T12:00:00+03:00"]]){
+    const voters=(await committeeVoters(client,body,dept)).sort((a,b)=>Number(isChair(a))-Number(isChair(b)));
+    for(let i=0;i<voters.length;i++){
+      await client.query(`INSERT INTO loan_stage_votes (loan_id,stage,user_id,decision,comment,created_at)
+        VALUES ($1,$2,$3,'approve','Approved',$4::timestamptz+make_interval(mins=>$5::int))
+        ON CONFLICT (loan_id,stage,user_id) DO UPDATE SET decision='approve'`,[loan.id,stage,voters[i].id,day,i*5]);
+    }
+    const chair=voters.find(isChair)||voters[voters.length-1];
+    if(chair)await client.query(`UPDATE loans SET ${stage==="credits"?"committee_approved_by":"authorized_by"}=$2 WHERE id=$1`,[loan.id,chair.id]);
+    done.push(`${voters.length} ${stage} approvals`);
+  }
+  const department=(await client.query("SELECT id FROM departments WHERE code='finance'")).rows[0];
+  const recorder=(await client.query(`SELECT id FROM users WHERE active=true AND (full_name ILIKE '%tabula%robert%' OR role IN ('Finance Officer','System Admin'))
+    ORDER BY (full_name ILIKE '%tabula%robert%') DESC,(role='Finance Officer') DESC,id LIMIT 1`)).rows[0]?.id;
+  const uap=(await client.query("SELECT id,account_name FROM finance_accounts WHERE account_code='GL-4500' AND active=true LIMIT 1 FOR UPDATE")).rows[0];
+  const uapSource="UAP-WD-7M-20261007";
+  if(uap&&!(await client.query("SELECT 1 FROM unit_trust_movements WHERE source_reference=$1",[uapSource])).rows[0]){
+    const entry=(await client.query(`INSERT INTO organization_finance_entries
+      (department_id,reference,entry_type,category,description,counterparty,payment_method,amount,status,receipt_number,transaction_date,approved_at,finance_account_id,recorded_by,approved_by)
+      VALUES ($1,$2,'transfer','Internal withdrawal from UAP',$3,'Centenary bank account','Bank transfer',7000000,'completed',$4,'2026-10-07',NOW(),$5,$6,$6) RETURNING id`,
+      [department?.id||null,"FIN-UAP-WD-7M-20261007",`UGX 7,000,000 withdrawn from UAP to Centenary to fund ${loan.reference} (Christopher Muhoozi). Already included in the Centenary balance.`,
+        receiptReference("UAPWD"),uap.id,recorder])).rows[0];
+    await client.query(`INSERT INTO unit_trust_movements (movement_date,description,deposit_amount,interest_amount,withdrawal_amount,balance_after,source_reference,finance_entry_id)
+      VALUES ('2026-10-07','Withdrawal to company bank (Centenary)',0,0,7000000,0,$1,$2)`,[uapSource,entry.id]);
+    await recomputeUnitTrustBalances(client,"2026-10-07");
+    const balance=await syncUnitTrustAccount(client);
+    done.push(`UAP less 7,000,000 (now ${Number(balance||0).toLocaleString()})`);
+  }
+  const bank=(await client.query("SELECT id FROM finance_accounts WHERE account_code='GL-4104' AND active=true LIMIT 1 FOR UPDATE")).rows[0];
+  if(bank&&!(await client.query("SELECT 1 FROM organization_finance_entries WHERE reference='FIN-CEN-RECON-20261007'")).rows[0]){
+    await client.query(`INSERT INTO organization_finance_entries
+      (department_id,reference,entry_type,category,description,counterparty,payment_method,amount,status,receipt_number,transaction_date,approved_at,finance_account_id,recorded_by,approved_by)
+      VALUES ($1,'FIN-CEN-RECON-20261007','transfer','Bank reconciliation',$2,'Centenary bank statement','Bank reconciliation',551075,'completed',$3,'2026-10-07',NOW(),$4,$5,$5)`,
+      [department?.id||null,"Centenary reconciled to the bank: UGX 8,902,548 before the Christopher Muhoozi disbursement (system showed 8,351,473). Balance after disbursement UGX 2,042,548.",
+        receiptReference("RECON"),bank.id,recorder]);
+    await client.query("UPDATE finance_accounts SET balance=balance+551075,updated_at=NOW() WHERE id=$1",[bank.id]);
+    await syncOrganizationBankBalanceSetting(client,bank.id);
+    const now=(await client.query("SELECT balance::float b FROM finance_accounts WHERE id=$1",[bank.id])).rows[0].b;
+    done.push(`Centenary +551,075 (now ${now.toLocaleString()})`);
+  }
+  const summary=`${loan.reference}: ${done.join("; ")}`;
+  await client.query(`INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value,updated_at=NOW()`,[key,summary]);
+  muhooziReconcileStatus=summary;
   return summary;
 }
 async function backfillRepaymentsToCentenary(client){
@@ -821,7 +884,9 @@ app.get("/api/departments/:code/files/:storedName",auth,requireDepartment("view"
 app.get("/api/health",asyncRoute(async(req,res)=>{
   await query("SELECT 1");
   const fix=(await query("SELECT value FROM settings WHERE key='fixMuhooziDisbursement20261007'")).rows[0]?.value;
-  res.json({status:"ok",service:"organization-management",build:RUNNING_BUILD,disbursementFix:fix||disbursementFixStatus,time:new Date().toISOString()});
+  const reconcile=(await query("SELECT value FROM settings WHERE key='fixMuhooziReconcile20261008'")).rows[0]?.value;
+  res.json({status:"ok",service:"organization-management",build:RUNNING_BUILD,disbursementFix:fix||disbursementFixStatus,
+    muhooziReconcile:reconcile||muhooziReconcileStatus,time:new Date().toISOString()});
 }));
 app.post("/api/auth/login",loginLimiter,asyncRoute(async(req,res)=>{
   const email=String(req.body.email||"").trim().toLowerCase(), password=String(req.body.password||"");
@@ -1098,7 +1163,7 @@ app.get("/api/executive/command-center",auth,requireExecutive("view"),asyncRoute
     query(`SELECT COUNT(*) FILTER (WHERE status='active')::int AS active,
       COUNT(*) FILTER (WHERE due_date=CURRENT_DATE AND status='active')::int AS due_today,
       COUNT(*) FILTER (WHERE status='overdue')::int AS defaults,
-      COALESCE(SUM(balance) FILTER (WHERE status IN ('active','overdue')),0)::float AS outstanding,
+      ROUND(COALESCE(SUM(${LOAN_PRINCIPAL_LEFT_SQL}) FILTER (WHERE status IN ('active','overdue')),0),2)::float AS outstanding,
       COALESCE(SUM(amount) FILTER (WHERE status IN ('active','overdue','completed')),0)::float AS issued,
       COALESCE(SUM(amount-balance) FILTER (WHERE status IN ('active','overdue','completed')),0)::float AS recovered
       FROM loans`),
@@ -1781,7 +1846,7 @@ app.get("/api/finance/command-center",auth,requireFinance("view"),asyncRoute(asy
   const displayCash=historicalPeriod?periodAccounts.filter(a=>a.accountType==="cash").reduce((s,a)=>s+a.balance,0):cash;
   const uapBalance=Number((await one(`SELECT balance::float AS balance FROM finance_accounts WHERE account_code='GL-4500' AND active=true`))?.balance
     ||(await one(`SELECT value FROM settings WHERE key='organizationUapBalance'`))?.value||0);
-  const loansOutstanding=Number((await one(`SELECT COALESCE(SUM(balance),0)::float AS total FROM loans WHERE status IN ('active','overdue')`))?.total||0);
+  const loansOutstanding=Number((await one(`SELECT ROUND(COALESCE(SUM(${LOAN_PRINCIPAL_LEFT_SQL}),0),2)::float AS total FROM loans WHERE status IN ('active','overdue')`))?.total||0);
   const companyBankBalance=historicalPeriod?displayBank:Number((await one(`SELECT balance::float AS balance FROM finance_accounts WHERE account_code='GL-4104' AND active=true`))?.balance||bank);
   const companyFunds=uapBalance+companyBankBalance+loansOutstanding;
   const liveBank=historicalPeriod?displayBank:companyBankBalance;
@@ -2736,7 +2801,7 @@ app.get("/api/credits/command-center",auth,requireCredits("view",{allowFinanceVi
       COUNT(*) FILTER (WHERE status='rejected')::int AS rejected,
       COUNT(*) FILTER (WHERE status='overdue' OR (balance>0 AND due_date<CURRENT_DATE))::int AS overdue,
       COUNT(*) FILTER (WHERE status='ready-disbursement')::int AS awaiting_disbursement,
-      COALESCE(SUM(balance) FILTER (WHERE status IN ('active','overdue')),0)::float AS outstanding,
+      ROUND(COALESCE(SUM(${LOAN_PRINCIPAL_LEFT_SQL}) FILTER (WHERE status IN ('active','overdue')),0),2)::float AS outstanding,
       COALESCE(SUM(amount) FILTER (WHERE disbursed_at>=date_trunc('month',CURRENT_DATE)),0)::float AS disbursed_month
       FROM loans`),
     query(`SELECT
@@ -6231,6 +6296,10 @@ async function runScheduledMaintenance() {
     const fixed=await transaction(client=>fixOctober7Disbursement(client));
     if(fixed)console.log(`Loan disbursement fix: ${fixed}`);
   }catch(error){disbursementFixStatus=`failed: ${error.message}`;console.error("Oct 7 loan disbursement fix failed:",error.message);}
+  try{
+    const reconciled=await transaction(client=>reconcileMuhooziLoanOctober2026(client));
+    if(reconciled)console.log(`Muhoozi loan reconcile: ${reconciled}`);
+  }catch(error){muhooziReconcileStatus=`failed: ${error.message}`;console.error("Muhoozi loan reconcile failed:",error.message);}
   const graceDays=0;
   await transaction(async client=>{
     // No grace window: unpaid installments become overdue the day after the due date.
