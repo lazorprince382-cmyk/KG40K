@@ -1306,8 +1306,8 @@ function executiveFinanceSummary(e) {
     <div class="executive-account-grid">${accounts.length?accounts.map(account=>`<article>${account.accountCode==="GL-4500"?`<button type="button" class="executive-account-open" data-executive-page="finance-unit-trust">`:`<div class="executive-account-open">`}<div class="executive-account-icon">${account.accountType==="bank"||account.accountCode==="GL-4500"?icons.building:icons.wallet}</div><div class="executive-account-title"><span>${escapeHtml(account.accountCode==="GL-4104"?"Centenary bank":account.accountCode==="GL-4500"?"Unit Trust (UAP)":String(account.accountType||"account").replaceAll("_"," "))}</span><h4>${escapeHtml(account.accountCode==="GL-4104"?"Centenary bank account":account.accountCode==="GL-4500"?"UAP account":account.accountName)}</h4><p>${escapeHtml(account.bankName||"Organization funds")} ${account.maskedAccountNumber?`· ${escapeHtml(account.maskedAccountNumber)}`:""}</p></div><strong>${money(account.balance)}</strong><div class="executive-account-meta"><span class="status ${account.restricted?"pending":"active"}">${account.restricted?"Restricted":"Available"}</span><small>${account.accountCode==="GL-4500"?"Open live movement":account.lastReconciledAt?`Reconciled ${new Date(account.lastReconciledAt).toLocaleDateString()}`:"Not yet reconciled"}</small></div>${account.accountCode==="GL-4500"?"</button>":"</div>"}</article>`).join(""):`<div class="exec-empty">Finance has not registered any bank, cash or fund accounts yet.</div>`}</div>
   </section>${executiveFinancialWidget(e)}${executiveRecordTable("Major finance entries",["Reference","Category","Description","Amount","Status"],e.financeEntries.filter(x=>!/management accounts import/i.test(x.paymentMethod||"")).map(x=>[x.reference,x.category,x.description,money(x.amount),status(x.status)]))}`;
 }
-function executiveModuleMetric(label,value,color,action) {
-  const hint=action==="payers"?"Tap to see who paid":"Summary";
+function executiveModuleMetric(label,value,color,action,note) {
+  const hint=action==="payers"?"Tap to see who paid":note||"Summary";
   if(action==="payers")return `<button type="button" class="exec-module-metric ${color} is-action" data-welfare-month-payers="1"><small>${label}</small><strong>${value}</strong><span>${hint}</span></button>`;
   return `<div class="exec-module-metric ${color}"><small>${label}</small><strong>${value}</strong><span>${hint}</span></div>`;
 }
@@ -2808,7 +2808,12 @@ function creditsActiveLoansView() {
   if(!state.credits?.loans)return `<div class="exec-empty">Loading active loans…</div>`;
   const rows=state.credits?.loans?.filter(l=>["active","overdue"].includes(l.status))||[];
   const penaltyWatch=rows.filter(l=>l.inDangerPeriod||l.status==="overdue"||loanLatePenaltyAmount(l)>0).length;
-  return `<div class="exec-module-metrics">${executiveModuleMetric("Active loans",rows.length,"blue")}${executiveModuleMetric("Total amount remaining",money(rows.reduce((n,l)=>n+loanAmountOwed(l),0)),"violet")}${executiveModuleMetric("Total repayment",money(rows.reduce((n,l)=>n+Number(l.totalPaid||0),0)),"orange")}${executiveModuleMetric(penaltyWatch?"Late / penalty watch":"Cash disbursed",penaltyWatch?penaltyWatch:money(rows.reduce((n,l)=>n+Math.max(0,Number(l.amount||0)-Number(l.processingFee||0)),0)),penaltyWatch?"orange":"green")}</div>
+  return `<div class="exec-module-metrics">${executiveModuleMetric("Active loans",rows.length,"blue")}${(()=>{
+    const scheduleLeft=rows.reduce((n,l)=>n+Math.max(0,Number(l.totalDue||l.amount||0)-Number(l.totalPaid||0)),0);
+    const penalties=rows.reduce((n,l)=>n+Math.max(0,Number(l.outstandingCharges||0))+Math.max(0,Number(l.pendingPenaltyAmount||0)),0);
+    return executiveModuleMetric("Total amount remaining",money(rows.reduce((n,l)=>n+loanAmountOwed(l),0)),"violet",null,
+      `Principal + interest still to pay ${money(scheduleLeft)} · unpaid late penalties ${money(penalties)} · across ${rows.length} active loan${rows.length===1?"":"s"}`);
+  })()}${executiveModuleMetric("Total repayment",money(rows.reduce((n,l)=>n+Number(l.totalPaid||0),0)),"orange")}${executiveModuleMetric(penaltyWatch?"Late / penalty watch":"Cash disbursed",penaltyWatch?penaltyWatch:money(rows.reduce((n,l)=>n+Math.max(0,Number(l.amount||0)-Number(l.processingFee||0)),0)),penaltyWatch?"orange":"green")}</div>
     <div class="credits-loan-list">${rows.map(l=>{
       const p=loanRepaymentProgress(l);
       const fee=Number(l.processingFee||0),netDisbursed=Math.max(0,Number(l.amount||0)-fee);
