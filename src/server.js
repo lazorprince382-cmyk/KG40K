@@ -4933,7 +4933,8 @@ app.post("/api/loans/:id/finance-verification",auth,(_req,res)=>res.status(410).
     if(principal>openingBalance)principal=openingBalance;
     const total=round(principal+interest);
     await client.query(`INSERT INTO loan_repayment_schedule (loan_id,installment_number,due_date,opening_balance,principal,interest,total_due,status)
-      VALUES ($1,$2::int,($3::date+($2::int::text||' months')::interval)::date,$4,$5,$6,$7,CASE WHEN $2::int=1 THEN 'due' ELSE 'upcoming' END)`,
+      VALUES ($1,$2::int,($3::date+($2::int::text||' months')::interval)::date,$4,$5,$6,$7,
+        CASE WHEN ($3::date+($2::int::text||' months')::interval)::date<=(CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date THEN 'due' ELSE 'upcoming' END)`,
       [loan.id,installment,startIso,openingBalance,principal,interest,total]);
     balance=round(Math.max(0,openingBalance-principal));
   }
