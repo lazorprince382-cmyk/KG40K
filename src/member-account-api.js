@@ -3,6 +3,7 @@ module.exports = function registerMemberAccountApi({
 }) {
   const { notifyCreditsVerificationQueue } = require("./credits-queue");
   const { loadWelfareStanding } = require("./welfare-standing");
+  const { loansOutstandingTotal } = require("./loan-totals");
   const { loadMemberSchedule } = require("./savings-schedule");
   const imageTypes = new Set(["image/jpeg","image/png","image/webp","image/gif","image/jpg"]);
   const receiptTypes = new Set(["image/jpeg","image/png","image/webp","application/pdf"]);
@@ -443,8 +444,7 @@ module.exports = function registerMemberAccountApi({
       ||(await one(`SELECT value FROM settings WHERE key='organizationUapBalance'`))?.value||0);
     const bankBalance=Number((await one(`SELECT balance::float AS balance FROM finance_accounts WHERE account_code='GL-4104' AND active=true`))?.balance
       ||(await one(`SELECT value FROM settings WHERE key='organizationBankBalance'`))?.value||0);
-    const loansOutstanding=Number((await one(`SELECT COALESCE(SUM(balance),0)::float AS total FROM loans WHERE status IN ('active','overdue')`))?.total||0);
-    const companyFunds=uapBalance+bankBalance+loansOutstanding;
+    const loansOutstanding=await loansOutstandingTotal(one);
     const welfarePaid=Number(contributionsTotal||0);
     const memberName=String(member.fullName||member.full_name||"");
     const memberNumber=String(member.memberNumber||member.member_number||"");
@@ -452,6 +452,8 @@ module.exports = function registerMemberAccountApi({
     const welfareVicent=(/vicent|vincent/i.test(memberName)&&/gumisiriza/i.test(memberName))||memberNumber==="G40-2026-0002";
     const welfareSinceLabel=welfareExcluded?null:welfareVicent?"July 2026":"June 2024";
     const welfareStanding=await loadWelfareStanding();
+    const welfareRemaining=Math.max(0,Number(welfareStanding.closingBalance||0));
+    const companyFunds=uapBalance+bankBalance+loansOutstanding+welfareRemaining;
     const standingRow=(welfareStanding.byMember||[]).find(row=>Number(row.memberId)===Number(memberId))
       ||(welfareStanding.byMember||[]).find(row=>String(row.memberNumber||"")===String(memberNumber));
     const historicalShare=welfareExcluded||welfareVicent
@@ -492,9 +494,9 @@ module.exports = function registerMemberAccountApi({
         availableLoanLimit: Math.max(0, member.savings * 3 - activeLoans.reduce((sum, item) => sum + Number(item.balance), 0)),
         welfareContributions: contributionsTotal, investments: investmentTotal, shares: member.shares,
         pendingRequests, notifications: notifications.rows.filter(item => !item.readAt).length,
-        uapBalance, bankBalance, loansOutstanding, companyFunds
+        uapBalance, bankBalance, loansOutstanding, welfareRemaining, companyFunds
       },
-      organizationStanding:{uapBalance,bankBalance,loansOutstanding,companyFunds},
+      organizationStanding:{uapBalance,bankBalance,loansOutstanding,welfareRemaining,companyFunds},
       welfareFund:{
         sinceLabel:welfareStanding.sinceLabel||"June 2024",
         collectedSince:Number(welfareStanding.grossCollectedSince||welfareStanding.collectedSince||0),

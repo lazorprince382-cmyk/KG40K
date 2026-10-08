@@ -6,7 +6,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const projectRoot = path.resolve(__dirname,"..");
-const LOAN_PRINCIPAL_LEFT_SQL=`LEAST(loans.balance,COALESCE((SELECT SUM(GREATEST(s.principal-s.principal_paid,0)) FROM loan_repayment_schedule s WHERE s.loan_id=loans.id),loans.balance))`;
+const { LOAN_PRINCIPAL_LEFT_SQL } = require("./loan-totals");
 const RUNNING_BUILD=(()=>{try{return require("child_process").execSync("git rev-parse --short HEAD",{cwd:projectRoot,stdio:["ignore","pipe","ignore"]}).toString().trim();}catch{return "unknown";}})();
 const { query, one, transaction, audit, initialize, ROLES } = require("./db");
 const { officialMemberDepts, officialDeptCodes } = require("./official-department-roster");
@@ -1418,7 +1418,8 @@ app.get("/api/executive/command-center",auth,requireExecutive("view"),asyncRoute
   const companyBankBalance=Number((await one(`SELECT balance::float AS balance FROM finance_accounts WHERE account_code='GL-4104' AND active=true`))?.balance
     ||accountTotals.bankBalance||0);
   const loansOutstandingLive=Number(loans.outstanding||0);
-  const companyFunds=uapBalance+companyBankBalance+loansOutstandingLive;
+  const welfareRemaining=Math.max(0,Number(welfareBalance||0));
+  const companyFunds=uapBalance+companyBankBalance+loansOutstandingLive+welfareRemaining;
   res.json({
     selectedFiscalYear,availableFiscalYears,historicalPeriod:selectedFiscalYear!==defaultFiscalYear,
     stats:{totalMembers:memberStats.rows[0].total,activeMembers:memberStats.rows[0].active,newMembers:memberStats.rows[0].new_this_month,
@@ -1434,8 +1435,8 @@ app.get("/api/executive/command-center",auth,requireExecutive("view"),asyncRoute
     performance,performanceSource,departments:departments.rows,approvals:approvals.rows,approvalHistory:approvalHistory.rows,activities:activities.rows,meetings:meetings.rows,
     documents:documents.rows,financeEntries:financeEntries.rows,welfareRequests:welfareRequests.rows,governance:governanceRows.rows,
     finance:{...finance,budgetUtilization,budgetAllocated:budgetSummary.allocated,budgetUsed:budgetSummary.used,
-      accounts:financeAccounts.rows,cashPosition:{...accountTotals,bankBalance:companyBankBalance,uapBalance,loansOutstanding:loansOutstandingLive,companyFunds},monthly},
-    organizationStanding:{uapBalance,bankBalance:companyBankBalance,loansOutstanding:loansOutstandingLive,companyFunds},
+      accounts:financeAccounts.rows,cashPosition:{...accountTotals,bankBalance:companyBankBalance,uapBalance,loansOutstanding:loansOutstandingLive,welfareRemaining,companyFunds},monthly},
+    organizationStanding:{uapBalance,bankBalance:companyBankBalance,loansOutstanding:loansOutstandingLive,welfareRemaining,companyFunds},
     loans:{...loans,outstanding:loansOutstandingLive,recoveryRate:loans.issued?Math.round(loans.recovered/loans.issued*100):0},
     investment:{...investment,running:liveRunning,profitable:liveProfitable,losing:liveLosing,invested:investmentInvested,
       current_value:investmentCurrentValue,expected_return:investmentExpectedReturn,growth:investmentGrowth,unitTrust:unitTrustPosition},
@@ -1877,11 +1878,12 @@ app.get("/api/finance/command-center",auth,requireFinance("view"),asyncRoute(asy
     ||(await one(`SELECT value FROM settings WHERE key='organizationUapBalance'`))?.value||0);
   const loansOutstanding=Number((await one(`SELECT ROUND(COALESCE(SUM(${LOAN_PRINCIPAL_LEFT_SQL}),0),2)::float AS total FROM loans WHERE status IN ('active','overdue')`))?.total||0);
   const companyBankBalance=historicalPeriod?displayBank:Number((await one(`SELECT balance::float AS balance FROM finance_accounts WHERE account_code='GL-4104' AND active=true`))?.balance||bank);
-  const companyFunds=uapBalance+companyBankBalance+loansOutstanding;
+  const welfareRemaining=Math.max(0,Number(welfareStanding.closingBalance||0));
+  const companyFunds=uapBalance+companyBankBalance+loansOutstanding+welfareRemaining;
   const liveBank=historicalPeriod?displayBank:companyBankBalance;
   res.json({
     selectedFiscalYear,selectedFiscalKey,selectedFiscalLabel,availableFiscalYears,historicalPeriod,
-    stats:{currentBankBalance:liveBank,cashOnHand:displayCash,uapBalance,loansOutstanding,companyFunds,
+    stats:{currentBankBalance:liveBank,cashOnHand:displayCash,uapBalance,loansOutstanding,welfareRemaining,companyFunds,
       incomeToday:historicalPeriod?(snapshotAmount('total_income')||snapshotAmount('net_income')||0):incomeExpense.rows[0].income_today,
       receiptsToday:historicalPeriod?(snapshotAmount('total_income')||0):incomeExpense.rows[0].receipts_today,
       expensesToday:historicalPeriod?(snapshotAmount('total_operating_expenses')||snapshotAmount('total_expenses')||0):incomeExpense.rows[0].expense_today,
@@ -1894,7 +1896,7 @@ app.get("/api/finance/command-center",auth,requireFinance("view"),asyncRoute(asy
       totalAssets:historicalPeriod?(snapshotAmount('total_assets')||0):totalAssets,
       totalLiabilities:historicalPeriod?(snapshotAmount('total_liabilities')||0):liabilities,
       annualSubscriptionsCollected:subscriptionCollected,annualSubscriptionsExpected:subscriptionExpected},
-    cashPosition:{bankBalance:liveBank,cashBalance:displayCash,uapBalance,loansOutstanding,companyFunds,pettyCash:historicalPeriod?0:petty,mobileMoney:historicalPeriod?periodAccounts.filter(a=>a.accountType==="mobile_money").reduce((s,a)=>s+a.balance,0):mobile,availableFunds:Math.max(0,(historicalPeriod?liveBank+displayCash:liquidFunds)-restricted),restrictedFunds:historicalPeriod?periodAccounts.filter(a=>a.restricted).reduce((s,a)=>s+a.balance,0):restricted,
+    cashPosition:{bankBalance:liveBank,cashBalance:displayCash,uapBalance,loansOutstanding,welfareRemaining,companyFunds,pettyCash:historicalPeriod?0:petty,mobileMoney:historicalPeriod?periodAccounts.filter(a=>a.accountType==="mobile_money").reduce((s,a)=>s+a.balance,0):mobile,availableFunds:Math.max(0,(historicalPeriod?liveBank+displayCash:liquidFunds)-restricted),restrictedFunds:historicalPeriod?periodAccounts.filter(a=>a.restricted).reduce((s,a)=>s+a.balance,0):restricted,
       welfareOnCentenaryThisMonth:historicalPeriod?0:welfareMonth.total,
       welfareMonthLabel:welfareMonth.label},
     financialSnapshot,accounts:periodAccounts,departments:departments.rows,budgets:budgetRows,vouchers:vouchers.rows,entries:entries.rows,
@@ -1925,7 +1927,7 @@ app.get("/api/finance/command-center",auth,requireFinance("view"),asyncRoute(asy
           OR COALESCE(t.notes,'') ILIKE '%received=%'
         )
       ORDER BY CASE WHEN t.status IN ('pending','pending_finance_review') THEN 0 ELSE 1 END, t.id DESC LIMIT 80`)).rows,
-    organizationStanding:{uapBalance,bankBalance:companyBankBalance,loansOutstanding,companyFunds},
+    organizationStanding:{uapBalance,bankBalance:companyBankBalance,loansOutstanding,welfareRemaining,companyFunds},
     notifications:[
       ...pendingFinanceEntries.slice(0,4).map(x=>({level:"warning",title:`${x.reference} awaits Finance verification`,createdAt:x.createdAt||x.transactionDate})),
       ...budgetRows.filter(x=>x.utilization>=80).map(x=>({level:"warning",title:`${x.department} budget has reached ${x.utilization}%`,createdAt:x.updatedAt||x.createdAt})),

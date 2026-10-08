@@ -1094,7 +1094,7 @@ function executiveDashboardView() {
     ["UAP account",money(uap),"building","finance-unit-trust","Old Mutual unit trust — open the live movement"],
     ["Centenary bank account",money(bank),"wallet","executive-finance","Company bank live balance"],
     ["Money in loans",money(loansOut),"loans","executive-credits","Outstanding loan principal"],
-    ["Total Company Funds",money(company),"reports","executive-finance","UAP + Centenary + loans"],
+    ["Total Company Funds",money(company),"reports","executive-finance","UAP + Centenary + loans + welfare remaining"],
     ["Welfare since June 2024",money(welfareGross),"receipt","executive-welfare","Standing collected since June 2024"],
     ["Income this month",money(s.organizationReceiptsMonth??s.organizationIncomeMonth??0),"arrowDown","executive-finance","All Centenary receipts this month, including member savings and welfare"],
     ["Expenditure this month",money(s.organizationExpenditureMonth??s.organizationExpenditure),"arrowUp","executive-finance","Live operational payments"],
