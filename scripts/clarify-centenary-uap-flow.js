@@ -123,7 +123,13 @@ async function main() {
     console.log("Unit Trust 10M movement dated 2026-08-31");
 
     // Opening trail stays historical. Do not pull a later live balance back to the 01 Sep SMS figure.
-    if (!dryRun && Number(centenary.balance) <= FINAL + 0.009) {
+    const laterActivity = (
+      await client.query(
+        `SELECT 1 FROM organization_finance_entries WHERE finance_account_id=$1 AND transaction_date>'2026-09-01' LIMIT 1`,
+        [centenary.id]
+      )
+    ).rows[0];
+    if (!dryRun && !laterActivity && Number(centenary.balance) <= FINAL + 0.009) {
       await client.query(
         `UPDATE finance_accounts SET
            balance=$1,

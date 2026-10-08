@@ -342,6 +342,33 @@ async function reconcileMuhooziLoanOctober2026(client){
   muhooziReconcileStatus=summary;
   return summary;
 }
+let centenaryResetStatus="not run yet";
+async function undoCentenarySyncReset20261008(client){
+  const key="fixCentenarySyncReset20261008";
+  if((await client.query("SELECT 1 FROM settings WHERE key=$1",[key])).rows[0])return null;
+  if(!(await client.query("SELECT 1 FROM settings WHERE key='fixMuhooziReconcile20261008'")).rows[0]){centenaryResetStatus="waiting for the Muhoozi reconcile";return null;}
+  const bank=(await client.query("SELECT id,balance::float AS balance FROM finance_accounts WHERE account_code='GL-4104' AND active=true LIMIT 1 FOR UPDATE")).rows[0];
+  if(!bank)return null;
+  let summary;
+  if(Number(bank.balance)<8351473-0.005){
+    summary=`no change: Centenary UGX ${Number(bank.balance).toLocaleString()} was not reset`;
+  }else{
+    const recorder=(await client.query(`SELECT id FROM users WHERE active=true AND (full_name ILIKE '%tabula%robert%' OR role IN ('Finance Officer','System Admin'))
+      ORDER BY (full_name ILIKE '%tabula%robert%') DESC,(role='Finance Officer') DESC,id LIMIT 1`)).rows[0]?.id;
+    const department=(await client.query("SELECT id FROM departments WHERE code='finance'")).rows[0];
+    await client.query(`INSERT INTO organization_finance_entries
+      (department_id,reference,entry_type,category,description,counterparty,payment_method,amount,status,receipt_number,transaction_date,approved_at,finance_account_id,recorded_by,approved_by)
+      VALUES ($1,'FIN-CEN-RESET-UNDO-20261008','transfer','Bank reconciliation',$2,'Centenary bank statement','Bank reconciliation',6860000,'completed',$3,'2026-10-07',NOW(),$4,$5,$5)`,
+      [department?.id||null,"Removes UGX 6,860,000 that an old 01/09/2026 sync script added back to Centenary after the Christopher Muhoozi disbursement. Centenary after disbursement UGX 2,042,548.",
+        receiptReference("RECON"),bank.id,recorder]);
+    await client.query("UPDATE finance_accounts SET balance=balance-6860000,updated_at=NOW() WHERE id=$1",[bank.id]);
+    await syncOrganizationBankBalanceSetting(client,bank.id);
+    summary=`Centenary UGX ${Number(bank.balance).toLocaleString()} less 6,860,000 = UGX ${(Number(bank.balance)-6860000).toLocaleString()}`;
+  }
+  await client.query(`INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value,updated_at=NOW()`,[key,summary]);
+  centenaryResetStatus=summary;
+  return summary;
+}
 async function backfillRepaymentsToCentenary(client){
   const pending=(await client.query(`SELECT t.id FROM transactions t LEFT JOIN loans l ON l.id=t.loan_id
     WHERE t.type='Loan repayment' AND t.status='completed' AND t.finance_entry_id IS NULL
@@ -886,7 +913,9 @@ app.get("/api/health",asyncRoute(async(req,res)=>{
   const fix=(await query("SELECT value FROM settings WHERE key='fixMuhooziDisbursement20261007'")).rows[0]?.value;
   const reconcile=(await query("SELECT value FROM settings WHERE key='fixMuhooziReconcile20261008'")).rows[0]?.value;
   res.json({status:"ok",service:"organization-management",build:RUNNING_BUILD,disbursementFix:fix||disbursementFixStatus,
-    muhooziReconcile:reconcile||muhooziReconcileStatus,time:new Date().toISOString()});
+    muhooziReconcile:reconcile||muhooziReconcileStatus,
+    centenaryReset:(await query("SELECT value FROM settings WHERE key='fixCentenarySyncReset20261008'")).rows[0]?.value||centenaryResetStatus,
+    time:new Date().toISOString()});
 }));
 app.post("/api/auth/login",loginLimiter,asyncRoute(async(req,res)=>{
   const email=String(req.body.email||"").trim().toLowerCase(), password=String(req.body.password||"");
@@ -6300,6 +6329,10 @@ async function runScheduledMaintenance() {
     const reconciled=await transaction(client=>reconcileMuhooziLoanOctober2026(client));
     if(reconciled)console.log(`Muhoozi loan reconcile: ${reconciled}`);
   }catch(error){muhooziReconcileStatus=`failed: ${error.message}`;console.error("Muhoozi loan reconcile failed:",error.message);}
+  try{
+    const undone=await transaction(client=>undoCentenarySyncReset20261008(client));
+    if(undone)console.log(`Centenary sync reset: ${undone}`);
+  }catch(error){centenaryResetStatus=`failed: ${error.message}`;console.error("Centenary sync reset fix failed:",error.message);}
   const graceDays=0;
   await transaction(async client=>{
     // No grace window: unpaid installments become overdue the day after the due date.

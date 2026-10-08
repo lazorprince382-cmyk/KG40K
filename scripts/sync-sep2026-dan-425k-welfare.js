@@ -140,8 +140,14 @@ async function main() {
       console.log(`  Policy: monthly savings target UGX ${SAVINGS_SHARE.toLocaleString()}; welfare UGX ${WELFARE_SHARE.toLocaleString()}; receipt UGX ${DEPOSIT_TOTAL.toLocaleString()}`);
 
       // The 01 Sep SMS figure is historical. Do not overwrite later receipts with it.
-      if (Number(account.balance) > FINAL_BALANCE + 0.009) {
-        console.log(`  SKIP Centenary balance — live UGX ${Number(account.balance).toLocaleString()} is ahead of the 01 Sep SMS figure`);
+      const laterActivity = (
+        await client.query(
+          `SELECT 1 FROM organization_finance_entries WHERE finance_account_id=$1 AND transaction_date>'2026-09-01' LIMIT 1`,
+          [account.id]
+        )
+      ).rows[0];
+      if (laterActivity || Number(account.balance) > FINAL_BALANCE + 0.009) {
+        console.log(`  SKIP Centenary balance — live ledger has moved on from the 01 Sep SMS figure (UGX ${Number(account.balance).toLocaleString()})`);
       } else {
         await client.query(
           `UPDATE finance_accounts SET balance=$1, updated_at=NOW(),

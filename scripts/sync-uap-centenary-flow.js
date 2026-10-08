@@ -223,7 +223,18 @@ async function main() {
     console.log(`Target Centenary: ${CENTENARY_BALANCE.toLocaleString()}`);
     console.log(`Target UAP: ${UAP_CURRENT.toLocaleString()}`);
 
-    if (!dryRun) {
+    const laterCentenary = (
+      await client.query(
+        `SELECT 1 FROM organization_finance_entries WHERE finance_account_id=$1 AND transaction_date>'2026-09-01' LIMIT 1`,
+        [centenary.id]
+      )
+    ).rows[0];
+    const laterUap = (
+      await client.query(`SELECT 1 FROM unit_trust_movements WHERE movement_date>'2026-09-01' LIMIT 1`)
+    ).rows[0];
+    if (!dryRun && uap && (laterCentenary || laterUap)) {
+      console.log("SKIP UAP / Centenary balances — live ledger has moved on from the 01 Sep figures");
+    } else if (!dryRun) {
       if (!uap) {
         uap = (
           await client.query(
