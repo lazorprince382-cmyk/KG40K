@@ -198,18 +198,41 @@ async function fixOctober7Disbursement(client){
   const key="fixMuhooziDisbursement20261007";
   if((await client.query("SELECT 1 FROM settings WHERE key=$1",[key])).rows[0])return null;
   const day="2026-10-07",at="2026-10-07T12:00:00+03:00";
-  const loan=(await client.query(`SELECT l.*,m.full_name,(l.disbursed_at AT TIME ZONE 'Africa/Kampala')::date::text AS disbursed_day
+  const findLoan=async()=>(await client.query(`SELECT l.*,m.full_name,(l.disbursed_at AT TIME ZONE 'Africa/Kampala')::date::text AS disbursed_day
     FROM loans l JOIN members m ON m.id=l.member_id
     WHERE m.full_name ILIKE '%christopher%' AND m.full_name ILIKE '%muhoozi%' AND l.reference NOT LIKE 'LN-HIST-%'
       AND l.status NOT IN ('completed','rejected','cancelled','declined','withdrawn')
       AND (l.status NOT IN ('active','overdue') OR (l.disbursed_at AT TIME ZONE 'Africa/Kampala')::date>=$1::date)
     ORDER BY l.id DESC LIMIT 1 FOR UPDATE OF l`,[day])).rows[0];
+  let loan=await findLoan();
   if(!loan){
-    const seen=(await client.query(`SELECT string_agg(l.reference||' '||l.status||' '||l.amount::text||' '||COALESCE(l.disbursed_at::date::text,'-'),'; ' ORDER BY l.id DESC) AS s
-      FROM loans l JOIN members m ON m.id=l.member_id WHERE m.full_name ILIKE '%muhoozi%'`)).rows[0]?.s||"none";
-    disbursementFixStatus=`not applied: no open loan for Christopher Muhoozi (loans seen: ${seen})`;
-    console.warn(`Oct 7 disbursement fix ${disbursementFixStatus}`);
-    return null;
+    const member=(await client.query(`SELECT id,savings_balance FROM members WHERE full_name ILIKE '%christopher%' AND full_name ILIKE '%muhoozi%' ORDER BY id LIMIT 1`)).rows[0];
+    const elsewhere=(await client.query(`SELECT string_agg(l.reference||' ('||m.member_number||', '||l.status||')',', ') AS s FROM loans l JOIN members m ON m.id=l.member_id
+      WHERE l.reference NOT LIKE 'LN-HIST-%' AND 7000000 IN (l.amount,COALESCE(l.verified_amount,0))
+        AND (l.status NOT IN ('active','overdue','completed','rejected','cancelled','declined','withdrawn') OR (l.disbursed_at AT TIME ZONE 'Africa/Kampala')::date>=$1::date)`,[day])).rows[0]?.s;
+    if(!member||elsewhere){
+      disbursementFixStatus=!member?"not applied: member Christopher Muhoozi not found":`not applied: a 7,000,000 loan exists under another member: ${elsewhere}`;
+      console.warn(`Oct 7 disbursement fix ${disbursementFixStatus}`);
+      return null;
+    }
+    const product=(await client.query("SELECT id,policy_reference FROM loan_products WHERE name='Emergency Loan' ORDER BY id LIMIT 1")).rows[0];
+    const officer=(await client.query(`SELECT id FROM users WHERE active=true AND (lower(email)='nakayiza.baraza.olivia@gmail.com' OR role='Credits Officer')
+      ORDER BY (lower(email)='nakayiza.baraza.olivia@gmail.com') DESC,id LIMIT 1`)).rows[0]?.id||null;
+    const executive=(await client.query(`SELECT id FROM users WHERE active=true AND role IN ('Executive Officer','System Admin') ORDER BY (role='Executive Officer') DESC,id LIMIT 1`)).rows[0]?.id||null;
+    const memberUser=(await client.query("SELECT id FROM users WHERE member_id=$1 ORDER BY id LIMIT 1",[member.id])).rows[0]?.id||null;
+    const applied="2026-10-04T10:00:00+03:00",committee="2026-10-04T16:00:00+03:00",authorized="2026-10-05T12:00:00+03:00";
+    const created=(await client.query(`INSERT INTO loans (reference,member_id,product_id,amount,balance,term_months,purpose,status,verified_amount,processing_fee,
+        savings_at_application,existing_loan_balance,eligibility_result,security_type,borrower_declaration_accepted,policy_reference,
+        recommended_by,committee_approved_by,authorized_by,created_at,authorized_at)
+      VALUES ('LN-CHRIS-7M-20261004',$1,$2,7000000,7000000,1,'Emergency loan','ready-disbursement',7000000,140000,$3,0,
+        'Secured on member savings','savings_and_shares',true,COALESCE($4,'AGM-2025-LOAN-RESOLUTION'),$5,$5,$6,$7::timestamptz,$8::timestamptz) RETURNING id`,
+      [member.id,product.id,member.savings_balance||0,product.policy_reference,officer,executive,applied,authorized])).rows[0];
+    for(const [stage,action,actor,comment,at] of [
+      ["application","submitted",memberUser,"Emergency loan of UGX 7,000,000 secured on savings",applied],
+      ["committee-review","approve",officer,"Approved by the Credit department",committee],
+      ["executive-authorization","approve",executive,"Approved by the Executive",authorized]])
+      await client.query("INSERT INTO loan_workflow_events (loan_id,stage,action,actor_id,comment,created_at) VALUES ($1,$2,$3,$4,$5,$6::timestamptz)",[created.id,stage,action,actor,comment,at]);
+    loan=await findLoan();
   }
   const actor=(await client.query(`SELECT id FROM users WHERE active=true AND (lower(email)='nakayiza.baraza.olivia@gmail.com' OR role='Credits Officer')
     ORDER BY (lower(email)='nakayiza.baraza.olivia@gmail.com') DESC,id LIMIT 1`)).rows[0]?.id;
@@ -4859,8 +4882,8 @@ async function completeLoanDisbursement(client,{loan,disbursement,method,destina
       [loan.id,processingFee,`${feeRate}% processing fee deducted from disbursed amount`,userId,when]);
   }
   await createRepaymentSchedule(client,{...loan,disbursed_at:when},fullAmount);
-  await client.query("INSERT INTO loan_workflow_events (loan_id,stage,action,actor_id,comment) VALUES ($1,'disbursement','disbursed',$2,$3)",
-    [loan.id,userId,`${method}${method==="Cash"?"":` to ${destination}`} - ${transactionReference}. Net UGX ${netCash.toLocaleString()}; processing fee UGX ${processingFee.toLocaleString()}.`]);
+  await client.query("INSERT INTO loan_workflow_events (loan_id,stage,action,actor_id,created_at,comment) VALUES ($1,'disbursement','disbursed',$2,$3,$4)",
+    [loan.id,userId,when,`${method}${method==="Cash"?"":` to ${destination}`} - ${transactionReference}. Net UGX ${netCash.toLocaleString()}; processing fee UGX ${processingFee.toLocaleString()}.`]);
   const memberUser=(await client.query("SELECT id FROM users WHERE member_id=$1 AND active=true LIMIT 1",[loan.member_id])).rows[0];
   if(memberUser)await client.query("INSERT INTO notifications (user_id,title,message) VALUES ($1,'Loan disbursed',$2)",
     [memberUser.id,`Loan ${loan.reference} has been disbursed by ${method}${method==="Cash"?"":` to ${destination}`}. Net received UGX ${netCash.toLocaleString()} after a ${feeRate}% processing fee. You repay the full UGX ${fullAmount.toLocaleString()} plus 2% monthly organization interest.`]);
