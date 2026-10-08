@@ -2788,6 +2788,10 @@ function loanRepaymentProgress(l) {
   const progressPct=totalDue?Math.min(100,Math.round(totalPaid/totalDue*100)):0;
   return {totalDue,totalPaid,totalInterest,remaining,progressPct};
 }
+function loanAmountOwed(l){
+  const scheduleLeft=Math.max(0,Number(l.totalDue||l.amount||0)-Number(l.totalPaid||0));
+  return Math.round((scheduleLeft+Math.max(0,Number(l.outstandingCharges||0))+Math.max(0,Number(l.pendingPenaltyAmount||0)))*100)/100;
+}
 function loanLatePenaltyAmount(l){
   return Math.max(0,Number(l.penaltyAmount||0))+Math.max(0,Number(l.pendingPenaltyAmount||0));
 }
@@ -2804,12 +2808,12 @@ function creditsActiveLoansView() {
   if(!state.credits?.loans)return `<div class="exec-empty">Loading active loans…</div>`;
   const rows=state.credits?.loans?.filter(l=>["active","overdue"].includes(l.status))||[];
   const penaltyWatch=rows.filter(l=>l.inDangerPeriod||l.status==="overdue"||loanLatePenaltyAmount(l)>0).length;
-  return `<div class="exec-module-metrics">${executiveModuleMetric("Active loans",rows.length,"blue")}${executiveModuleMetric("Total amount remaining",money(rows.reduce((n,l)=>n+Math.max(0,Number(l.totalDue||l.amount||0)-Number(l.totalPaid||0)),0)),"violet")}${executiveModuleMetric("Total repayment",money(rows.reduce((n,l)=>n+Number(l.totalPaid||0),0)),"orange")}${executiveModuleMetric(penaltyWatch?"Late / penalty watch":"Cash disbursed",penaltyWatch?penaltyWatch:money(rows.reduce((n,l)=>n+Math.max(0,Number(l.amount||0)-Number(l.processingFee||0)),0)),penaltyWatch?"orange":"green")}</div>
+  return `<div class="exec-module-metrics">${executiveModuleMetric("Active loans",rows.length,"blue")}${executiveModuleMetric("Total amount remaining",money(rows.reduce((n,l)=>n+loanAmountOwed(l),0)),"violet")}${executiveModuleMetric("Total repayment",money(rows.reduce((n,l)=>n+Number(l.totalPaid||0),0)),"orange")}${executiveModuleMetric(penaltyWatch?"Late / penalty watch":"Cash disbursed",penaltyWatch?penaltyWatch:money(rows.reduce((n,l)=>n+Math.max(0,Number(l.amount||0)-Number(l.processingFee||0)),0)),penaltyWatch?"orange":"green")}</div>
     <div class="credits-loan-list">${rows.map(l=>{
       const p=loanRepaymentProgress(l);
       const fee=Number(l.processingFee||0),netDisbursed=Math.max(0,Number(l.amount||0)-fee);
       const penalty=loanLatePenaltyAmount(l);
-      const remaining=Math.max(0,Number(l.totalDue||l.amount||0)-Number(l.totalPaid||0));
+      const remaining=loanAmountOwed(l);
       return `<article class="credits-active-loan${l.inDangerPeriod||l.status==="overdue"||penalty>0?" danger-period":""}">
         <div class="credits-loan-main">
           <span>${escapeHtml(l.reference)} · ${escapeHtml(l.product)}</span>
