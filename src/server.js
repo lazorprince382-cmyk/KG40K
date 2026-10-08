@@ -6,6 +6,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const projectRoot = path.resolve(__dirname,"..");
+const RUNNING_BUILD=(()=>{try{return require("child_process").execSync("git rev-parse --short HEAD",{cwd:projectRoot,stdio:["ignore","pipe","ignore"]}).toString().trim();}catch{return "unknown";}})();
 const { query, one, transaction, audit, initialize, ROLES } = require("./db");
 const { officialMemberDepts, officialDeptCodes } = require("./official-department-roster");
 const { getPrimaryCreditsOfficer, notifyCreditsVerificationQueue } = require("./credits-queue");
@@ -193,21 +194,16 @@ async function removeDuplicateBabiryeRepayment(client){
   return removed;
 }
 async function fixOctober7Disbursement(client){
-  const key="fixLoanDisbursement20261007";
+  const key="fixMuhooziDisbursement20261007";
   if((await client.query("SELECT 1 FROM settings WHERE key=$1",[key])).rows[0])return null;
   const day="2026-10-07",at="2026-10-07T12:00:00+03:00";
-  const candidates=(await client.query(`SELECT l.*,m.full_name,(l.disbursed_at AT TIME ZONE 'Africa/Kampala')::date::text AS disbursed_day
+  const loan=(await client.query(`SELECT l.*,m.full_name,(l.disbursed_at AT TIME ZONE 'Africa/Kampala')::date::text AS disbursed_day
     FROM loans l JOIN members m ON m.id=l.member_id
-    WHERE l.reference NOT LIKE 'LN-HIST-%' AND 7000000 IN (l.amount,COALESCE(l.verified_amount,0))
-      AND ((l.status IN ('active','overdue') AND (l.disbursed_at AT TIME ZONE 'Africa/Kampala')::date BETWEEN $1::date AND $1::date+1)
-        OR l.status='ready-disbursement'
-        OR EXISTS (SELECT 1 FROM loan_disbursements d WHERE d.loan_id=l.id AND d.status IN ('prepared','authorized')))
-    FOR UPDATE OF l`,[day])).rows;
-  if(candidates.length!==1){
-    if(candidates.length>1)console.warn(`Oct 7 disbursement fix skipped: ${candidates.length} matching 7M loans (${candidates.map(c=>c.reference).join(", ")})`);
-    return null;
-  }
-  const loan=candidates[0];
+    WHERE m.full_name ILIKE '%christopher%muhoozi%' AND l.reference NOT LIKE 'LN-HIST-%'
+      AND l.status NOT IN ('completed','rejected','cancelled','declined','withdrawn')
+      AND (l.status NOT IN ('active','overdue') OR (l.disbursed_at AT TIME ZONE 'Africa/Kampala')::date>=$1::date)
+    ORDER BY l.id DESC LIMIT 1 FOR UPDATE OF l`,[day])).rows[0];
+  if(!loan){console.warn("Oct 7 disbursement fix: no open loan found for Christopher Muhoozi");return null;}
   const actor=(await client.query(`SELECT id FROM users WHERE active=true AND (lower(email)='nakayiza.baraza.olivia@gmail.com' OR role='Credits Officer')
     ORDER BY (lower(email)='nakayiza.baraza.olivia@gmail.com') DESC,id LIMIT 1`)).rows[0]?.id;
   let summary;
@@ -794,7 +790,7 @@ app.get("/api/departments/:code/files/:storedName",auth,requireDepartment("view"
 
 app.get("/api/health",asyncRoute(async(req,res)=>{
   await query("SELECT 1");
-  res.json({status:"ok",service:"organization-management",time:new Date().toISOString()});
+  res.json({status:"ok",service:"organization-management",build:RUNNING_BUILD,time:new Date().toISOString()});
 }));
 app.post("/api/auth/login",loginLimiter,asyncRoute(async(req,res)=>{
   const email=String(req.body.email||"").trim().toLowerCase(), password=String(req.body.password||"");
