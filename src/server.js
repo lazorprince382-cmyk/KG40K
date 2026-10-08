@@ -193,17 +193,24 @@ async function removeDuplicateBabiryeRepayment(client){
     ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value,updated_at=NOW()`,[removed.join(",")]);
   return removed;
 }
+let disbursementFixStatus="not run yet";
 async function fixOctober7Disbursement(client){
   const key="fixMuhooziDisbursement20261007";
   if((await client.query("SELECT 1 FROM settings WHERE key=$1",[key])).rows[0])return null;
   const day="2026-10-07",at="2026-10-07T12:00:00+03:00";
   const loan=(await client.query(`SELECT l.*,m.full_name,(l.disbursed_at AT TIME ZONE 'Africa/Kampala')::date::text AS disbursed_day
     FROM loans l JOIN members m ON m.id=l.member_id
-    WHERE m.full_name ILIKE '%christopher%muhoozi%' AND l.reference NOT LIKE 'LN-HIST-%'
+    WHERE m.full_name ILIKE '%christopher%' AND m.full_name ILIKE '%muhoozi%' AND l.reference NOT LIKE 'LN-HIST-%'
       AND l.status NOT IN ('completed','rejected','cancelled','declined','withdrawn')
       AND (l.status NOT IN ('active','overdue') OR (l.disbursed_at AT TIME ZONE 'Africa/Kampala')::date>=$1::date)
     ORDER BY l.id DESC LIMIT 1 FOR UPDATE OF l`,[day])).rows[0];
-  if(!loan){console.warn("Oct 7 disbursement fix: no open loan found for Christopher Muhoozi");return null;}
+  if(!loan){
+    const seen=(await client.query(`SELECT string_agg(l.reference||' '||l.status||' '||l.amount::text||' '||COALESCE(l.disbursed_at::date::text,'-'),'; ' ORDER BY l.id DESC) AS s
+      FROM loans l JOIN members m ON m.id=l.member_id WHERE m.full_name ILIKE '%muhoozi%'`)).rows[0]?.s||"none";
+    disbursementFixStatus=`not applied: no open loan for Christopher Muhoozi (loans seen: ${seen})`;
+    console.warn(`Oct 7 disbursement fix ${disbursementFixStatus}`);
+    return null;
+  }
   const actor=(await client.query(`SELECT id FROM users WHERE active=true AND (lower(email)='nakayiza.baraza.olivia@gmail.com' OR role='Credits Officer')
     ORDER BY (lower(email)='nakayiza.baraza.olivia@gmail.com') DESC,id LIMIT 1`)).rows[0]?.id;
   let summary;
@@ -790,7 +797,8 @@ app.get("/api/departments/:code/files/:storedName",auth,requireDepartment("view"
 
 app.get("/api/health",asyncRoute(async(req,res)=>{
   await query("SELECT 1");
-  res.json({status:"ok",service:"organization-management",build:RUNNING_BUILD,time:new Date().toISOString()});
+  const fix=(await query("SELECT value FROM settings WHERE key='fixMuhooziDisbursement20261007'")).rows[0]?.value;
+  res.json({status:"ok",service:"organization-management",build:RUNNING_BUILD,disbursementFix:fix||disbursementFixStatus,time:new Date().toISOString()});
 }));
 app.post("/api/auth/login",loginLimiter,asyncRoute(async(req,res)=>{
   const email=String(req.body.email||"").trim().toLowerCase(), password=String(req.body.password||"");
@@ -6199,7 +6207,7 @@ async function runScheduledMaintenance() {
   try{
     const fixed=await transaction(client=>fixOctober7Disbursement(client));
     if(fixed)console.log(`Loan disbursement fix: ${fixed}`);
-  }catch(error){console.error("Oct 7 loan disbursement fix failed:",error.message);}
+  }catch(error){disbursementFixStatus=`failed: ${error.message}`;console.error("Oct 7 loan disbursement fix failed:",error.message);}
   const graceDays=0;
   await transaction(async client=>{
     // No grace window: unpaid installments become overdue the day after the due date.
