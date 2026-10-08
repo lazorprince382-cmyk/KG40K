@@ -132,7 +132,7 @@ async function postReceiptToCentenary(client,{grossAmount,memberName,method,desc
   return {...inserted,accountName:account.account_name,accountId:account.id};
 }
 const REPAYMENT_BANK_POSTING_FROM="2026-09-01";
-async function deductDisbursementFromCentenary(client,{loanId,disbursementAmount,loanReference,memberName,method,destination,userId}){
+async function deductDisbursementFromCentenary(client,{loanId,disbursementAmount,loanAmount,processingFee,loanReference,memberName,method,destination,userId,onDate=null}){
   const account=(await client.query(`SELECT id,account_name,balance::float AS balance FROM finance_accounts
     WHERE active=true AND account_code='GL-4104' ORDER BY id LIMIT 1 FOR UPDATE`)).rows[0];
   if(!account){const error=new Error("Centenary bank account (GL-4104) is not set up");error.status=400;throw error;}
@@ -146,11 +146,11 @@ async function deductDisbursementFromCentenary(client,{loanId,disbursementAmount
   const inserted=(await client.query(`INSERT INTO organization_finance_entries
     (department_id,reference,entry_type,category,description,counterparty,payment_method,amount,status,receipt_number,
       transaction_date,recorded_by,approved_by,approved_at,finance_account_id)
-    VALUES ($1,$2,'expense','Loan disbursement',$3,$4,$5,$6,'completed',$7,NOW()::date,$8,$8,NOW(),$9)
+    VALUES ($1,$2,'expense','Loan disbursement',$3,$4,$5,$6,'completed',$7,(COALESCE($10::timestamptz,NOW()) AT TIME ZONE 'Africa/Kampala')::date,$8,$8,NOW(),$9)
     RETURNING id,reference,receipt_number AS "receiptNumber"`,
     [department.id,ref,
-      `Loan ${loanReference} disbursed to ${memberName} - ${method}${method==="Cash"?"":" to "+destination}. UGX ${disbursementAmount.toLocaleString()} deducted from Centenary account.`,
-      memberName,method,disbursementAmount,receipt,userId,account.id])).rows[0];
+      `Loan ${loanReference} disbursed to ${memberName} - ${method}${method==="Cash"?"":" to "+destination}. UGX ${disbursementAmount.toLocaleString()} paid out from Centenary${processingFee?` (loan UGX ${Number(loanAmount).toLocaleString()} less processing fee UGX ${Number(processingFee).toLocaleString()} kept on the account)`:""}.`,
+      memberName,method,disbursementAmount,receipt,userId,account.id,onDate])).rows[0];
   await client.query("UPDATE finance_accounts SET balance=balance-$1,updated_at=NOW() WHERE id=$2",[disbursementAmount,account.id]);
   await syncOrganizationBankBalanceSetting(client,account.id);
   return {...inserted,accountName:account.account_name,accountId:account.id};
@@ -191,6 +191,67 @@ async function removeDuplicateBabiryeRepayment(client){
   await client.query(`INSERT INTO settings (key,value) VALUES ('fixBabiryeDuplicateRepayment20261001',$1)
     ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value,updated_at=NOW()`,[removed.join(",")]);
   return removed;
+}
+async function fixOctober7Disbursement(client){
+  const key="fixLoanDisbursement20261007";
+  if((await client.query("SELECT 1 FROM settings WHERE key=$1",[key])).rows[0])return null;
+  const day="2026-10-07",at="2026-10-07T12:00:00+03:00";
+  const candidates=(await client.query(`SELECT l.*,m.full_name,(l.disbursed_at AT TIME ZONE 'Africa/Kampala')::date::text AS disbursed_day
+    FROM loans l JOIN members m ON m.id=l.member_id
+    WHERE l.reference NOT LIKE 'LN-HIST-%' AND 7000000 IN (l.amount,COALESCE(l.verified_amount,0))
+      AND ((l.status IN ('active','overdue') AND (l.disbursed_at AT TIME ZONE 'Africa/Kampala')::date BETWEEN $1::date AND $1::date+1)
+        OR l.status='ready-disbursement'
+        OR EXISTS (SELECT 1 FROM loan_disbursements d WHERE d.loan_id=l.id AND d.status IN ('prepared','authorized')))
+    FOR UPDATE OF l`,[day])).rows;
+  if(candidates.length!==1){
+    if(candidates.length>1)console.warn(`Oct 7 disbursement fix skipped: ${candidates.length} matching 7M loans (${candidates.map(c=>c.reference).join(", ")})`);
+    return null;
+  }
+  const loan=candidates[0];
+  const actor=(await client.query(`SELECT id FROM users WHERE active=true AND (lower(email)='nakayiza.baraza.olivia@gmail.com' OR role='Credits Officer')
+    ORDER BY (lower(email)='nakayiza.baraza.olivia@gmail.com') DESC,id LIMIT 1`)).rows[0]?.id;
+  let summary;
+  if(!["active","overdue"].includes(loan.status)){
+    const disbursement=(await client.query("SELECT * FROM loan_disbursements WHERE loan_id=$1 FOR UPDATE",[loan.id])).rows[0];
+    await client.query("DELETE FROM loan_repayment_schedule WHERE loan_id=$1",[loan.id]);
+    const done=await completeLoanDisbursement(client,{loan,disbursement,method:"Bank transfer",destination:"Paid from Centenary on 07/10/2026",
+      userId:actor,transactionReference:reference("DSB"),disbursedAt:at});
+    summary=`${loan.reference} activated on ${day}; UGX ${done.netCash.toLocaleString()} deducted from Centenary, fee UGX ${done.processingFee.toLocaleString()} kept`;
+  }else{
+    const shift=loan.disbursed_day&&loan.disbursed_day!==day
+      ?Number((await client.query("SELECT ($1::date-$2::date) AS d",[day,loan.disbursed_day])).rows[0].d):0;
+    if(shift){
+      await client.query(`UPDATE loans SET disbursed_at=$2::timestamptz,due_date=due_date+$3::int WHERE id=$1`,[loan.id,at,shift]);
+      await client.query("UPDATE loan_repayment_schedule SET due_date=due_date+$2::int WHERE loan_id=$1",[loan.id,shift]);
+      await client.query("UPDATE loan_disbursements SET disbursed_at=$2::timestamptz WHERE loan_id=$1",[loan.id,at]);
+    }
+    const fee=Number(loan.processing_fee||0)||Math.round(Number(loan.amount)*0.02*100)/100;
+    const net=Math.round((Number(loan.amount)-fee)*100)/100;
+    const tx=(await client.query(`SELECT * FROM transactions WHERE type='Loan disbursement' AND (loan_id=$3 OR (loan_id IS NULL AND member_id=$1))
+      AND created_at>=$2::date-INTERVAL '1 day' ORDER BY (loan_id=$3) DESC,created_at DESC LIMIT 1 FOR UPDATE`,[loan.member_id,day,loan.id])).rows[0];
+    if(tx&&shift)await client.query("UPDATE transactions SET created_at=$2::timestamptz,verified_at=$2::timestamptz WHERE id=$1",[tx.id,at]);
+    let entry=tx?.finance_entry_id?(await client.query("SELECT * FROM organization_finance_entries WHERE id=$1 FOR UPDATE",[tx.finance_entry_id])).rows[0]:null;
+    if(!entry)entry=(await client.query(`SELECT * FROM organization_finance_entries WHERE category='Loan disbursement' AND description ILIKE '%'||$1||'%'
+      ORDER BY id DESC LIMIT 1 FOR UPDATE`,[loan.reference])).rows[0];
+    if(entry){
+      const back=Math.round((Number(entry.amount)-net)*100)/100;
+      await client.query(`UPDATE organization_finance_entries SET amount=$2,transaction_date=$3::date,
+        description=$4 WHERE id=$1`,[entry.id,net,day,
+        `Loan ${loan.reference} disbursed to ${loan.full_name}. UGX ${net.toLocaleString()} paid out from Centenary (loan UGX ${Number(loan.amount).toLocaleString()} less processing fee UGX ${fee.toLocaleString()} kept on the account).`]);
+      if(Math.abs(back)>0.004&&entry.finance_account_id){
+        await client.query("UPDATE finance_accounts SET balance=balance+$1,updated_at=NOW() WHERE id=$2",[back,entry.finance_account_id]);
+        await syncOrganizationBankBalanceSetting(client,entry.finance_account_id);
+      }
+      summary=`${loan.reference} dated ${day}; Centenary entry set to UGX ${net.toLocaleString()} (UGX ${back.toLocaleString()} returned to Centenary)`;
+    }else{
+      const posted=await deductDisbursementFromCentenary(client,{loanId:loan.id,disbursementAmount:net,loanAmount:Number(loan.amount),processingFee:fee,
+        loanReference:loan.reference,memberName:loan.full_name,method:tx?.method||"Bank transfer",destination:tx?.external_reference||"Member",userId:actor,onDate:at});
+      if(tx)await client.query("UPDATE transactions SET finance_entry_id=$2 WHERE id=$1",[tx.id,posted.id]);
+      summary=`${loan.reference} dated ${day}; UGX ${net.toLocaleString()} deducted from Centenary (${posted.reference})`;
+    }
+  }
+  await client.query(`INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value,updated_at=NOW()`,[key,summary]);
+  return summary;
 }
 async function backfillRepaymentsToCentenary(client){
   const pending=(await client.query(`SELECT t.id FROM transactions t LEFT JOIN loans l ON l.id=t.loan_id
@@ -4754,6 +4815,53 @@ app.post("/api/loans/:id/finance-verification",auth,(_req,res)=>res.status(410).
     balance=round(Math.max(0,openingBalance-principal));
   }
 }
+async function completeLoanDisbursement(client,{loan,disbursement,method,destination,userId,transactionReference,disbursedAt=null}){
+  const fullAmount=Number(disbursement?.amount||loan.verified_amount||loan.amount);
+  const product=(await client.query("SELECT processing_fee_rate FROM loan_products WHERE id=$1",[loan.product_id])).rows[0];
+  const feeRate=Number(product?.processing_fee_rate||2);
+  let processingFee=Number(loan.processing_fee||0);
+  if(!processingFee)processingFee=Math.round((fullAmount*feeRate/100+Number.EPSILON)*100)/100;
+  const netCash=Math.max(0,Math.round((fullAmount-processingFee+Number.EPSILON)*100)/100);
+  const when=(await client.query("SELECT COALESCE($1::timestamptz,NOW()) AS at",[disbursedAt])).rows[0].at;
+  if(disbursement){
+    const disbursed=await client.query(`UPDATE loan_disbursements
+      SET status='disbursed',method=$1,destination=$2,disbursed_by=$3,transaction_reference=$4,disbursed_at=$6
+      WHERE id=$5 AND status<>'disbursed' RETURNING id`,[method,destination,userId,transactionReference,disbursement.id,when]);
+    if(disbursed.rowCount!==1){const error=new Error("Loan was already disbursed");error.status=409;throw error;}
+  }else{
+    await client.query(`INSERT INTO loan_disbursements (loan_id,amount,method,destination,status,prepared_by,authorized_by,disbursed_by,
+        transaction_reference,prepared_at,authorized_at,disbursed_at)
+      VALUES ($1,$2,$3,$4,'disbursed',$5,$5,$5,$6,$7,$7,$7)`,[loan.id,fullAmount,method,destination,userId,transactionReference,when]);
+  }
+  const activated=await client.query(`UPDATE loans SET status='active',amount=$1,balance=$1,processing_fee=$2,disbursed_at=$5,
+      due_date=(($5::timestamptz AT TIME ZONE 'Africa/Kampala')::date+($3||' months')::interval)::date
+    WHERE id=$4 AND status NOT IN ('active','overdue','completed') RETURNING id,reference`,[fullAmount,processingFee,loan.term_months,loan.id,when]);
+  if(activated.rowCount!==1){const error=new Error("Loan status changed before disbursement");error.status=409;throw error;}
+  const memberDetails=(await client.query("SELECT full_name FROM members WHERE id=$1",[loan.member_id])).rows[0];
+  const financeEntry=await deductDisbursementFromCentenary(client,{
+    loanId:loan.id,disbursementAmount:netCash,loanAmount:fullAmount,processingFee,
+    loanReference:activated.rows[0].reference||loan.reference,memberName:memberDetails?.full_name||"Member",
+    method,destination,userId,onDate:when
+  });
+  const payoutNote=method==="Cash"
+    ?`Cash handed to member after ${feeRate}% processing fee of UGX ${processingFee.toLocaleString()}. Full principal UGX ${fullAmount.toLocaleString()} remains repayable with organization interest. UGX ${netCash.toLocaleString()} deducted from Centenary ${financeEntry.reference}.`
+    :`Net amount paid by ${method} to ${destination} after ${feeRate}% processing fee of UGX ${processingFee.toLocaleString()}. Full principal UGX ${fullAmount.toLocaleString()} remains repayable with organization interest. UGX ${netCash.toLocaleString()} deducted from Centenary ${financeEntry.reference}.`;
+  await client.query(`INSERT INTO transactions (reference,member_id,type,method,amount,status,external_reference,notes,recorded_by,verified_by,verified_at,finance_entry_id,created_at)
+    VALUES ($1,$2,'Loan disbursement',$3,$4,'completed',$5,$6,$7,$7,$9,$8,$9)`,
+    [transactionReference,loan.member_id,method,netCash,destination,payoutNote,userId,financeEntry.id,when]);
+  if(processingFee>0){
+    await client.query(`INSERT INTO loan_charges (loan_id,charge_type,amount,paid_amount,status,reason,assessed_by,assessed_at)
+      VALUES ($1,'Processing fee',$2,$2,'paid',$3,$4,$5)`,
+      [loan.id,processingFee,`${feeRate}% processing fee deducted from disbursed amount`,userId,when]);
+  }
+  await createRepaymentSchedule(client,{...loan,disbursed_at:when},fullAmount);
+  await client.query("INSERT INTO loan_workflow_events (loan_id,stage,action,actor_id,comment) VALUES ($1,'disbursement','disbursed',$2,$3)",
+    [loan.id,userId,`${method}${method==="Cash"?"":` to ${destination}`} - ${transactionReference}. Net UGX ${netCash.toLocaleString()}; processing fee UGX ${processingFee.toLocaleString()}.`]);
+  const memberUser=(await client.query("SELECT id FROM users WHERE member_id=$1 AND active=true LIMIT 1",[loan.member_id])).rows[0];
+  if(memberUser)await client.query("INSERT INTO notifications (user_id,title,message) VALUES ($1,'Loan disbursed',$2)",
+    [memberUser.id,`Loan ${loan.reference} has been disbursed by ${method}${method==="Cash"?"":` to ${destination}`}. Net received UGX ${netCash.toLocaleString()} after a ${feeRate}% processing fee. You repay the full UGX ${fullAmount.toLocaleString()} plus 2% monthly organization interest.`]);
+  return {netCash,processingFee,fullAmount,feeRate,financeEntry};
+}
 app.post("/api/loans/:id/disburse",auth,asyncRoute(async(req,res)=>{
   if(req.user.role==="Executive Officer")
     return res.status(403).json({error:"Disbursement is reserved for the Credits Officer (Nakayiza Baraza Olivia). Executive can only authorize."});
@@ -4786,48 +4894,8 @@ app.post("/api/loans/:id/disburse",auth,asyncRoute(async(req,res)=>{
     if(!loan||loan.status!=="ready-disbursement"||!disbursement||disbursement.status!=="authorized") {
       const error=new Error("Loan is not ready for disbursement or was already disbursed");error.status=409;throw error;
     }
-    const fullAmount=Number(disbursement.amount||loan.verified_amount||loan.amount);
-    const product=(await client.query("SELECT processing_fee_rate FROM loan_products WHERE id=$1",[loan.product_id])).rows[0];
-    const feeRate=Number(product?.processing_fee_rate||2);
-    let processingFee=Number(loan.processing_fee||0);
-    if(!processingFee)processingFee=Math.round((fullAmount*feeRate/100+Number.EPSILON)*100)/100;
-    const netCash=Math.max(0,Math.round((fullAmount-processingFee+Number.EPSILON)*100)/100);
-    const disbursed=await client.query(`UPDATE loan_disbursements
-      SET status='disbursed',method=$1,destination=$2,disbursed_by=$3,transaction_reference=$4,disbursed_at=NOW()
-      WHERE id=$5 AND status='authorized' RETURNING id`,[method,destination,req.user.id,transactionReference,disbursement.id]);
-    if(disbursed.rowCount!==1){const error=new Error("Loan was already disbursed");error.status=409;throw error;}
-    const activated=await client.query(`UPDATE loans SET status='active',amount=$1,balance=$1,processing_fee=$2,disbursed_at=NOW(),due_date=(CURRENT_DATE+($3||' months')::interval)::date
-      WHERE id=$4 AND status='ready-disbursement' RETURNING id,reference`,[fullAmount,processingFee,loan.term_months,loan.id]);
-    if(activated.rowCount!==1){const error=new Error("Loan status changed before disbursement");error.status=409;throw error;}
-    const activatedLoan=activated.rows[0];
-    const memberDetails=(await client.query("SELECT full_name FROM members WHERE id=$1",[loan.member_id])).rows[0];
-    const financeEntry=await deductDisbursementFromCentenary(client,{
-      loanId:loan.id,
-      disbursementAmount:fullAmount,
-      loanReference:activatedLoan.reference||loan.reference,
-      memberName:memberDetails?.full_name||"Member",
-      method,
-      destination,
-      userId:req.user.id
-    });
-    const payoutNote=method==="Cash"
-      ?`Cash handed to member after ${feeRate}% processing fee of UGX ${processingFee.toLocaleString()}. Full principal UGX ${fullAmount.toLocaleString()} remains repayable with organization interest. Deducted from Centenary ${financeEntry.reference}.`
-      :`Net amount paid by ${method} to ${destination} after ${feeRate}% processing fee of UGX ${processingFee.toLocaleString()}. Full principal UGX ${fullAmount.toLocaleString()} remains repayable with organization interest. Deducted from Centenary ${financeEntry.reference}.`;
-    await client.query(`INSERT INTO transactions (reference,member_id,type,method,amount,status,external_reference,notes,recorded_by,verified_by,verified_at,finance_entry_id)
-      VALUES ($1,$2,'Loan disbursement',$3,$4,'completed',$5,$6,$7,$7,NOW(),$8)`,
-      [transactionReference,loan.member_id,method,netCash,destination,payoutNote,req.user.id,financeEntry.id]);
-    if(processingFee>0){
-      await client.query(`INSERT INTO loan_charges (loan_id,charge_type,amount,paid_amount,status,reason,assessed_by,assessed_at)
-        VALUES ($1,'Processing fee',$2,$2,'paid',$3,$4,NOW())`,
-        [loan.id,processingFee,`${feeRate}% processing fee deducted from disbursed amount`,req.user.id]);
-    }
-    await createRepaymentSchedule(client,loan,fullAmount);
-    await client.query("INSERT INTO loan_workflow_events (loan_id,stage,action,actor_id,comment) VALUES ($1,'disbursement','disbursed',$2,$3)",
-      [loan.id,req.user.id,`${method}${method==="Cash"?"":` to ${destination}`} - ${transactionReference}. Net UGX ${netCash.toLocaleString()}; processing fee UGX ${processingFee.toLocaleString()}.`]);
-    const memberUser=(await client.query("SELECT id FROM users WHERE member_id=$1 AND active=true LIMIT 1",[loan.member_id])).rows[0];
-    if(memberUser)await client.query("INSERT INTO notifications (user_id,title,message) VALUES ($1,'Loan disbursed',$2)",
-      [memberUser.id,`Loan ${loan.reference} has been disbursed by ${method}${method==="Cash"?"":` to ${destination}`}. Net received UGX ${netCash.toLocaleString()} after a ${feeRate}% processing fee. You repay the full UGX ${fullAmount.toLocaleString()} plus 2% monthly organization interest.`]);
-    return {loan,netCash,processingFee,fullAmount,method,destination};
+    const done=await completeLoanDisbursement(client,{loan,disbursement,method,destination,userId:req.user.id,transactionReference});
+    return {loan,...done,method,destination};
   });
   await audit({userId:req.user.id,action:"LOAN_DISBURSED",entityType:"loan",entityId:String(result.loan.id),details:`${transactionReference} · ${result.method}`,...metadata(req)});
   res.json({ok:true,status:"active",transactionReference,netCash:result.netCash,processingFee:result.processingFee,principal:result.fullAmount,method:result.method,destination:result.destination});
@@ -6132,6 +6200,10 @@ async function runScheduledMaintenance() {
     const posted=await backfillRepaymentsToCentenary(client);
     if(posted.length)console.log(`Loan repayments posted to Centenary: ${posted.join(", ")}`);
   });
+  try{
+    const fixed=await transaction(client=>fixOctober7Disbursement(client));
+    if(fixed)console.log(`Loan disbursement fix: ${fixed}`);
+  }catch(error){console.error("Oct 7 loan disbursement fix failed:",error.message);}
   const graceDays=0;
   await transaction(async client=>{
     // No grace window: unpaid installments become overdue the day after the due date.
