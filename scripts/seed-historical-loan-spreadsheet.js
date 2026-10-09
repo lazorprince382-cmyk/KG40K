@@ -181,7 +181,7 @@ async function ensureHistoricalMembers(client) {
         hm.memberNumber,
         hm.fullName,
         `${hm.key}.history@members.kg40.local`,
-        "+256700000000",
+        "",
         `HIST-${hm.key.toUpperCase()}`,
         hm.status,
       ]

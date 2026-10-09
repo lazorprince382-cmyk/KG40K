@@ -255,6 +255,8 @@ h1 { margin-bottom: 7px; font: 800 clamp(24px, 3vw, 31px)/1.16 Manrope, sans-ser
 .filter-set { display: flex; gap: 7px; flex-wrap: wrap; }
 .filter-chip { padding: 7px 11px; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); background: #fff; font-size:14px; font-weight: 700; }
 .filter-chip.active { border-color: var(--green-800); color: #fff; background: var(--green-800); }
+.filter-chip { cursor: pointer; }
+.member-group-row td { background: #fff7ed; color: #9a3412; font-size: 13px; padding-top: 14px; padding-bottom: 10px; border-top: 2px solid #fed7aa; }
 .table-scroll { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; min-width: 720px; }
 th { padding: 11px 20px; color: #89938e; background: #f8faf9; font-size:14px; font-weight: 800; letter-spacing: .7px; text-align: left; text-transform: uppercase; }
