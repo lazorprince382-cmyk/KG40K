@@ -1423,7 +1423,8 @@ function executiveAnalyticsView() {
   return `<div class="exec-analytics-grid">${series.map(([title,key,color])=>`<section class="exec-panel"><div class="exec-panel-head"><div><h3>${title}</h3><p>Six-month organizational trend</p></div><strong class="trend-up">${key==="expenses"?"Controlled":"Growing"}</strong></div><div class="exec-line-chart ${color}">${e.monthly.map((m)=>`<div><i style="height:${Math.min(100,(m[key]||m.income)/(Math.max(...e.monthly.map(x=>x[key]||x.income),1))*100)}%"></i><span>${m.month}</span></div>`).join("")}</div></section>`).join("")}</div>`;
 }
 function executiveNotificationsView() {
-  return `<section class="exec-panel"><div class="exec-notification-page">${state.executive.notifications.map(n=>`<article><span>${icons.bell}</span><div><small>${n.type}</small><h3>${n.title}</h3><p>${n.detail}</p></div><time>${relativeTime(n.createdAt||n.time)}</time><button>Mark read</button></article>`).join("")}</div></section>`;
+  const items=visibleAlerts(state.executive.notifications);
+  return `<section class="exec-panel"><div class="exec-notification-page">${items.map(n=>`<article><span>${icons.bell}</span><div><small>${n.type}</small><h3>${n.title}</h3><p>${n.detail}</p></div><time>${relativeTime(n.createdAt||n.time)}</time><button type="button" data-dismiss-alert="${escapeHtml(alertKey(n))}">Mark read</button></article>`).join("")||`<div class="exec-empty">No unread notifications.</div>`}</div></section>`;
 }
 function executiveDocumentsView() {
   const types=["Constitution","Bylaws","Policies","Minutes","Signed Contracts","Annual Reports","Audit Reports","Legal Documents"];
@@ -2532,7 +2533,8 @@ function investmentDocumentsView() {
   return `<div class="exec-document-groups">${known.map(type=>{const rows=docs.filter(d=>d.documentType===type);return `<section class="finance-panel"><div class="finance-panel-head"><div><h3>${type}</h3><p>${rows.length} investment document${rows.length===1?"":"s"}</p></div></div>${rows.map(row).join("")||`<div class="exec-empty">No documents in this category.</div>`}</section>`;}).join("")}${other.length?`<section class="finance-panel"><div class="finance-panel-head"><div><h3>Other documents</h3><p>${other.length} custom-typed document${other.length===1?"":"s"}</p></div></div>${other.map(row).join("")}</section>`:""}</div>`;
 }
 function investmentNotificationsView() {
-  return `<section class="finance-panel"><div class="exec-notification-page">${state.investment.notifications.map(n=>`<article><span>${icons.bell}</span><div><small>${n.level}</small><h3>${n.title}</h3><p>Investment Department portfolio alert</p></div><time>${relativeTime(n.createdAt||n.time)}</time><button>Mark read</button></article>`).join("")}</div></section>`;
+  const items=visibleAlerts(state.investment.notifications);
+  return `<section class="finance-panel"><div class="exec-notification-page">${items.map(n=>`<article><span>${icons.bell}</span><div><small>${n.level}</small><h3>${n.title}</h3><p>Investment Department portfolio alert</p></div><time>${relativeTime(n.createdAt||n.time)}</time><button type="button" data-dismiss-alert="${escapeHtml(alertKey(n))}">Mark read</button></article>`).join("")||`<div class="exec-empty">No unread notifications.</div>`}</div></section>`;
 }
 function investmentSettingsView() {
   return `<div class="settings-grid"><div class="card setting-card"><div class="card-head" style="padding:0 0 16px"><div><h2 class="card-title">Portfolio controls</h2><p class="card-subtitle">Performance and monitoring rules</p></div></div>
@@ -3294,7 +3296,7 @@ function memberDashboard() {
 function performanceChart() {
   const savings = [48, 62, 57, 73, 68, 84, 79, 91];
   const loans = [35, 42, 51, 48, 61, 57, 72, 66];
-  return `<div class="card"><div class="card-head"><div><h2 class="card-title">Savings & loan performance</h2><p class="card-subtitle">Monthly collections in millions (UGX)</p></div><button class="filter-chip">Last 8 months</button></div>
+  return `<div class="card"><div class="card-head"><div><h2 class="card-title">Savings & loan performance</h2><p class="card-subtitle">Monthly collections in millions (UGX)</p></div><span class="filter-chip period-label">Last 8 months</span></div>
     <div class="chart-wrap"><div class="chart"><div class="chart-grid"><span></span><span></span><span></span><span></span><span></span></div><div class="y-labels"><span>100m</span><span>75m</span><span>50m</span><span>25m</span><span>0</span></div>
     ${["Dec","Jan","Feb","Mar","Apr","May","Jun","Jul"].map((m,i)=>`<div class="bar-group"><i class="bar" style="height:${savings[i]}%"></i><i class="bar alt" style="height:${loans[i]}%"></i><span class="bar-label">${m}</span></div>`).join("")}</div>
     <div class="legend"><span><i></i>Savings collected</span><span><i class="alt"></i>Loan repayments</span></div></div></div>`;
@@ -3317,6 +3319,15 @@ function activityList(items) {
   }).join("")}</div>`;
 }
 
+function dismissedAlertKeys(){
+  try{return new Set(JSON.parse(localStorage.getItem("dismissedAlerts")||"[]"));}catch{return new Set();}
+}
+function alertKey(n){return `${n.title||""}|${n.createdAt||n.time||""}`;}
+function visibleAlerts(list){const seen=dismissedAlertKeys();return (list||[]).filter(n=>!seen.has(alertKey(n)));}
+function dismissAlert(key){
+  const keys=[...dismissedAlertKeys(),key].slice(-300);
+  try{localStorage.setItem("dismissedAlerts",JSON.stringify(keys));}catch{}
+}
 const PLACEHOLDER_PHONES=new Set(["+256700000000","256700000000","0700000000"]);
 function memberPhoneLabel(phone){
   const value=String(phone||"").trim();
@@ -3344,7 +3355,10 @@ function membersView() {
 function savingsView() {
   const memberMode = state.role === "Member";
   const currentMember = state.members[0];
-  const tx = state.transactions.filter(t => (!memberMode || t.member === currentMember.name) && (!searchTerm || `${t.member} ${t.id} ${t.type}`.toLowerCase().includes(searchTerm.toLowerCase())));
+  const txFilter=state.txFilter||"all";
+  const txMatches=t=>txFilter==="all"||(txFilter==="deposits"?/deposit|saving|share/i.test(t.type||""):/repayment/i.test(t.type||""));
+  const tx = state.transactions.filter(t => (!memberMode || t.member === currentMember.name) && txMatches(t) && (!searchTerm || `${t.member} ${t.id} ${t.type}`.toLowerCase().includes(searchTerm.toLowerCase())));
+  const txChip=(id,label)=>`<button type="button" class="filter-chip${txFilter===id?" active":""}" data-tx-filter="${id}">${label}</button>`;
   const total = state.members.reduce((n,m)=>n+m.savings,0);
   if (memberMode) return `<div class="metric-grid">
     ${metric("My savings", money(currentMember.savings), "wallet", `<span class="up">? ${money(350000)}</span> this month`, "dark")}
@@ -3359,7 +3373,7 @@ function savingsView() {
     ${metric("Share capital", money(state.members.reduce((n,m)=>n+m.shares,0)), "building", "Tracked separately")}
     ${metric("Pending deposits", money(740000), "clock", "4 awaiting verification", "amber")}
   </div>
-  <div class="card table-card"><div class="card-head"><div><h2 class="card-title">Savings transactions</h2><p class="card-subtitle">Deposits, repayments and share purchases</p></div></div><div class="table-tools"><div class="filter-set"><button class="filter-chip active">All transactions</button><button class="filter-chip">Deposits</button><button class="filter-chip">Repayments</button></div></div><div class="table-scroll"><table><thead><tr><th>Reference</th><th>Member</th><th>Transaction</th><th>Method</th><th>Amount</th><th>Status</th><th>Date</th><th></th></tr></thead><tbody>${tx.map(t=>`<tr><td class="cell-main">${t.id}</td><td>${t.member}</td><td>${t.type}</td><td>${t.method}</td><td class="cell-main mono ${t.amount<0?"negative":""}">${money(t.amount)}</td><td>${status(t.status)}</td><td>${new Date(t.date).toLocaleString()}</td><td>${state.permissions.includes("transaction:verify")&&t.status==="pending"?`<button class="button small primary" data-verify="${t.databaseId}">Verify</button>`:""}</td></tr>`).join("")}</tbody></table></div></div>`;
+  <div class="card table-card"><div class="card-head"><div><h2 class="card-title">Savings transactions</h2><p class="card-subtitle">Deposits, repayments and share purchases</p></div></div><div class="table-tools"><div class="filter-set">${txChip("all","All transactions")}${txChip("deposits","Deposits")}${txChip("repayments","Repayments")}</div></div><div class="table-scroll"><table><thead><tr><th>Reference</th><th>Member</th><th>Transaction</th><th>Method</th><th>Amount</th><th>Status</th><th>Date</th><th></th></tr></thead><tbody>${tx.map(t=>`<tr><td class="cell-main">${t.id}</td><td>${t.member}</td><td>${t.type}</td><td>${t.method}</td><td class="cell-main mono ${t.amount<0?"negative":""}">${money(t.amount)}</td><td>${status(t.status)}</td><td>${new Date(t.date).toLocaleString()}</td><td>${state.permissions.includes("transaction:verify")&&t.status==="pending"?`<button class="button small primary" data-verify="${t.databaseId}">Verify</button>`:""}</td></tr>`).join("")}</tbody></table></div></div>`;
 }
 
 function loansView() {
@@ -3987,6 +4001,8 @@ function bind() {
   document.querySelectorAll("[data-executive-workspace-exit]").forEach(el=>el.addEventListener("click",exitExecutiveWorkspace));
   document.querySelectorAll("[data-open-member-dashboard]").forEach(el=>el.addEventListener("click",()=>openMemberDashboard(el.dataset.openMemberDashboard)));
   document.querySelectorAll("[data-member-filter]").forEach(el=>el.addEventListener("click",()=>{state.memberFilter=el.dataset.memberFilter;render();}));
+  document.querySelectorAll("[data-tx-filter]").forEach(el=>el.addEventListener("click",()=>{state.txFilter=el.dataset.txFilter;render();}));
+  document.querySelectorAll("[data-dismiss-alert]").forEach(el=>el.addEventListener("click",()=>{dismissAlert(el.dataset.dismissAlert);render();}));
   document.querySelector("[data-executive-fy]")?.addEventListener("change",async event=>{try{event.target.disabled=true;state.executive=await api(`/api/executive/command-center?fy=${event.target.value}`);render();}catch(error){toast(error.message);}});
   document.querySelectorAll("[data-executive-project]").forEach(el=>el.addEventListener("click",()=>openExecutiveProject(el.dataset.executiveProject)));
   document.querySelectorAll("[data-finance-page]").forEach(el=>el.addEventListener("click",async()=>{
