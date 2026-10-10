@@ -1459,8 +1459,7 @@ function financeDashboardView() {
   ]:[
     ["Income this month",money(s.monthlyReceipts??s.monthlyIncome),"arrowDown","finance-income","All Centenary receipts this month, including member savings and welfare"],
     ["Expenses this month",money(s.monthlyExpenses),"arrowUp","finance-expenses","All payments out of Centenary this month, including loan disbursements"],
-    ["Pending payment requests",String(s.pendingPaymentRequests||0),"approvals","finance-approvals","Payments waiting for approval"],
-    ["Centenary bank account",money(s.currentBankBalance),"wallet","finance-bank","Company bank live balance"]
+    ["Pending payment requests",String(s.pendingPaymentRequests||0),"approvals","finance-approvals","Payments waiting for approval"]
   ];
   const liveYears=(f.availableFiscalYears||[]).filter(y=>String(y.mode||"live")==="live"||!/FY ended/i.test(String(y.label||"")));
   const yearOptions=(liveYears.length?liveYears:[{key:f.selectedFiscalKey||"live:2027",label:"FY 26/27",year:2027,mode:"live"}]).map(y=>{
@@ -1474,7 +1473,7 @@ function financeDashboardView() {
   const firstName=escapeHtml((actor()||"there").split(" ")[0]);
   return `<div class="finance-title-strip finance-welcome-strip"><div><h2>Good ${greeting}, ${firstName}</h2></div><div class="dashboard-year-control"><label>Financial year</label><select data-finance-fy>${yearOptions}</select></div></div>
     ${financeHistoricalSnapshot(f)}
-    <div class="exec-stat-grid">${cards.map((card,index)=>financeStatCard(...card,index)).join("")}</div>
+    <div class="exec-stat-grid finance-card-grid cols-${cards.length===3?3:4}">${cards.map((card,index)=>financeStatCard(...card,index)).join("")}</div>
     ${financeSavingsApprovalQueue(f)}
     ${financePendingEntriesWidget(f)}
     ${financeSubscriptionProgressWidget(f)}
@@ -1542,7 +1541,7 @@ function financeHistoricalSnapshot(f) {
     ["Money in loans",money(loans),"loans","credits-active","Outstanding loan principal"],
     ["Total Company Funds",money(total),"reports","finance-bank","UAP + Centenary + loans + welfare remaining"]
   ];
-  return `<section class="finance-snapshot-block"><div class="finance-period-heading"><div><strong>Company positions</strong></div><div class="head-actions"><button class="button secondary small" data-finance-page="finance-unit-trust">${icons.reports}Unit Trust</button><button class="button secondary small" data-finance-page="finance-bank">${icons.building}Bank accounts</button></div></div><div class="exec-stat-grid">${cards.map((card,index)=>financeStatCard(...card,index)).join("")}</div></section>`;
+  return `<section class="finance-snapshot-block"><div class="finance-period-heading"><div><strong>Company positions</strong></div><div class="head-actions"><button class="button secondary small" data-finance-page="finance-unit-trust">${icons.reports}Unit Trust</button><button class="button secondary small" data-finance-page="finance-bank">${icons.building}Bank accounts</button></div></div><div class="exec-stat-grid finance-card-grid cols-4">${cards.map((card,index)=>financeStatCard(...card,index)).join("")}</div></section>`;
 }
 function financeStatCard(label,value,icon,target,note,index) {
   const colors=["blue","green","violet","orange","red","teal"];

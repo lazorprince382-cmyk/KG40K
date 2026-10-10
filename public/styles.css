@@ -1832,3 +1832,7 @@ tr.pending-receipt{background:#f8fafc;color:#64748b}
 .member-month-badge{display:block;margin-top:6px;font-style:normal;font-weight:800;font-size:13px}.member-month-badge.behind{color:#c0392b}.member-month-badge.ahead{color:#1e8449}.member-month-badge.met{color:#0b3b70}
 .member-month-next{display:block;margin-top:3px;font-style:normal;font-weight:600;font-size:12px;color:#51607a}
 .uap-record-panel{margin-bottom:16px}.uap-record-form{display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:0 18px 18px}.uap-record-form input{flex:1 1 220px;max-width:320px;min-height:42px;padding:8px 12px;border:1px solid #cfd8de;border-radius:10px;font:inherit}
+.exec-stat-grid.finance-card-grid.cols-4{grid-template-columns:repeat(4,minmax(0,1fr))}.exec-stat-grid.finance-card-grid.cols-3{grid-template-columns:repeat(3,minmax(0,1fr))}.finance-card-grid .exec-stat-card strong{font-size:clamp(17px,1.25vw,22px)}
+@media(max-width:1150px){.exec-stat-grid.finance-card-grid.cols-4{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:900px){.exec-stat-grid.finance-card-grid.cols-3{grid-template-columns:1fr}}
+@media(max-width:760px){.exec-stat-grid.finance-card-grid.cols-4{grid-template-columns:1fr}}
