@@ -1423,8 +1423,8 @@ function executiveAnalyticsView() {
   return `<div class="exec-analytics-grid">${series.map(([title,key,color])=>`<section class="exec-panel"><div class="exec-panel-head"><div><h3>${title}</h3><p>Six-month organizational trend</p></div><strong class="trend-up">${key==="expenses"?"Controlled":"Growing"}</strong></div><div class="exec-line-chart ${color}">${e.monthly.map((m)=>`<div><i style="height:${Math.min(100,(m[key]||m.income)/(Math.max(...e.monthly.map(x=>x[key]||x.income),1))*100)}%"></i><span>${m.month}</span></div>`).join("")}</div></section>`).join("")}</div>`;
 }
 function executiveNotificationsView() {
-  const items=visibleAlerts(state.executive.notifications);
-  return `<section class="exec-panel"><div class="exec-notification-page">${items.map(n=>`<article><span>${icons.bell}</span><div><small>${n.type}</small><h3>${n.title}</h3><p>${n.detail}</p></div><time>${relativeTime(n.createdAt||n.time)}</time><button type="button" data-dismiss-alert="${escapeHtml(alertKey(n))}">Mark read</button></article>`).join("")||`<div class="exec-empty">No unread notifications.</div>`}</div></section>`;
+  const items=state.executive.notifications||[],read=dismissedAlertKeys();
+  return `<section class="exec-panel"><div class="exec-notification-page">${items.map(n=>{const isRead=read.has(alertKey(n));return `<article class="${isRead?"is-read":""}"><span>${icons.bell}</span><div><small>${escapeHtml(n.type||"")}</small><h3>${escapeHtml(n.title||"")}</h3><p>${escapeHtml(n.detail||"")}</p></div><time>${relativeTime(n.createdAt||n.time)}</time><div class="exec-notification-actions">${isRead?`<span class="exec-notification-read">Read</span>`:`<button type="button" data-dismiss-alert="${escapeHtml(alertKey(n))}">Mark read</button>`}${n.deletable&&n.key?`<button type="button" class="danger" data-delete-notification="${escapeHtml(n.key)}">${icons.trash}Delete</button>`:""}</div></article>`;}).join("")||`<div class="exec-empty">No notifications.</div>`}</div></section>`;
 }
 function executiveDocumentsView() {
   const types=["Constitution","Bylaws","Policies","Minutes","Signed Contracts","Annual Reports","Audit Reports","Legal Documents"];
@@ -1629,8 +1629,12 @@ function financeWelfareProgressWidget(f){
 }
 function openFinanceSubscriptionMembers(){
   const s=state.finance?.subscriptionProgress;if(!s)return toast("Subscription progress is not available.");
-  const rows=(s.payments||[]).map(p=>`<tr><td><strong>${escapeHtml(p.member)}</strong><small>${escapeHtml(p.memberNumber||"")}</small></td><td>${escapeHtml(p.reference)}</td><td>${money(p.amount)}</td><td>${new Date(p.verifiedAt||p.paidAt).toLocaleString()}</td></tr>`).join("")||`<tr><td colspan="4"><div class="member-empty">No annual subscription payments verified yet.</div></td></tr>`;
-  modal("Annual subscription payments",`<div class="finance-subscription-detail"><p>${money(s.collected)} collected of ${money(s.expected)} · fee ${money(s.fee)} per member</p><div class="table-scroll"><table><thead><tr><th>Member</th><th>Reference</th><th>Amount</th><th>Paid / verified</th></tr></thead><tbody>${rows}</tbody></table></div></div>`);
+  const payments=(s.payments||[]).slice().sort((a,b)=>new Date(b.verifiedAt||b.paidAt||0)-new Date(a.verifiedAt||a.paidAt||0));
+  const rows=payments.map(p=>`<tr><td><strong>${escapeHtml(p.member)}</strong><small>${escapeHtml(p.memberNumber||"")}</small></td><td>${escapeHtml(p.reference)}</td><td>${money(p.amount)}</td><td>${p.verifiedAt||p.paidAt?new Date(p.verifiedAt||p.paidAt).toLocaleString():"—"}</td></tr>`).join("")||`<tr><td colspan="4"><div class="member-empty">No annual subscription payments verified yet.</div></td></tr>`;
+  closeModal();
+  document.body.insertAdjacentHTML("beforeend",`<div class="modal-backdrop" id="modal-backdrop"><div class="modal" role="dialog" aria-modal="true"><div class="modal-head"><div><h2>Annual subscription payments</h2><p>${money(s.collected)} collected of ${money(s.expected)} · fee ${money(s.fee)} per member · ${payments.length} paid</p></div><button class="modal-close" data-close>${icons.x}</button></div><div class="finance-subscription-detail"><div class="table-scroll"><table><thead><tr><th>Member</th><th>Reference</th><th>Amount</th><th>Paid / verified</th></tr></thead><tbody>${rows}</tbody></table></div></div></div></div>`);
+  document.querySelector("[data-close]").onclick=closeModal;
+  document.getElementById("modal-backdrop")?.addEventListener("click",event=>{if(event.target.id==="modal-backdrop")closeModal();});
 }
 async function reviewFinanceSavings(id,decision){
   if(!financeCanApproveSavings())return toast("Auditors cannot approve savings.");
@@ -1866,13 +1870,17 @@ function financeUnitTrustView(){
     <form class="uap-record-form" data-uap-inline-form data-month="${recordMonth}"><input name="amount" type="number" min="0" step="0.01" required placeholder="Interest earned (UGX)" aria-label="Interest earned in ${escapeHtml(uapMonthName(recordMonth))}"><button class="button primary" type="submit">${icons.plus}Save ${escapeHtml(uapMonthName(recordMonth))} interest</button></form></section>`:"";
   return `<div class="finance-title-strip"><div><p class="eyebrow">Unit Trust / Old Mutual</p><h2>UAP account movement</h2><p>Choose a month and record the interest UAP paid for it from the statement. No daily interest is calculated.</p></div>
     <div class="dashboard-year-control"><label>Month</label><select data-unit-trust-month><option value="">All months</option>${monthOptions}</select></div></div>
-    <div class="module-actions" style="margin-bottom:14px">
-      ${canEdit?`<button class="button primary" data-finance-modal="uap-interest">${icons.plus}Record month interest</button>`:""}
-      <button class="button secondary" data-finance-modal="transfer-uap">${icons.arrowUp||icons.plus}Transfer to UAP</button>
-      <button class="button secondary" data-finance-modal="withdraw-uap">${icons.withdraw}Withdraw from UAP</button>
-      <button class="button secondary" data-unit-trust-view="${escapeHtml(report.month||"")}">${icons.eye}View report</button>
-      <button class="button secondary" data-unit-trust-download="${escapeHtml(report.month||"")}">${icons.download}Download report</button>
-      <button class="button secondary" data-finance-page="finance-bank">${icons.building}Open company bank</button>
+    <div class="uap-action-bar">
+      <div class="uap-action-group"><span>Money movement</span><div>
+        ${canEdit?`<button class="button primary" data-finance-modal="uap-interest">${icons.plus}Record interest</button>`:""}
+        <button class="button secondary" data-finance-modal="transfer-uap">${icons.arrowUp||icons.plus}Transfer to UAP</button>
+        <button class="button secondary" data-finance-modal="withdraw-uap">${icons.withdraw}Withdraw</button>
+      </div></div>
+      <div class="uap-action-group"><span>Reports</span><div>
+        <button class="button secondary" data-unit-trust-view="${escapeHtml(report.month||"")}">${icons.eye}View</button>
+        <button class="button secondary" data-unit-trust-download="${escapeHtml(report.month||"")}">${icons.download}Download</button>
+        <button class="button secondary" data-finance-page="finance-bank">${icons.building}Company bank</button>
+      </div></div>
     </div>
     <div class="exec-module-metrics">
       ${financeUnitTrustMetric("UAP account",money(s.currentBalance||s.closingBalance),"Balance as per the last UAP statement recorded","violet")}
@@ -2203,9 +2211,7 @@ function defaultUnitTrustMonth(available){
   const months=available||[];
   const now=new Date();
   const current=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
-  const previous=now.getMonth()===0?`${now.getFullYear()-1}-12`:`${now.getFullYear()}-${String(now.getMonth()).padStart(2,"0")}`;
-  if(!months.length||months.includes(previous))return previous;
-  if(months.includes(current))return current;
+  if(!months.length||months.includes(current))return current;
   return months[0];
 }
 async function processFinanceVoucher(id) {
@@ -3527,7 +3533,8 @@ function escapeHtml(value) {
 }
 async function loadMessenger(preferredId=null) {
   const result=await api("/api/messages/conversations");
-  const currentId=preferredId||state.messenger?.active?.conversationId||result.conversations.find(c=>!c.archived)?.id;
+  if(preferredId)state.messengerClosed=false;
+  const currentId=preferredId||state.messenger?.active?.conversationId||(state.messengerClosed?null:result.conversations.find(c=>!c.archived)?.id);
   let active=null;
   if(currentId) active=await api(`/api/messages/conversations/${currentId}`);
   state.messenger={conversations:result.conversations,active};
@@ -4002,6 +4009,15 @@ function bind() {
   document.querySelectorAll("[data-member-filter]").forEach(el=>el.addEventListener("click",()=>{state.memberFilter=el.dataset.memberFilter;render();}));
   document.querySelectorAll("[data-tx-filter]").forEach(el=>el.addEventListener("click",()=>{state.txFilter=el.dataset.txFilter;render();}));
   document.querySelectorAll("[data-dismiss-alert]").forEach(el=>el.addEventListener("click",()=>{dismissAlert(el.dataset.dismissAlert);render();}));
+  document.querySelectorAll("[data-delete-notification]").forEach(el=>el.addEventListener("click",async()=>{
+    if(!(await (window.confirmDialog?.("Delete this notification?") ?? confirm("Delete this notification?"))))return;
+    try{
+      el.disabled=true;
+      await api("/api/executive/notifications/delete",{method:"POST",body:JSON.stringify({key:el.dataset.deleteNotification})});
+      state.executive.notifications=(state.executive.notifications||[]).filter(n=>n.key!==el.dataset.deleteNotification);
+      render();toast("Notification deleted.");
+    }catch(error){el.disabled=false;toast(error.message);}
+  }));
   document.querySelector("[data-executive-fy]")?.addEventListener("change",async event=>{try{event.target.disabled=true;state.executive=await api(`/api/executive/command-center?fy=${event.target.value}`);render();}catch(error){toast(error.message);}});
   document.querySelectorAll("[data-executive-project]").forEach(el=>el.addEventListener("click",()=>openExecutiveProject(el.dataset.executiveProject)));
   document.querySelectorAll("[data-finance-page]").forEach(el=>el.addEventListener("click",async()=>{
@@ -4297,7 +4313,7 @@ async function handleAction(action, element) {
   if (action==="new-channel") return openNewChannelModal();
   if (action==="message-search") return openMessageSearch();
   if (action==="attach-file") return document.getElementById("message-files")?.click();
-  if (action==="chat-back") { state.messenger.active=null; return render(); }
+  if (action==="chat-back") { state.messenger.active=null; state.messengerClosed=true; return render(); }
   if (action==="cancel-reply") { state.messageReply=null; return render(); }
   if (action==="emoji") {
     const area=document.querySelector(".message-composer textarea");

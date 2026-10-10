@@ -521,16 +521,22 @@ module.exports = function registerMemberAccountApi({
       }, meetings: meetings.rows,
       documents: documents.rows, notifications: notifications.rows, announcements: announcements.rows, support: support.rows, recentActivity,
       financialYearProgress, pastYearProgress, closingPosition,
-      loanEligibility:{
-        pastYearTargetCompleted:Boolean(pastYearProgress)&&Number(pastYearProgress.variance)>=0,
-        hasRunningLoan:activeLoans.length>0,
-        canApplyForLoan:activeLoans.length===0,
-        note:activeLoans.length
-          ?"You have a running loan — settle it before applying again or guaranteeing another member"
-          :(Boolean(pastYearProgress)&&Number(pastYearProgress.variance)>=0
-            ?"FY 25/26 savings target completed — you can apply for a loan"
-            :"Complete the FY 25/26 savings target (or current-year progress if you have no closing record) to apply for a loan")
-      }
+      loanEligibility:(()=>{
+        const schedule=financialYearProgress?.savingsSchedule;
+        const monthlyUpToDate=!schedule||Number(schedule.shortBy||0)<=0.5;
+        return {
+          monthlyUpToDate,
+          shortBy:schedule?Math.round(Number(schedule.shortBy||0)):0,
+          monthLabel:schedule?.monthLabel||null,
+          hasRunningLoan:activeLoans.length>0,
+          canApplyForLoan:activeLoans.length===0&&monthlyUpToDate,
+          note:activeLoans.length
+            ?"You have a running loan — settle it before applying again or guaranteeing another member"
+            :(monthlyUpToDate
+              ?"Monthly savings are up to date — you can apply for a loan"
+              :"Bring your monthly savings up to date to apply for a loan")
+        };
+      })()
     };
   }
 

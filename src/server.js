@@ -23,7 +23,7 @@ const {
 } = require("./loan-security");
 const { getRunningLoan, getSavingsTargetStatus, getGuarantorEligibility } = require("./loan-eligibility");
 const { loadWelfareStanding, loadWelfareMonth, enforceOneMonthlyWelfareCharge } = require("./welfare-standing");
-const { chargeWelfareFromCoveredSavings } = require("./savings-schedule");
+const { chargeWelfareFromCoveredSavings, loadMemberSchedule } = require("./savings-schedule");
 const { isWordUpload, convertWordUploadToPdf } = require("./services/office-pdf");
 
 function mimeFromFilename(name="",fallback="application/octet-stream"){
@@ -1378,12 +1378,13 @@ app.get("/api/executive/command-center",auth,requireExecutive("view"),asyncRoute
   const liveProfitable=investmentProjectsLive.filter(project=>project.performanceStatus==="profitable").length;
   const liveLosing=investmentProjectsLive.filter(project=>["losing","underperforming"].includes(project.performanceStatus)).length;
   const welfareBalance=welfareStanding.closingBalance;
+  const deletedNotes=await loadDeletedNotifications(req.user.id);
   const notifications=[
-    ...approvals.rows.slice(0,5).map(item=>({type:"approval",title:item.title,detail:`${item.department} approval required`,time:item.createdAt})),
-    ...documents.rows.filter(d=>d.status==="pending_executive").slice(0,3).map(item=>({type:"approval",title:item.title,detail:`${item.department||"Legal"} document publication required`,time:item.updatedAt})),
-    ...meetings.rows.slice(0,3).map(item=>({type:"meeting",title:item.title,detail:item.venue||item.meetingType,time:item.scheduledAt})),
-    ...activities.rows.filter(item=>!approvals.rows.some(approval=>approval.id===item.id)).slice(0,4).map(item=>({type:item.activityType,title:item.title,detail:item.department,time:item.createdAt}))
-  ];
+    ...approvals.rows.slice(0,5).map(item=>({key:`approval:${item.id}`,deletable:false,type:"approval",title:item.title,detail:`${item.department} approval required`,time:item.createdAt})),
+    ...documents.rows.filter(d=>d.status==="pending_executive").slice(0,3).map(item=>({key:`document:${item.id}`,deletable:false,type:"approval",title:item.title,detail:`${item.department||"Legal"} document publication required`,time:item.updatedAt})),
+    ...meetings.rows.slice(0,3).map(item=>({key:`meeting:${item.id||item.reference||item.title}`,deletable:true,type:"meeting",title:item.title,detail:item.venue||item.meetingType,time:item.scheduledAt})),
+    ...activities.rows.filter(item=>!approvals.rows.some(approval=>approval.id===item.id)).slice(0,8).map(item=>({key:`activity:${item.id}`,deletable:true,type:item.activityType,title:item.title,detail:item.department,time:item.createdAt}))
+  ].filter(n=>!deletedNotes.has(n.key));
   const pendingDocumentCount=documents.rows.filter(d=>d.status==="pending_executive").length;
   const recoveryRate=loans.issued?Math.round(loans.recovered/loans.issued*100):0;
   const supervisoryPerformance=Object.fromEntries(performanceRows.rows.map(row=>[row.code,Number(row.performance||0)]));
@@ -1457,6 +1458,18 @@ app.get("/api/executive/command-center",auth,requireExecutive("view"),asyncRoute
     legal:legal.rows[0],audit:{...auditIssues.rows[0],open:auditSummary.open,departmentsUnderReview:auditSummary.departments,compliance:auditSummary.compliance},
     supervisory:{...supervisory.rows[0],departmentsBelowTarget:supervisorySummary.below},monthly,notifications
   });
+}));
+async function loadDeletedNotifications(userId){
+  const raw=(await one("SELECT value FROM settings WHERE key=$1",[`deletedNotifications:${userId}`]))?.value;
+  try{return new Set(JSON.parse(raw||"[]"));}catch(_){return new Set();}
+}
+app.post("/api/executive/notifications/delete",auth,requireExecutive("view"),asyncRoute(async(req,res)=>{
+  const key=String(req.body.key||"").trim();
+  if(!/^(activity|meeting):/.test(key))return res.status(400).json({error:"Pending approvals cannot be deleted — decide them on Approvals"});
+  const keys=[...(await loadDeletedNotifications(req.user.id)),key].slice(-500);
+  await query(`INSERT INTO settings (key,value) VALUES ($1,$2)
+    ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value,updated_at=NOW()`,[`deletedNotifications:${req.user.id}`,JSON.stringify([...new Set(keys)])]);
+  res.json({ok:true});
 }));
 app.post("/api/executive/approvals/:id/decision",auth,requireExecutive("approve"),asyncRoute(async(req,res)=>{
   const decision=String(req.body.decision||"").toLowerCase();
@@ -3781,6 +3794,7 @@ app.get("/api/welfare/command-center",auth,requireWelfare("view"),asyncRoute(asy
     beneficiarySummary:{total:beneficiaries.size,totalPaid:assistancePaid,averageSupport:beneficiaries.size?assistancePaid/beneficiaries.size:0,
       repeat:payments.rows.length-beneficiaries.size,highestCategory:Object.entries(categories).sort((a,b)=>b[1]-a[1])[0]?.[0]||"None"},
     welfareStanding,
+    contributionTypes:(await loadPostedWelfareTypes()).filter(t=>t.status==="open"),
     requests:requestRows,contributions:contributions.rows,payments:payments.rows,activities:activities.rows,
     meetings:meetings.rows,documents:documents.rows,monthly,categories:Object.entries(categories).map(([category,amount])=>({category,amount})),
     notifications:[
@@ -3793,6 +3807,36 @@ app.get("/api/welfare/command-center",auth,requireWelfare("view"),asyncRoute(asy
     access:{authorityLevel:req.welfareAccess.authority_level,canCreate:Boolean(req.welfareAccess.can_create),
       canEdit:Boolean(req.welfareAccess.can_edit),canApprove:Boolean(req.welfareAccess.can_approve)}
   });
+}));
+async function loadPostedWelfareTypes(){
+  const raw=(await one("SELECT value FROM settings WHERE key='welfareContributionTypes'"))?.value;
+  try{const list=JSON.parse(raw||"[]");return Array.isArray(list)?list:[];}catch(_){return [];}
+}
+async function savePostedWelfareTypes(list){
+  await query(`INSERT INTO settings (key,value) VALUES ('welfareContributionTypes',$1)
+    ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value,updated_at=NOW()`,[JSON.stringify(list)]);
+}
+app.get("/api/welfare/contribution-types",auth,asyncRoute(async(req,res)=>{
+  res.json({types:(await loadPostedWelfareTypes()).filter(t=>t.status==="open")});
+}));
+app.post("/api/welfare/contribution-types",auth,requireWelfare("create"),asyncRoute(async(req,res)=>{
+  const name=String(req.body.name||"").trim(),purpose=String(req.body.purpose||"").trim();
+  const amount=Number(req.body.amount||0),deadline=String(req.body.deadline||"").slice(0,10)||null;
+  if(name.length<3)return res.status(400).json({error:"Give the contribution type a name"});
+  if(!Number.isFinite(amount)||amount<0)return res.status(400).json({error:"Amount per member must be zero or more"});
+  const list=await loadPostedWelfareTypes();
+  if(list.some(t=>t.status==="open"&&t.name.toLowerCase()===name.toLowerCase()))return res.status(409).json({error:"That contribution type is already open"});
+  const item={id:reference("WCT"),name,purpose,amount,deadline,status:"open",postedBy:req.user.full_name||req.user.email||"",postedAt:new Date().toISOString()};
+  list.push(item);await savePostedWelfareTypes(list);
+  await audit({userId:req.user.id,action:"WELFARE_CONTRIBUTION_TYPE_POSTED",entityType:"welfare_contribution_type",entityId:item.id,details:name,...metadata(req)});
+  res.status(201).json(item);
+}));
+app.post("/api/welfare/contribution-types/:id/close",auth,requireWelfare("edit"),asyncRoute(async(req,res)=>{
+  const list=await loadPostedWelfareTypes();const item=list.find(t=>t.id===req.params.id);
+  if(!item)return res.status(404).json({error:"Contribution type not found"});
+  item.status="closed";item.closedAt=new Date().toISOString();await savePostedWelfareTypes(list);
+  await audit({userId:req.user.id,action:"WELFARE_CONTRIBUTION_TYPE_CLOSED",entityType:"welfare_contribution_type",entityId:item.id,details:item.name,...metadata(req)});
+  res.json({ok:true});
 }));
 app.get("/api/welfare/search",auth,requireWelfare("view"),asyncRoute(async(req,res)=>{
   const term=String(req.query.q||"").trim();if(term.length<2)return res.json({results:[]});const like=`%${term}%`;
@@ -4473,10 +4517,10 @@ app.delete("/api/users/:id",auth,permit("user:manage"),asyncRoute(async(req,res)
   if(reason.length<5)return res.status(400).json({error:"Enter a clear reason for deleting this account"});
   const target=await one(`SELECT id,full_name,email,role,member_id FROM users WHERE id=$1 AND email NOT ILIKE 'deleted.%@removed.local'`,[userId]);
   if(!target)return res.status(404).json({error:"User account not found"});
-  if(target.role==="System Admin"){
+  if(["System Admin","Executive Officer"].includes(target.role)){
     const remaining=Number((await one(`SELECT COUNT(*)::int AS count FROM users
-      WHERE role='System Admin' AND active=true AND id<>$1 AND email NOT ILIKE 'deleted.%@removed.local'`,[userId]))?.count||0);
-    if(remaining<1)return res.status(409).json({error:"Keep at least one System Admin account"});
+      WHERE role IN ('System Admin','Executive Officer') AND active=true AND id<>$1 AND email NOT ILIKE 'deleted.%@removed.local'`,[userId]))?.count||0);
+    if(remaining<1)return res.status(409).json({error:"Keep at least one Executive Officer account that can manage accounts"});
   }
   await transaction(async client=>{
     await client.query(`UPDATE department_assignments SET active=false WHERE user_id=$1`,[userId]);
@@ -4617,42 +4661,11 @@ app.post("/api/loans",auth,upload.array("supportingDocument",10),(req,res,next)=
   if(activeGuarantee){
     return res.status(400).json({error:`You cannot apply for a loan while guaranteeing ${activeGuarantee.borrower}'s loan ${activeGuarantee.reference}. Settle that loan first.`});
   }
-  const closingPosition=await one(`SELECT p.period_end AS "periodEnd",b.savings_balance::float AS savings,
-    b.expected_savings::float AS expected
-    FROM members m JOIN legacy_member_opening_balances b ON b.id=m.legacy_opening_balance_id
-    JOIN financial_reporting_periods p ON p.id=b.period_id WHERE m.id=$1`,[memberId]);
-  let pastYearTargetCompleted=false;
-  if(closingPosition){
-    const arrearsPaid=Number((await one(`SELECT COALESCE(SUM(amount),0)::float AS amount FROM transactions
-      WHERE member_id=$1 AND type='Savings deposit' AND status='completed' AND target_fiscal_year=EXTRACT(YEAR FROM $2::date)::int`,
-      [memberId,closingPosition.periodEnd])).amount||0);
-    const totalPaid=Number(closingPosition.savings)+arrearsPaid;
-    const expected=Number(closingPosition.expected||0);
-    const shortfall=Math.max(0,Math.round((expected-totalPaid)*100)/100);
-    if(shortfall>0.005){
-      const fy=`FY ${new Date(closingPosition.periodEnd).getUTCFullYear()-1}/${String(new Date(closingPosition.periodEnd).getUTCFullYear()).slice(-2)}`;
-      return res.status(400).json({error:`Complete your ${fy} savings target before applying for a loan. Amount remaining to complete target: UGX ${shortfall.toLocaleString()}.`,remainingToCompleteTarget:shortfall,fiscalYear:fy});
-    }
-    // FY 25/26 (closing) target met — unlock loan apply without current-year progress gate
-    pastYearTargetCompleted=true;
-  }
-  const financialYear=await one(`SELECT fiscal_year_label AS "fiscalYear",starts_on AS "startsOn",ends_on AS "endsOn",
-    monthly_savings_target::float AS "monthlySavingsTarget",
-    LEAST(12,GREATEST(0,(EXTRACT(YEAR FROM age(date_trunc('month',LEAST(CURRENT_DATE,ends_on+INTERVAL '1 day')),date_trunc('month',starts_on)))*12+
-      EXTRACT(MONTH FROM age(date_trunc('month',LEAST(CURRENT_DATE,ends_on+INTERVAL '1 day')),date_trunc('month',starts_on))))::int)) AS "monthsDue"
-    FROM member_financial_year_policies
-    WHERE status='active' AND CURRENT_DATE BETWEEN starts_on AND ends_on ORDER BY starts_on DESC LIMIT 1`);
-  // Members who completed FY 25/26 may apply freely; only members without that closing target must stay on current-year pace
-  if(financialYear&&!pastYearTargetCompleted){
-    const yearSavings=Number((await one(`SELECT COALESCE(SUM(amount),0)::float AS amount FROM transactions
-      WHERE member_id=$1 AND type='Savings deposit' AND status='completed'
-        AND (target_fiscal_year=EXTRACT(YEAR FROM $3::date)::int OR (target_fiscal_year IS NULL AND created_at::date BETWEEN $2 AND $3))`,
-      [memberId,financialYear.startsOn,financialYear.endsOn])).amount||0);
-    const expectedToDate=Number(financialYear.monthlySavingsTarget)*Number(financialYear.monthsDue);
-    const currentShortfall=Math.max(0,Math.round((expectedToDate-yearSavings)*100)/100);
-    if(currentShortfall>0.005){
-      return res.status(400).json({error:`Your ${financialYear.fiscalYear} savings progress is behind target. Amount remaining to complete target progress: UGX ${currentShortfall.toLocaleString()}.`,remainingToCompleteTarget:currentShortfall,fiscalYear:financialYear.fiscalYear});
-    }
+  // A member qualifies when monthly savings are up to date through the current month
+  const savingsSchedule=await loadMemberSchedule(memberId);
+  if(savingsSchedule&&Number(savingsSchedule.shortBy)>0.5){
+    const short=Math.round(Number(savingsSchedule.shortBy));
+    return res.status(400).json({error:`Your monthly savings are not up to date. Amount remaining to complete target for ${savingsSchedule.monthLabel}: UGX ${short.toLocaleString()}.`,remainingToCompleteTarget:short,fiscalYear:savingsSchedule.monthLabel});
   }
   const policyMaximum=Number(product.max_amount||25000000);
   if(amount>policyMaximum)return res.status(400).json({error:`Amount exceeds the approved limit of UGX ${policyMaximum.toLocaleString()}`});
