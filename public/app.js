@@ -2,8 +2,8 @@
 [
   "app-core.js?v=231",
   "department-theme.js?v=64",
-  "department-core.js?v=92",
-  "audit-dashboard.js?v=81",
+  "department-core.js?v=93",
+  "audit-dashboard.js?v=82",
   "audit-modules.js?v=63",
   "welfare-module.js?v=97",
   "legal-module.js?v=96",

@@ -40,7 +40,7 @@
       pages:["dashboard","messages","audit-plans","audits","audit-findings","audit-investigations","audit-recommendations",
         "audit-compliance","audit-risk","audit-fraud","audit-reports","audit-analytics","audit-documents",
         "audit-calendar","audit-notifications","settings","audit-search"],
-      sidebarPages:["dashboard","messages","audits","audit-findings","audit-investigations","audit-recommendations","audit-risk","audit-fraud","audit-reports","audit-documents","audit-notifications","settings"],
+      sidebarPages:["dashboard","messages","audit-findings","audit-investigations","audit-recommendations","audit-reports","audit-documents","audit-notifications","settings"],
       labels:{dashboard:"Dashboard",messages:"Messages","audit-plans":"Audit Plans",audits:"Audits","audit-findings":"Audit Findings",
         "audit-investigations":"Investigations","audit-recommendations":"Recommendations",
         "audit-compliance":"Compliance Monitoring","audit-risk":"Risk Management","audit-fraud":"Fraud Detection",
