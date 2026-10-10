@@ -822,7 +822,7 @@ function investmentSidebar() {
     "investment-analytics":"reports","investment-documents":"file","investment-notifications":"bell"};
   const pending=state.investment?.stats?.pendingProposals||0;
   const pages=rolePages[executiveWorkspaceRole()]||rolePages[state.role];
-  const sidebarPages=new Set(["dashboard","messages","investment-projects","investment-proposals","investment-investors","investment-revenue","investment-expenses","investment-assets","investment-contracts","investment-reports","investment-documents","settings"]);
+  const sidebarPages=new Set(["dashboard","messages","investment-projects","investment-revenue","investment-expenses","investment-documents","settings"]);
   return `<aside class="sidebar executive-sidebar investment-sidebar" id="sidebar">
     <div class="executive-brand"><div class="executive-crest investment-crest">${icons.reports}</div><div><strong>KASANGATI G40<br>KWAGALANA</strong><span>INVESTMENT DEPARTMENT</span></div></div>
     <nav class="nav executive-nav">${pages.filter(page=>sidebarPages.has(page)).map(page=>`<button class="nav-item ${state.page===page?"active":""}" data-page="${page}">${icons[iconMap[page]||page]||icons.dashboard}<span>${labels[page]}</span>${navAlertDot(page==="investment-proposals"&&pending||page==="messages"&&state.unreadMessages)}</button>`).join("")}</nav>
