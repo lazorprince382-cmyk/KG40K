@@ -22,16 +22,6 @@
     const f=C()?.financialYearProgress;if(!f)return `<div class="member-empty">No contribution targets for this year yet.</div>`;
     const savingsToward=Number(f.savingsTowardTarget??f.savingsPaid);
     const shareToward=Number(f.sharePaidTowardTarget??f.sharePaid);
-    const annualMet=savingsToward>=Number(f.annualSavingsTarget)-0.005;
-    const annualSurplus=Math.max(0,savingsToward-Number(f.annualSavingsTarget));
-    const covered=Number(f.coveredMonths||0);
-    const surplusApplied=Number(f.pastYearSurplusApplied||0);
-    const surplusNote=surplusApplied>0
-      ?`<div class="member-policy-note member-advance-note"><b>Past-year surplus applied:</b> ${money(surplusApplied)} carries into ${esc(f.fiscalYear)} savings and covers about <b>${covered} month${covered===1?"":"s"}</b>${Number(f.coveredMonthsRemainder)>0?` (plus ${money(f.coveredMonthsRemainder)} toward the next month)`:""}.</div>`
-      :"";
-    const advanceNote=annualMet&&annualSurplus>0
-      ?`<div class="member-policy-note member-advance-note"><b>Annual savings target met.</b> Extra ${money(annualSurplus)} remains as surplus toward future months.</div>`
-      :"";
     const sched=f.savingsSchedule;
     const yearPaid=sched?Number(sched.savingsPaidTowardYear):savingsToward;
     const yearNote=sched
@@ -43,8 +33,7 @@
       ${targetLine("Annual share contribution",shareToward,f.annualShareTarget)}
       ${targetLine("Annual subscription fee",f.subscriptionPaid,f.annualSubscriptionFee)}
       ${targetLine("Combined annual contribution",Number(f.combinedAnnualPaid||0),Number(f.combinedAnnualTarget||0))}
-      <div class="member-policy-note"><b>Monthly savings:</b> ${money(f.monthlySavingsTarget)} · <b>Full-year savings:</b> ${money(f.annualSavingsTarget)} · <b>Shares:</b> ${money(f.annualShareTarget)} · <b>Subscription:</b> ${money(f.annualSubscriptionFee)} · <b>Combined target:</b> ${money(f.combinedAnnualTarget||0)}</div>
-      ${surplusNote}${advanceNote}`;
+      <div class="member-policy-note"><b>Monthly savings:</b> ${money(f.monthlySavingsTarget)} · <b>Full-year savings:</b> ${money(f.annualSavingsTarget)} · <b>Shares:</b> ${money(f.annualShareTarget)} · <b>Subscription:</b> ${money(f.annualSubscriptionFee)} · <b>Combined target:</b> ${money(f.combinedAnnualTarget||0)}</div>`;
   }
   function pastContributionBody(){
     const x=C()?.pastYearProgress;if(!x)return `<div class="member-empty">No previous-year contribution record yet.</div>`;

@@ -1,6 +1,6 @@
 /* Ordered application loader. */
 [
-  "app-core.js?v=227",
+  "app-core.js?v=228",
   "department-theme.js?v=64",
   "department-core.js?v=92",
   "audit-dashboard.js?v=81",
@@ -14,7 +14,7 @@
   "supervisory-module.js?v=81",
   "department-events.js?v=63",
   "official-policy-ui.js?v=11",
-  "member-portal.js?v=131",
+  "member-portal.js?v=132",
   "loan-calculator.js?v=7",
   "department-bootstrap.js?v=64"
 ].forEach((source) => document.write(`<script src="${source}"><\/script>`));

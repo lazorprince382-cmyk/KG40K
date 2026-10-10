@@ -1452,15 +1452,15 @@ function financeDashboardView() {
   const s=f.stats;
   const historical=f.historicalPeriod;
   const cards=historical?[
-    ["Cash & bank at period end",money(s.currentBankBalance),"wallet","finance-bank",""],
-    ["UAP account",money(s.uapBalance||0),"building","finance-unit-trust",""],
-    ["Total assets",money(s.totalAssets),"building","finance-assets",""],
-    ["Total liabilities",money(s.totalLiabilities),"file","finance-invoices",""]
+    ["Cash & bank at period end",money(s.currentBankBalance),"wallet","finance-bank","Centenary balance when the period closed"],
+    ["UAP account",money(s.uapBalance||0),"building","finance-unit-trust","Old Mutual unit trust at period end"],
+    ["Total assets",money(s.totalAssets),"building","finance-assets","Everything the company owned"],
+    ["Total liabilities",money(s.totalLiabilities),"file","finance-invoices","Everything the company owed"]
   ]:[
-    ["Income this month",money(s.monthlyReceipts??s.monthlyIncome),"arrowDown","finance-income",""],
-    ["Expenses this month",money(s.monthlyExpenses),"arrowUp","finance-expenses",""],
-    ["Pending payment requests",String(s.pendingPaymentRequests||0),"approvals","finance-approvals",""],
-    ["Centenary bank account",money(s.currentBankBalance),"wallet","finance-bank",""]
+    ["Income this month",money(s.monthlyReceipts??s.monthlyIncome),"arrowDown","finance-income","All Centenary receipts this month, including member savings and welfare"],
+    ["Expenses this month",money(s.monthlyExpenses),"arrowUp","finance-expenses","All payments out of Centenary this month, including loan disbursements"],
+    ["Pending payment requests",String(s.pendingPaymentRequests||0),"approvals","finance-approvals","Payments waiting for approval"],
+    ["Centenary bank account",money(s.currentBankBalance),"wallet","finance-bank","Company bank live balance"]
   ];
   const liveYears=(f.availableFiscalYears||[]).filter(y=>String(y.mode||"live")==="live"||!/FY ended/i.test(String(y.label||"")));
   const yearOptions=(liveYears.length?liveYears:[{key:f.selectedFiscalKey||"live:2027",label:"FY 26/27",year:2027,mode:"live"}]).map(y=>{
@@ -1474,7 +1474,7 @@ function financeDashboardView() {
   const firstName=escapeHtml((actor()||"there").split(" ")[0]);
   return `<div class="finance-title-strip finance-welcome-strip"><div><h2>Good ${greeting}, ${firstName}</h2></div><div class="dashboard-year-control"><label>Financial year</label><select data-finance-fy>${yearOptions}</select></div></div>
     ${financeHistoricalSnapshot(f)}
-    <div class="finance-stat-grid finance-current-grid">${cards.map((card,index)=>financeStatCard(...card,index)).join("")}</div>
+    <div class="exec-stat-grid">${cards.map((card,index)=>financeStatCard(...card,index)).join("")}</div>
     ${financeSavingsApprovalQueue(f)}
     ${financePendingEntriesWidget(f)}
     ${financeSubscriptionProgressWidget(f)}
@@ -1537,16 +1537,16 @@ function financeHistoricalSnapshot(f) {
   const loans=Number(s.loansOutstanding??org.loansOutstanding??0);
   const total=Number(s.companyFunds??org.companyFunds??(uap+bank+loans));
   const cards=[
-    ["UAP account",uap,"building","finance-unit-trust",""],
-    ["Centenary bank account",bank,"wallet","finance-bank",""],
-    ["Money in loans",loans,"loans","credits-active",""],
-    ["Total Company Funds",total,"reports","finance-bank",""]
+    ["UAP account",money(uap),"building","finance-unit-trust","Old Mutual unit trust — open the live movement"],
+    ["Centenary bank account",money(bank),"wallet","finance-bank","Company bank live balance"],
+    ["Money in loans",money(loans),"loans","credits-active","Outstanding loan principal"],
+    ["Total Company Funds",money(total),"reports","finance-bank","UAP + Centenary + loans + welfare remaining"]
   ];
-  return `<section class="finance-snapshot-block"><div class="finance-period-heading"><div><strong>Company positions</strong></div><div class="head-actions"><button class="button secondary small" data-finance-page="finance-unit-trust">${icons.reports}Unit Trust</button><button class="button secondary small" data-finance-page="finance-bank">${icons.building}Bank accounts</button></div></div><div class="finance-snapshot-grid">${cards.map(([label,value,icon,target,note],index)=>`<button class="finance-snapshot-card" data-finance-page="${target}"><span class="${["blue","green","violet","orange"][index]}">${icons[icon]||icons.file}</span><div><small>${label}</small><strong>${money(value)}</strong>${note?`<em>${note}</em>`:""}</div></button>`).join("")}</div></section>`;
+  return `<section class="finance-snapshot-block"><div class="finance-period-heading"><div><strong>Company positions</strong></div><div class="head-actions"><button class="button secondary small" data-finance-page="finance-unit-trust">${icons.reports}Unit Trust</button><button class="button secondary small" data-finance-page="finance-bank">${icons.building}Bank accounts</button></div></div><div class="exec-stat-grid">${cards.map((card,index)=>financeStatCard(...card,index)).join("")}</div></section>`;
 }
 function financeStatCard(label,value,icon,target,note,index) {
-  const colors=["blue","green","violet","red","teal","purple","orange","red","blue","green","violet","orange"];
-  return `<button class="finance-stat-card" data-finance-page="${target}"><span class="${colors[index]}">${icons[icon]}</span><div><small>${label}</small><strong>${value}</strong>${note?`<em>${note}</em>`:""}</div><b>View details ></b></button>`;
+  const colors=["blue","green","violet","orange","red","teal"];
+  return `<button type="button" class="exec-stat-card" data-finance-page="${target}" aria-label="Open ${escapeHtml(label)} details" title="Open ${escapeHtml(label)} details"><span class="exec-stat-icon ${colors[index%colors.length]}">${icons[icon]||icons.dashboard}</span><span><small>${label}</small><strong>${value}</strong><em>${note}</em></span><b>&gt;</b></button>`;
 }
 function financeCanApproveSavings(f=state.finance){
   return f?.access?.canApproveSavings!==false&&state.role!=="Auditor"&&state.user?.role!=="Auditor";
