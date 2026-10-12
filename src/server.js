@@ -389,6 +389,27 @@ async function memberEmailsToGmail20261012(client){
   await client.query(`INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value,updated_at=NOW()`,[key,summary]);
   return changed.length?`${summary}: ${changed.join("; ")}`:summary;
 }
+async function createVicentAccount20261012(client){
+  const key="fixVicentAccount20261012";
+  if((await client.query("SELECT 1 FROM settings WHERE key=$1",[key])).rows[0])return null;
+  const member=(await client.query(`SELECT id,full_name,branch_id FROM members
+    WHERE full_name ILIKE 'Vicent Gumisiriza' AND deleted_at IS NULL LIMIT 1 FOR UPDATE`)).rows[0];
+  let summary;
+  if(!member)summary="member not found";
+  else if((await client.query("SELECT 1 FROM users WHERE member_id=$1",[member.id])).rows[0])summary="account already exists";
+  else{
+    const email="vicentgumisiriza@gmail.com";
+    const creator=(await client.query(`SELECT id FROM users WHERE active=true AND role IN ('Legal Officer','Executive Officer')
+      ORDER BY (full_name ILIKE '%tabula%robert%') DESC,id LIMIT 1`)).rows[0]?.id;
+    await client.query(`INSERT INTO users (full_name,email,phone,password_hash,role,branch_id,member_id,created_by,must_change_password,login_email_is_provisional)
+      VALUES ($1,$2,NULL,$3,'Member',$4,$5,$6,true,true)`,
+      [member.full_name,email,"$2b$12$bQ82kSieeQo4KaptDg1rae3q6X7uR4IwNYt.e32vX8RyVtHfyhAvy",member.branch_id,member.id,creator]);
+    await client.query("UPDATE members SET email=$1 WHERE id=$2 AND email IS NULL",[email,member.id]);
+    summary=`created ${email} for ${member.full_name}`;
+  }
+  await client.query(`INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value,updated_at=NOW()`,[key,summary]);
+  return summary;
+}
 async function backfillRepaymentsToCentenary(client){
   const pending=(await client.query(`SELECT t.id FROM transactions t LEFT JOIN loans l ON l.id=t.loan_id
     WHERE t.type='Loan repayment' AND t.status='completed' AND t.finance_entry_id IS NULL
@@ -6373,6 +6394,10 @@ async function runScheduledMaintenance() {
     const emails=await transaction(client=>memberEmailsToGmail20261012(client));
     if(emails)console.log(`Member emails: ${emails}`);
   }catch(error){console.error("Member email update failed:",error.message);}
+  try{
+    const vicent=await transaction(client=>createVicentAccount20261012(client));
+    if(vicent)console.log(`Vicent account: ${vicent}`);
+  }catch(error){console.error("Vicent account creation failed:",error.message);}
   const graceDays=0;
   await transaction(async client=>{
     // No grace window: unpaid installments become overdue the day after the due date.
