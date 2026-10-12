@@ -95,12 +95,21 @@
       </div>
     </section>`;
   }
+  function closedYearBody(y){
+    return `<p class="member-reveal-sub">${esc(y.fiscalYear)} closed ${date(y.endsOn)} · monthly savings ${money(y.monthlyTarget)}</p>
+      ${targetLine("Full-year savings",y.savingsTowardTarget,y.annualSavingsTarget)}
+      ${targetLine("Annual share contribution",y.sharePaid,y.annualShareTarget)}
+      ${targetLine("Annual subscription fee",y.subscriptionPaid,y.annualSubscriptionFee)}
+      <div class="member-policy-note"><b>Shares:</b> ${money(y.annualShareTarget)} · <b>Subscription:</b> ${money(y.annualSubscriptionFee)} · <b>Full-year savings:</b> ${money(y.annualSavingsTarget)}</div>`;
+  }
   function contributionProgressReveal(){
-    const current=C()?.financialYearProgress,past=C()?.pastYearProgress;
-    if(!current&&!past)return "";
+    const current=C()?.financialYearProgress,past=C()?.pastYearProgress,closed=C()?.closedYears||[];
+    if(!current&&!past&&!closed.length)return "";
+    const previous=[...closed.map(y=>({key:`y${y.endYear}`,label:y.fiscalYear})),...(past?[{key:"past",label:past.fiscalYear}]:[])];
+    const firstKey=current?"current":previous[0]?.key;
     const yearTabs=`<div class="member-year-tabs">
-      ${current?`<button type="button" class="member-year-tab active" data-member-year-tab="current">${esc(current.fiscalYear)}</button>`:""}
-      ${past?`<button type="button" class="member-year-tab ${current?"":"active"}" data-member-year-tab="past">${esc(past.fiscalYear)}</button>`:""}
+      ${current?`<button type="button" class="member-year-tab active" data-member-year-tab="current">${esc(current.fiscalYear)} · this year</button>`:""}
+      ${previous.length?`<label class="member-year-select"><span>Previous years</span><select data-member-year-select><option value="">Choose a year</option>${previous.map(p=>`<option value="${p.key}" ${!current&&p.key===firstKey?"selected":""}>${esc(p.label)}</option>`).join("")}</select></label>`:""}
     </div>`;
     return `<section class="member-reveal-card">
       <button type="button" class="member-reveal-toggle" data-member-reveal="contribution" aria-expanded="false">
@@ -110,8 +119,9 @@
       </button>
       <div class="member-reveal-panel" data-member-reveal-panel="contribution" hidden>
         ${yearTabs}
-        <div data-member-year-panel="current" ${current?"":"hidden"}>${currentContributionBody()}</div>
-        <div data-member-year-panel="past" ${current?"hidden":""}>${pastContributionBody()}</div>
+        ${current?`<div data-member-year-panel="current">${currentContributionBody()}</div>`:""}
+        ${closed.map(y=>`<div data-member-year-panel="y${y.endYear}" ${firstKey===`y${y.endYear}`?"":"hidden"}>${closedYearBody(y)}</div>`).join("")}
+        ${past?`<div data-member-year-panel="past" ${firstKey==="past"?"":"hidden"}>${pastContributionBody()}</div>`:""}
       </div>
     </section>`;
   }
@@ -341,17 +351,15 @@
   }
   function guarantees(){
     const running=(C()?.loans||[]).filter(l=>["active","overdue"].includes(l.status));
-    const past=C()?.pastYearProgress;
-    const fy=C()?.financialYearProgress;
-    const pastBehind=past&&Number(past.variance)<0;
-    const pastOk=Boolean(past)&&Number(past.variance)>=0;
-    const currentBehind=!pastOk&&fy&&Number(fy.expectedSavingsToDate||0)-Number(fy.savingsPaid||0)>0.005;
+    const sched=C()?.financialYearProgress?.savingsSchedule;
+    const monthShort=sched?Math.max(0,Number(sched.shortBy||0)):0;
+    const behind=monthShort>0.5;
     const notice=running.length
       ?`<div class="notice warning"><div>${icons.info}</div><div><strong>Cannot guarantee while you have a running loan</strong><p>Settle ${esc(running[0].reference)} fully before accepting or offering a guarantee.</p></div></div>`
-      :(pastBehind||currentBehind
-        ?`<div class="notice warning"><div>${icons.info}</div><div><strong>Savings must be up to date to guarantee</strong><p>${pastBehind?`Complete ${esc(past.fiscalYear)} first (${money(Math.abs(Number(past.variance)))} remaining).`:`Bring ${esc(fy.fiscalYear)} savings up to date before guaranteeing.`}</p></div></div>`
+      :(behind
+        ?`<div class="notice warning"><div>${icons.info}</div><div><strong>Monthly savings must be up to date to guarantee</strong><p>Save ${money(monthShort)} to be up to date for ${esc(sched.monthLabel)}.</p></div></div>`
         :"");
-    const canAccept=!running.length&&!pastBehind&&!currentBehind;
+    const canAccept=!running.length&&!behind;
     const openGuarantees=C().guarantees.filter(x=>!["completed","closed","rejected"].includes(String(x.status||"")));
     const rows=openGuarantees.map(x=>`<tr><td><strong>${esc(x.reference)}</strong></td><td>${esc(x.borrower)}</td><td>${money(x.amount)}</td><td>${money(x.balance)}</td><td>${status(x.status)}</td><td>${status(x.guaranteeStatus)}</td><td>${x.guaranteeStatus==="pending"?`<div class="table-actions"><button class="button small secondary" data-member-guarantee="${x.loanId}" data-response="reject">Reject</button><button class="button small primary" data-member-guarantee="${x.loanId}" data-response="accept" ${canAccept?"":"disabled title=\"Not eligible to accept guarantees\""}>Accept</button></div>`:(x.guaranteeStatus==="accepted"?`<span class="status active">${esc(x.status||"in progress")}</span>`:"—")}</td></tr>`).join("");
     return `${notice}${panel("My guarantorship","Pending requests stay until you respond. Accepted guarantees remain with loan status until the loan is completed.",gridTable(["Loan","Borrower","Amount","Outstanding","Loan status","My response","Actions"],rows))}`;
@@ -584,13 +592,22 @@
   function depositForm(){
     const f=C()?.financialYearProgress,past=C()?.pastYearProgress,currentYear=f?new Date(f.endsOn).getUTCFullYear():new Date().getUTCFullYear(),pastYear=past?new Date(past.periodEnd).getUTCFullYear():currentYear-1;
     const balances=[];
-    const add=(year,type,label,balance,force=false)=>{balance=Math.max(0,Number(balance||0));if(balance>0||force)balances.push({year,type,label,balance});};
+    const lastClosed=(C()?.closedYears||[])[0];
+    const labels={[currentYear]:f?.fiscalYear||`FY ending ${currentYear}`,[pastYear]:past?.fiscalYear||`FY ending ${pastYear}`};
+    if(lastClosed)labels[lastClosed.endYear]=lastClosed.fiscalYear;
+    const add=(year,type,label,balance,force=false)=>{balance=Math.max(0,Number(balance||0));if(balance>0||force)balances.push({year,type,label,balance,paid:balance<=0&&type!=="savings"});};
     add(currentYear,"savings","Monthly savings / advance",f?Math.max(0,Number(f.expectedSavingsToDate)-Number(f.savingsTowardTarget??f.savingsPaid)):0,true);
-    if(f){add(currentYear,"shares","Annual share contribution",Math.max(0,Number(f.annualShareTarget)-Number(f.sharePaidTowardTarget??f.sharePaid)));add(currentYear,"subscription","Annual subscription fee",Math.max(0,Number(f.annualSubscriptionFee)-Number(f.subscriptionPaid)));}
-    if(past&&Number(past.variance)<0)add(pastYear,"savings","Past-year savings arrears",Math.abs(Number(past.variance)));
-    const years=[...new Set(balances.map(x=>x.year))],yearLabel=year=>year===currentYear?(f?.fiscalYear||`FY ending ${year}`):(past?.fiscalYear||`FY ending ${year}`);
-    const yearOptions=years.map(year=>`<option value="${year}">${esc(yearLabel(year))}${year===pastYear?" - arrears":" - current year"}</option>`).join("");
-    const typeOptions=balances.map(x=>`<option value="${x.type}" data-year="${x.year}" data-balance="${x.balance}">${esc(x.label)} - ${x.balance>0?`balance ${money(x.balance)}`:"open for advance / surplus"}</option>`).join("");
+    if(f){
+      if(Number(f.annualShareTarget)>0)add(currentYear,"shares",`Annual share contribution (${money(f.annualShareTarget)})`,Math.max(0,Number(f.annualShareTarget)-Number(f.sharePaidTowardTarget??f.sharePaid)),true);
+      if(Number(f.annualSubscriptionFee)>0)add(currentYear,"subscription",`Annual subscription fee (${money(f.annualSubscriptionFee)})`,Math.max(0,Number(f.annualSubscriptionFee)-Number(f.subscriptionPaid)),true);
+    }
+    if(lastClosed&&lastClosed.endYear!==currentYear){
+      const short=Number(lastClosed.annualSavingsTarget)-Number(lastClosed.savingsTowardTarget);
+      if(short>0.5)add(lastClosed.endYear,"savings","Past-year savings arrears",short);
+    }else if(past&&Number(past.variance)<0)add(pastYear,"savings","Past-year savings arrears",Math.abs(Number(past.variance)));
+    const years=[...new Set(balances.map(x=>x.year))],yearLabel=year=>labels[year]||`FY ending ${year}`;
+    const yearOptions=years.map(year=>`<option value="${year}">${esc(yearLabel(year))}${year===currentYear?" - current year":" - arrears"}</option>`).join("");
+    const typeOptions=balances.map(x=>`<option value="${x.type}" data-year="${x.year}" data-balance="${x.balance}" data-paid="${x.paid?1:0}">${esc(x.label)} - ${x.paid?"fully paid":x.balance>0?`balance ${money(x.balance)}`:"open for advance / surplus"}</option>`).join("");
     modal("Submit member contribution",`<form class="form" data-member-deposit enctype="multipart/form-data" novalidate><div class="form-grid">
       <div class="field full"><label>Financial year to pay</label><select name="fiscalYear" required data-deposit-year>${yearOptions}</select><small>Choose the year this payment should clear or advance.</small></div>
       <div class="field full"><label>Contribution type</label><select name="contributionType" required data-deposit-type>${typeOptions}</select><small data-deposit-balance>Savings can be paid even after the target is met.</small></div>
@@ -602,7 +619,7 @@
     </div><div class="member-form-message" data-deposit-message aria-live="polite"></div><div class="form-actions"><button type="button" class="button secondary" data-close-modal>Cancel</button><button type="submit" class="button primary">Send for verification</button></div></form>`);
     bindMember();
     const year=document.querySelector("[data-deposit-year]"),type=document.querySelector("[data-deposit-type]"),amount=document.querySelector("[data-member-deposit] [name=amount]"),hint=document.querySelector("[data-deposit-balance]");
-    const sync=()=>{if(!year||!type)return;let first=null;[...type.options].forEach(option=>{const show=option.dataset.year===year.value;option.hidden=!show;option.disabled=!show;if(show&&!first)first=option;});if(first){type.value=first.value;first.selected=true;}syncAmount();};
+    const sync=()=>{if(!year||!type)return;let first=null;[...type.options].forEach(option=>{const show=option.dataset.year===year.value;option.hidden=!show;option.disabled=!show||option.dataset.paid==="1";if(show&&!option.disabled&&!first)first=option;});if(first){type.value=first.value;first.selected=true;}syncAmount();};
     const syncAmount=()=>{const option=type?.selectedOptions?.[0];if(!option)return;const balance=Number(option.dataset.balance||0);amount.placeholder=balance>0?`Balance due: ${money(balance)}`:"Enter amount to deposit";if(option.value==="shares"||option.value==="subscription")amount.max=String(Math.max(balance,1000));else amount.removeAttribute("max");if(hint)hint.textContent=balance>0?`Selected balance: ${money(balance)}. Credits will allocate the verified payment to ${yearLabel(Number(option.dataset.year))}.`:`No target balance due — this savings payment will be treated as advance or surplus for ${yearLabel(Number(option.dataset.year))}.`;};
     year?.addEventListener("change",sync);type?.addEventListener("change",syncAmount);sync();
   }
@@ -645,9 +662,17 @@
         if(chevron)chevron.textContent=open?"Hide":"Show";
       });
     });
+    document.querySelectorAll("[data-member-year-select]").forEach(select=>{
+      select.addEventListener("change",()=>{
+        const key=select.value||"current";
+        document.querySelectorAll("[data-member-year-tab]").forEach(t=>t.classList.toggle("active",t.dataset.memberYearTab===key));
+        document.querySelectorAll("[data-member-year-panel]").forEach(panel=>panel.toggleAttribute("hidden",panel.dataset.memberYearPanel!==key));
+      });
+    });
     document.querySelectorAll("[data-member-year-tab]").forEach(tab=>{
       tab.addEventListener("click",()=>{
         const key=tab.dataset.memberYearTab;
+        document.querySelectorAll("[data-member-year-select]").forEach(s=>{s.value="";});
         document.querySelectorAll("[data-member-year-tab]").forEach(t=>t.classList.toggle("active",t===tab));
         document.querySelectorAll("[data-member-year-panel]").forEach(panel=>{
           panel.toggleAttribute("hidden",panel.dataset.memberYearPanel!==key);

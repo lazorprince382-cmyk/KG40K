@@ -1437,8 +1437,29 @@ function executiveDocumentsView() {
   const row=(d)=>`<div class="exec-document-row"><span>${icons.file}</span><div class="exec-document-copy"><strong>${escapeHtml(d.title)}</strong><small>${escapeHtml(d.reference)} - ${escapeHtml(d.documentType)} - Version ${escapeHtml(d.version)} - ${escapeHtml(d.department||"")}${who(d)}</small></div><div class="exec-document-controls">${status(d.status)}${d.hasFile?`<div class="document-actions"><a href="/api/documents/${d.id}/view" target="_blank" title="View document">${icons.eye}<span>View</span></a><a href="/api/documents/${d.id}/download" title="Download document">${icons.download}</a></div>`:`<span class="status pending no-file-badge">No file</span>`}<button type="button" class="document-delete" data-delete-document="${d.id}" data-document-title="${escapeHtml(d.title)}" title="Delete document">${icons.trash}</button></div></div>`;
   return `${pendingCount?`<div class="credits-verification-banner"><div>${icons.info}<span><strong>${pendingCount} document${pendingCount===1?"":"s"} awaiting publication</strong><small>Review and publish them from the Approvals tab.</small></span></div><button class="button small primary" data-executive-page="executive-approvals">Open Approvals</button></div>`:""}<div class="exec-document-groups">${types.map(type=>{const docs=libraryDocs.filter(d=>matchesType(d,type));return `<section class="exec-panel"><div class="exec-panel-head"><div><h3>${type}</h3><p>${docs.length} official document${docs.length===1?"":"s"}</p></div></div>${docs.map(row).join("")||`<div class="exec-empty">No documents in this category.</div>`}</section>`;}).join("")}${other.length?`<section class="exec-panel"><div class="exec-panel-head"><div><h3>Other documents</h3><p>${other.length} custom-typed document${other.length===1?"":"s"}</p></div></div>${other.map(row).join("")}</section>`:""}</div>`;
 }
+function financialYearsCard() {
+  const data=state.financialYears;
+  if(!data){
+    if(!state.financialYearsLoading){state.financialYearsLoading=true;api("/api/financial-years").then(result=>{state.financialYears=result;}).catch(error=>{state.financialYears={years:[],canEdit:false,error:error.message};}).finally(()=>{state.financialYearsLoading=false;render();});}
+    return `<div class="card setting-card"><div class="executive-loading">Loading financial years…</div></div>`;
+  }
+  const rows=(data.years||[]).map(y=>{
+    const editable=data.canEdit&&!y.closed;
+    const tag=y.current?`<span class="status active">This year</span>`:y.closed?`<span class="status completed">Closed</span>`:`<span class="status pending">Upcoming</span>`;
+    const formatDate=value=>new Date(value).toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric",timeZone:"Africa/Kampala"});
+    const input=(name,value)=>editable?`<input type="number" min="0" step="1000" name="${name}" value="${Number(value||0)}">`:`<strong>${money(value)}</strong>`;
+    return `<form class="setting-row fy-policy-row" data-fy-policy="${y.id}"><div class="setting-icon">${icons.building}</div>
+      <div class="setting-copy"><strong>FY ${escapeHtml(y.fiscalYear)} ${tag}</strong><span>${escapeHtml(formatDate(y.startsOn))} – ${escapeHtml(formatDate(y.endsOn))}</span></div>
+      <label class="fy-policy-field"><span>Annual subscription</span>${input("annualSubscriptionFee",y.annualSubscriptionFee)}</label>
+      <label class="fy-policy-field"><span>Annual shares</span>${input("annualShareTarget",y.annualShareTarget)}</label>
+      ${editable?`<button type="submit" class="button primary small">Save</button>`:""}</form>`;
+  }).join("");
+  return `<div class="card setting-card"><div class="card-head" style="padding:0 0 16px"><div><h2 class="card-title">Member financial years</h2><p class="card-subtitle">Targets members see each year. A new year opens automatically on 1 July using the previous year's targets.</p></div>
+    ${data.canEdit?`<button type="button" class="button secondary small" data-fy-open-next>Open next year</button>`:""}</div>
+    ${data.error?`<p class="form-error">${escapeHtml(data.error)}</p>`:""}${rows||`<div class="empty">No financial years yet.</div>`}</div>`;
+}
 function executiveSettingsView() {
-  return `<div class="settings-grid"><div class="card setting-card"><div class="card-head" style="padding:0 0 16px"><div><h2 class="card-title">Executive preferences</h2><p class="card-subtitle">Command-center display and alerts</p></div></div>
+  return `<div class="settings-grid">${financialYearsCard()}<div class="card setting-card"><div class="card setting-card"><div class="card-head" style="padding:0 0 16px"><div><h2 class="card-title">Executive preferences</h2><p class="card-subtitle">Command-center display and alerts</p></div></div>
     <div class="setting-row"><div class="setting-icon">${icons.bell}</div><div class="setting-copy"><strong>Urgent approval alerts</strong><span>Enabled for large loans, payments, contracts and policies</span></div>${status("active")}</div>
     <div class="setting-row"><div class="setting-icon">${icons.clock}</div><div class="setting-copy"><strong>Meeting reminders</strong><span>Notify 24 hours before executive and board meetings</span></div>${status("active")}</div>
     <div class="setting-row"><div class="setting-icon">${icons.reports}</div><div class="setting-copy"><strong>Weekly performance digest</strong><span>Every Monday at 8:00 AM</span></div>${status("active")}</div></div>
@@ -1926,7 +1947,7 @@ function financeDocumentsView() {
   return `<div class="exec-document-groups">${known.map(type=>{const rows=docs.filter(d=>d.documentType===type);return `<section class="finance-panel"><div class="finance-panel-head"><div><h3>${type}</h3><p>${rows.length} finance document${rows.length===1?"":"s"}</p></div></div>${rows.map(row).join("")||`<div class="exec-empty">No documents in this category yet.</div>`}</section>`;}).join("")}${other.length?`<section class="finance-panel"><div class="finance-panel-head"><div><h3>Other documents</h3><p>${other.length} custom-typed document${other.length===1?"":"s"}</p></div></div>${other.map(row).join("")}</section>`:""}</div>`;
 }
 function financeSettingsView() {
-  return `<div class="settings-grid"><div class="card setting-card"><div class="card-head" style="padding:0 0 16px"><div><h2 class="card-title">Finance controls</h2><p class="card-subtitle">Accounting and payment safeguards</p></div></div>
+  return `<div class="settings-grid">${financialYearsCard()}<div class="card setting-card"><div class="card-head" style="padding:0 0 16px"><div><h2 class="card-title">Finance controls</h2><p class="card-subtitle">Accounting and payment safeguards</p></div></div>
     <div class="setting-row"><div class="setting-icon">${icons.approvals}</div><div class="setting-copy"><strong>Large-payment threshold</strong><span>UGX 10,000,000 - Executive approval required</span></div></div>
     <div class="setting-row"><div class="setting-icon">${icons.reports}</div><div class="setting-copy"><strong>Budget alerts</strong><span>Warnings at 80%, 90% and 100%</span></div></div>
     <div class="setting-row"><div class="setting-icon">${icons.building}</div><div class="setting-copy"><strong>Fiscal period</strong><span>FY 2026</span></div></div></div>
@@ -4018,6 +4039,21 @@ function bind() {
       render();toast("Notification deleted.");
     }catch(error){el.disabled=false;toast(error.message);}
   }));
+  document.querySelectorAll("[data-fy-policy]").forEach(form=>form.addEventListener("submit",async event=>{
+    event.preventDefault();
+    const button=form.querySelector("button[type=submit]");
+    try{
+      if(button)button.disabled=true;
+      const body=Object.fromEntries(new FormData(form).entries());
+      await api(`/api/financial-years/${form.dataset.fyPolicy}`,{method:"PATCH",body:JSON.stringify(body)});
+      state.financialYears=null;render();toast("Financial-year targets saved.");
+    }catch(error){if(button)button.disabled=false;toast(error.message);}
+  }));
+  document.querySelector("[data-fy-open-next]")?.addEventListener("click",async event=>{
+    if(!(await (window.confirmDialog?.("Open the next financial year now? It copies this year's targets so you can adjust them.") ?? confirm("Open the next financial year now?"))))return;
+    try{event.target.disabled=true;const created=await api("/api/financial-years/next",{method:"POST",body:"{}"});state.financialYears=null;render();toast(`FY ${created.fiscalYear} opened.`);}
+    catch(error){event.target.disabled=false;toast(error.message);}
+  });
   document.querySelector("[data-executive-fy]")?.addEventListener("change",async event=>{try{event.target.disabled=true;state.executive=await api(`/api/executive/command-center?fy=${event.target.value}`);render();}catch(error){toast(error.message);}});
   document.querySelectorAll("[data-executive-project]").forEach(el=>el.addEventListener("click",()=>openExecutiveProject(el.dataset.executiveProject)));
   document.querySelectorAll("[data-finance-page]").forEach(el=>el.addEventListener("click",async()=>{

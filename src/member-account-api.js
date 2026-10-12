@@ -5,6 +5,7 @@ module.exports = function registerMemberAccountApi({
   const { loadWelfareStanding } = require("./welfare-standing");
   const { loansOutstandingTotal } = require("./loan-totals");
   const { loadMemberSchedule } = require("./savings-schedule");
+  const { ensureFinancialYears } = require("./financial-years");
   const imageTypes = new Set(["image/jpeg","image/png","image/webp","image/gif","image/jpg"]);
   const receiptTypes = new Set(["image/jpeg","image/png","image/webp","application/pdf"]);
   const removeStoredFile = storedName => {
@@ -132,6 +133,7 @@ module.exports = function registerMemberAccountApi({
     const amount=Number(req.body.amount),method=String(req.body.method||"").trim(),externalReference=String(req.body.externalReference||"").trim();
     const contributionTypes={savings:"Savings deposit",shares:"Share purchase",subscription:"Annual subscription fee"};
     const transactionType=contributionTypes[String(req.body.contributionType||"savings")]||contributionTypes.savings;
+    await ensureFinancialYears();
     const currentPolicy=await one(`SELECT EXTRACT(YEAR FROM ends_on)::int AS year,starts_on AS "startsOn",ends_on AS "endsOn",
       monthly_savings_target::float AS "monthlySavingsTarget",annual_share_target::float AS "annualShareTarget",
       annual_subscription_fee::float AS "annualSubscriptionFee",COALESCE(opening_share_credit,0)::float AS "openingShareCredit",
@@ -140,8 +142,10 @@ module.exports = function registerMemberAccountApi({
       FROM member_financial_year_policies WHERE status='active' AND CURRENT_DATE BETWEEN starts_on AND ends_on ORDER BY starts_on DESC LIMIT 1`);
     const previousPeriod=await one("SELECT fiscal_year AS year FROM financial_reporting_periods ORDER BY period_end DESC LIMIT 1");
     const targetFiscalYear=Number(req.body.fiscalYear||currentPolicy?.year||new Date().getUTCFullYear());
-    const allowedYears=[Number(currentPolicy?.year),Number(previousPeriod?.year),new Date().getUTCFullYear()].filter(Number.isFinite);
+    const lastClosedPolicy=await one(`SELECT EXTRACT(YEAR FROM ends_on)::int AS year FROM member_financial_year_policies WHERE ends_on<CURRENT_DATE ORDER BY ends_on DESC LIMIT 1`);
+    const allowedYears=[Number(currentPolicy?.year),Number(previousPeriod?.year),Number(lastClosedPolicy?.year),new Date().getUTCFullYear()].filter(Number.isFinite);
     if(!allowedYears.includes(targetFiscalYear)){removeStoredFile(req.file?.filename);return res.status(400).json({error:"Choose a valid current or previous financial year"});}
+    if(targetFiscalYear===Number(lastClosedPolicy?.year)&&targetFiscalYear!==Number(currentPolicy?.year)&&transactionType!=="Savings deposit"){removeStoredFile(req.file?.filename);return res.status(400).json({error:"Previous-year allocation is available only for clearing savings arrears"});}
     if(targetFiscalYear===Number(previousPeriod?.year)&&transactionType!=="Savings deposit"){removeStoredFile(req.file?.filename);return res.status(400).json({error:"Previous-year allocation is available only for clearing savings arrears"});}
     if(!req.file)return res.status(400).json({error:"Upload a receipt photo or PDF showing the payment"});
     if(!receiptTypes.has(req.file.mimetype)){
@@ -348,6 +352,7 @@ module.exports = function registerMemberAccountApi({
         FROM member_support_requests WHERE member_id=$1 ORDER BY id DESC`,[memberId])
     ]);
     if (!member) return null;
+    await ensureFinancialYears();
     const financialYear = await one(`SELECT id,fiscal_year_label AS "fiscalYear",starts_on AS "startsOn",ends_on AS "endsOn",
       monthly_savings_target::float AS "monthlySavingsTarget",annual_share_target::float AS "annualShareTarget",
       annual_subscription_fee::float AS "annualSubscriptionFee",
@@ -384,6 +389,24 @@ module.exports = function registerMemberAccountApi({
     const savingsMonthlyTarget = Number(financialYear?.monthlySavingsTarget || 0);
     const combinedMonthlySetting = Number((await one(`SELECT value FROM settings WHERE key='monthlyCombinedContribution'`))?.value || 0);
     const welfareMonthlySetting = Number((await one(`SELECT value FROM settings WHERE key='monthlyWelfareContribution'`))?.value || 25000);
+    const closedYears = (await query(`SELECT p.fiscal_year_label AS "fiscalYear",p.starts_on AS "startsOn",p.ends_on AS "endsOn",
+        EXTRACT(YEAR FROM p.ends_on)::int AS "endYear",p.monthly_savings_target::float AS "monthlySavingsTarget",
+        p.annual_share_target::float AS "annualShareTarget",p.annual_subscription_fee::float AS "annualSubscriptionFee",
+        COALESCE((SELECT SUM(t.amount) FROM transactions t WHERE t.member_id=$1 AND t.status='completed' AND t.type='Savings deposit'
+          AND (t.target_fiscal_year=EXTRACT(YEAR FROM p.ends_on)::int OR (t.target_fiscal_year IS NULL AND t.created_at::date BETWEEN p.starts_on AND p.ends_on))),0)::float AS "savingsPaid",
+        COALESCE((SELECT SUM(w.amount) FROM welfare_contributions w WHERE w.member_id=$1 AND w.status IN ('verified','completed','recorded') AND w.amount>0
+          AND w.contribution_type NOT ILIKE '%standing%' AND COALESCE(w.reference,'') NOT LIKE 'WEL-STANDING-%'
+          AND w.contribution_date::date BETWEEN p.starts_on AND p.ends_on),0)::float AS "welfarePaid",
+        COALESCE((SELECT SUM(t.amount) FROM transactions t WHERE t.member_id=$1 AND t.status='completed' AND t.type='Share purchase'
+          AND (t.target_fiscal_year=EXTRACT(YEAR FROM p.ends_on)::int OR (t.target_fiscal_year IS NULL AND t.created_at::date BETWEEN p.starts_on AND p.ends_on))),0)::float AS "sharePaid",
+        COALESCE((SELECT SUM(t.amount) FROM transactions t WHERE t.member_id=$1 AND t.status='completed' AND t.type='Annual subscription fee'
+          AND (t.target_fiscal_year=EXTRACT(YEAR FROM p.ends_on)::int OR (t.target_fiscal_year IS NULL AND t.created_at::date BETWEEN p.starts_on AND p.ends_on))),0)::float AS "subscriptionPaid"
+      FROM member_financial_year_policies p
+      WHERE p.ends_on < CURRENT_DATE ORDER BY p.starts_on DESC`, [memberId])).rows.map(y => {
+      const monthly = combinedMonthlySetting > 0 ? combinedMonthlySetting : Number(y.monthlySavingsTarget) + Math.max(0, welfareMonthlySetting);
+      return { ...y, fiscalYear: `FY ${y.fiscalYear}`, monthlyTarget: monthly, annualSavingsTarget: monthly * 12,
+        savingsTowardTarget: Number(y.savingsPaid) + Number(y.welfarePaid) };
+    });
     // Display bar uses the combined monthly pay (400k savings + 25k welfare) × 12 = 5,100,000.
     const monthlyTarget = combinedMonthlySetting > 0
       ? combinedMonthlySetting
@@ -520,7 +543,7 @@ module.exports = function registerMemberAccountApi({
         assistanceHistory: welfareAssistanceHistory.rows
       }, meetings: meetings.rows,
       documents: documents.rows, notifications: notifications.rows, announcements: announcements.rows, support: support.rows, recentActivity,
-      financialYearProgress, pastYearProgress, closingPosition,
+      financialYearProgress, pastYearProgress, closedYears, closingPosition,
       loanEligibility:(()=>{
         const schedule=financialYearProgress?.savingsSchedule;
         const monthlyUpToDate=!schedule||Number(schedule.shortBy||0)<=0.5;
@@ -574,6 +597,7 @@ module.exports = function registerMemberAccountApi({
     const amount=Number(req.body.amount),method=String(req.body.method||"").trim(),externalReference=String(req.body.externalReference||"").trim();
     const contributionTypes={savings:"Savings deposit",shares:"Share purchase",subscription:"Annual subscription fee"};
     const transactionType=contributionTypes[String(req.body.contributionType||"savings")]||contributionTypes.savings;
+    await ensureFinancialYears();
     const currentPolicy=await one(`SELECT EXTRACT(YEAR FROM ends_on)::int AS year,starts_on AS "startsOn",ends_on AS "endsOn",
       monthly_savings_target::float AS "monthlySavingsTarget",annual_share_target::float AS "annualShareTarget",
       annual_subscription_fee::float AS "annualSubscriptionFee",COALESCE(opening_share_credit,0)::float AS "openingShareCredit",
@@ -582,7 +606,8 @@ module.exports = function registerMemberAccountApi({
       FROM member_financial_year_policies WHERE status='active' AND CURRENT_DATE BETWEEN starts_on AND ends_on ORDER BY starts_on DESC LIMIT 1`);
     const previousPeriod=await one("SELECT fiscal_year AS year FROM financial_reporting_periods ORDER BY period_end DESC LIMIT 1");
     const targetFiscalYear=Number(req.body.fiscalYear||currentPolicy?.year||new Date().getUTCFullYear());
-    const allowedYears=[Number(currentPolicy?.year),Number(previousPeriod?.year),new Date().getUTCFullYear()].filter(Number.isFinite);
+    const lastClosedPolicy=await one(`SELECT EXTRACT(YEAR FROM ends_on)::int AS year FROM member_financial_year_policies WHERE ends_on<CURRENT_DATE ORDER BY ends_on DESC LIMIT 1`);
+    const allowedYears=[Number(currentPolicy?.year),Number(previousPeriod?.year),Number(lastClosedPolicy?.year),new Date().getUTCFullYear()].filter(Number.isFinite);
     if(!allowedYears.includes(targetFiscalYear)){removeStoredFile(req.file?.filename);return res.status(400).json({error:"Choose a valid current or previous financial year"});}
     if(!req.file)return res.status(400).json({error:"Upload a receipt photo or PDF showing the payment"});
     if(!receiptTypes.has(req.file.mimetype)){removeStoredFile(req.file.filename);return res.status(400).json({error:"Deposit evidence must be a JPG, PNG, WebP or PDF file"});}

@@ -4435,6 +4435,7 @@ require("./supervisory-api")({app,auth,asyncRoute,departmentPermission,query,one
 require("./legal-biodata-api")({app,auth,asyncRoute,departmentPermission,query,one,transaction,audit,metadata});
 require("./legal-family-api")({app,auth,asyncRoute,departmentPermission,query,one,audit,metadata});
 require("./member-account-api")({app,auth,asyncRoute,query,one,transaction,audit,metadata,upload,fs,path,uploadsDir});
+require("./financial-years")({app,auth,asyncRoute,audit,metadata});
 require("./member-self-service-api")({app,auth,asyncRoute,query,one,transaction,audit,metadata,departmentPermission,
   upload,fs,path,uploadsDir,reference});
 require("./member-report-api")({app,auth,asyncRoute,query});
@@ -6394,6 +6395,7 @@ async function runScheduledMaintenance() {
     const emails=await transaction(client=>memberEmailsToGmail20261012(client));
     if(emails)console.log(`Member emails: ${emails}`);
   }catch(error){console.error("Member email update failed:",error.message);}
+  try{await require("./financial-years").ensureFinancialYears();}catch(error){console.error("Financial year rollover failed:",error.message);}
   try{
     const vicent=await transaction(client=>createVicentAccount20261012(client));
     if(vicent)console.log(`Vicent account: ${vicent}`);

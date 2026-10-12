@@ -1759,6 +1759,12 @@ table th,table td{font-size:15px;line-height:1.45}.dept-panel td small,.dept-pan
 .member-year-tabs{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 14px}
 .member-year-tab{min-height:34px;padding:7px 12px;border:1px solid #d5e0ea;border-radius:999px;background:#fff;color:#506070;font-weight:700;cursor:pointer}
 .member-year-tab.active{border-color:#0b3b70;color:#fff;background:#0b3b70}
+.fy-policy-row{flex-wrap:wrap;padding:10px 0;border-top:1px solid #eef2f6}
+.fy-policy-row .setting-copy{flex:1 1 180px}
+.fy-policy-field{display:flex;flex-direction:column;gap:4px;font-size:12px;color:#506070}
+.fy-policy-field input{width:140px;min-height:34px;padding:6px 8px;border:1px solid #d5e0ea;border-radius:8px}
+.member-year-select{display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:700;color:#506070}
+.member-year-select select{min-height:34px;padding:6px 10px;border:1px solid #d5e0ea;border-radius:999px;background:#fff;color:#0b3b70;font-weight:700}
 .member-activity-scroll{max-height:280px;overflow:auto}
 
 /* Multi-role workspace picker and switcher */
