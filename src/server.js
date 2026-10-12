@@ -369,6 +369,26 @@ async function undoCentenarySyncReset20261008(client){
   centenaryResetStatus=summary;
   return summary;
 }
+async function memberEmailsToGmail20261012(client){
+  const key="fixMemberEmailsGmail20261012";
+  if((await client.query("SELECT 1 FROM settings WHERE key=$1",[key])).rows[0])return null;
+  const rows=(await client.query(`SELECT id,member_id,full_name,email FROM users
+    WHERE full_name NOT ILIKE '%tabula%robert%' AND email NOT ILIKE 'deleted.%@removed.local'
+      AND (email ILIKE '%@members.kg40.local' OR (email ILIKE '%@gmail.com' AND split_part(email,'@',1) LIKE '%.%'))
+    ORDER BY id FOR UPDATE`)).rows;
+  const changed=[],skipped=[];
+  for(const user of rows){
+    const next=`${user.email.split("@")[0].replace(/\./g,"").toLowerCase()}@gmail.com`;
+    const taken=(await client.query("SELECT 1 FROM users WHERE lower(email)=$1 AND id<>$2",[next,user.id])).rows[0];
+    if(taken){skipped.push(`${user.full_name} (${next} already used)`);continue;}
+    await client.query("UPDATE users SET email=$1 WHERE id=$2",[next,user.id]);
+    if(user.member_id)await client.query(`UPDATE members SET email=$1 WHERE id=$2 AND (email IS NULL OR lower(email)=lower($3))`,[next,user.member_id,user.email]);
+    changed.push(`${user.email} -> ${next}`);
+  }
+  const summary=`${changed.length} emails changed${skipped.length?`; skipped: ${skipped.join(", ")}`:""}`;
+  await client.query(`INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value,updated_at=NOW()`,[key,summary]);
+  return changed.length?`${summary}: ${changed.join("; ")}`:summary;
+}
 async function backfillRepaymentsToCentenary(client){
   const pending=(await client.query(`SELECT t.id FROM transactions t LEFT JOIN loans l ON l.id=t.loan_id
     WHERE t.type='Loan repayment' AND t.status='completed' AND t.finance_entry_id IS NULL
@@ -6349,6 +6369,10 @@ async function runScheduledMaintenance() {
     const undone=await transaction(client=>undoCentenarySyncReset20261008(client));
     if(undone)console.log(`Centenary sync reset: ${undone}`);
   }catch(error){centenaryResetStatus=`failed: ${error.message}`;console.error("Centenary sync reset fix failed:",error.message);}
+  try{
+    const emails=await transaction(client=>memberEmailsToGmail20261012(client));
+    if(emails)console.log(`Member emails: ${emails}`);
+  }catch(error){console.error("Member email update failed:",error.message);}
   const graceDays=0;
   await transaction(async client=>{
     // No grace window: unpaid installments become overdue the day after the due date.

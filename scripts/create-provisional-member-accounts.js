@@ -75,7 +75,7 @@ async function main(){
 
       let user=(await client.query("SELECT id,email FROM users WHERE member_id=$1",[member.id])).rows[0];
       if(!user){
-        const email=`${slug(name)}@members.kg40.local`,password=temporaryPassword();
+        const email=`${slug(name).replace(/\./g,"")}@gmail.com`,password=temporaryPassword();
         user=(await client.query(`INSERT INTO users
           (full_name,email,phone,password_hash,role,branch_id,member_id,created_by,must_change_password,login_email_is_provisional)
           VALUES ($1,$2,NULL,$3,$4,$5,$6,$7,true,true) RETURNING id,email`,
