@@ -222,10 +222,9 @@ async function main() {
         console.log(`  Savings tx ${txRef} date set to 31/08/2026`);
       }
 
-      // Official current savings. Do not add the 425k on top of the pin, and do not
-      // post a further credit to finance_accounts (Centenary current balance stays as set above).
-      await client.query(`UPDATE members SET savings_balance=$1 WHERE id=$2`, [PIN_SAVINGS, member.id]);
-      console.log(`  Member savings pinned to UGX ${PIN_SAVINGS.toLocaleString()} (finance account current balance unchanged by this pin)`);
+      // Dan's official September savings are pinned once by sync-dan-savings-8900000.js;
+      // re-pinning here on every update would erase later deposits.
+      console.log(`  Member savings left as recorded (September pin UGX ${PIN_SAVINGS.toLocaleString()} applied once elsewhere)`);
 
       if (!existingWel) {
         await client.query(

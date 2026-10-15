@@ -96,7 +96,11 @@ async function main() {
       `  Finance accounts snapshot: ${accountsBefore.length} account(s) — current balances will not change`
     );
 
-    if (!dryRun && previous !== TARGET_SAVINGS) {
+    // The September pin has already been applied; re-pinning on every update erased later deposits.
+    const pinRetired = true;
+    if (pinRetired) {
+      console.log("  September pin already applied — later deposits are kept, no member update");
+    } else if (!dryRun && previous !== TARGET_SAVINGS) {
       await client.query(`UPDATE members SET savings_balance=$1 WHERE id=$2`, [TARGET_SAVINGS, member.id]);
       await client.query(
         `INSERT INTO audit_logs(action, entity_type, entity_id, details)

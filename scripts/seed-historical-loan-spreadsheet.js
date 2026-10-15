@@ -89,8 +89,8 @@ function flatSchedule(amount, months, startDate, interestOverride = null, monthl
 const HISTORICAL_MEMBERS = [
   {
     key: "joshua",
-    fullName: "Joshua Ssewanyana",
-    aliases: ["SSEWANYANA JOSUA", "Joshua Ssewanyana"],
+    fullName: "Ssewanyana Joshua Timothy",
+    aliases: ["SSEWANYANA JOSUA", "Joshua Ssewanyana", "Ssewanyana Joshua Timothy"],
     memberNumber: "G40-HIST-JOSHUA",
     status: "exited",
   },
@@ -111,7 +111,7 @@ const HISTORICAL_MEMBERS = [
 ];
 
 const MEMBER_ALIASES = [
-  { match: /ssewanyana|josua|^joshua\b/i, name: "Joshua Ssewanyana" },
+  { match: /ssewanyana|josua|^joshua\b/i, name: "Ssewanyana Joshua Timothy" },
   { match: /mujjabwami|mujabwami/i, name: "Ezra Mujjabwami" },
   { match: /barasa|gerald/i, name: "Barasa Gerald" },
   { match: /jude|kyobe|tade/i, name: "Jude Tadieus Kyobe" },

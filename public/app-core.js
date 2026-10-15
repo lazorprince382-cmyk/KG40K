@@ -847,7 +847,7 @@ function creditsSidebar() {
   const disburseBadge=canCreditsDisburse()?(c?.stats?.awaitingDisbursement||0):0;
   const approvalBadge=(c?.loans||[]).filter(l=>["committee-review","officer-review"].includes(l.status)).length;
   const pages=rolePages[executiveWorkspaceRole()]||rolePages[state.role];
-  const sidebarPages=new Set(["dashboard","messages","credits-members","credits-savings","credits-applications","credits-approvals","credits-active","credits-disbursement","credits-receipts","credits-repayments","credits-guarantors","credits-recovery","credits-reports","credits-documents","credits-notifications","settings"]);
+  const sidebarPages=new Set(["dashboard","messages","credits-members","credits-savings","credits-applications","credits-approvals","credits-active","credits-disbursement","credits-receipts","credits-repayments","credits-guarantors","credits-recovery","credits-documents","credits-notifications","settings"]);
   if(isExecutiveReadOnly()) sidebarPages.delete("credits-disbursement");
   if(!canCreditsDisburse()) sidebarPages.delete("credits-disbursement");
   const alertFor=page=>page==="credits-applications"&&applicationBadge||page==="credits-approvals"&&approvalBadge||page==="credits-active"&&activeBadge||page==="credits-disbursement"&&disburseBadge||page==="credits-repayments"&&repaymentBadge||page==="credits-guarantors"&&guarantorBadge||page==="credits-recovery"&&(recoveryBadge||dangerBadge)||page==="messages"&&state.unreadMessages;
@@ -889,7 +889,7 @@ function executiveSidebar() {
     "executive-meetings":"clock","executive-projects":"building","executive-reports":"reports",
     notifications:"bell","executive-documents":"file",users:"lock"};
   const pending=state.executive?.stats?.pendingApprovals||((state.executive?.approvals||[]).length+((state.executive?.documents||[]).filter(d=>d.status==="pending_executive").length));
-  const sidebarPages=new Set(["dashboard","messages","members","departments","users","executive-approvals","executive-meetings","executive-reports","notifications","executive-documents","settings"]);
+  const sidebarPages=new Set(["dashboard","messages","members","departments","users","executive-approvals","executive-meetings","notifications","executive-documents","settings"]);
   const alertFor=page=>page==="executive-approvals"&&pending||page==="messages"&&state.unreadMessages||page==="notifications"&&(state.notifications||[]).some(n=>!n.readAt);
   return `<aside class="sidebar executive-sidebar" id="sidebar">
     <div class="executive-brand"><div class="executive-crest">${icons.shield}</div><div><strong>KASANGATI G40<br>KWAGALANA</strong><span>Executive Department</span></div></div>
@@ -946,7 +946,7 @@ function headActions() {
     return `<div class="head-actions">${canChannel?`<button class="button secondary" data-action="new-channel">${icons.bell}New channel</button>`:""}<button class="button secondary" data-action="new-group">${icons.users}New group</button><button class="button primary" data-action="new-message">${icons.plus}New message</button></div>`;
   }
   if (state.page === "users") return `<div class="head-actions"><button class="button primary" data-modal="user">${icons.plus}Create user</button></div>`;
-  if (state.page === "members" && (state.permissions.includes("member:manage") || state.permissions.includes("user:manage"))) return `<div class="head-actions"><button class="button secondary" data-action="export">${icons.download}Export</button><button class="button primary" data-modal="member">${icons.plus}New member</button></div>`;
+  if (state.page === "members" && (state.permissions.includes("member:manage") || state.permissions.includes("user:manage"))) return `<div class="head-actions"><button class="button primary" data-modal="member">${icons.plus}New member</button></div>`;
   if (state.page === "members") return `<div class="head-actions"><button class="button secondary" data-action="export">${icons.download}Export</button></div>`;
   if (state.page === "savings" && state.role === "Member") return `<div class="head-actions"><button class="button primary" data-action="statement">${icons.file}Download statement</button></div>`;
   if (state.page === "savings" && state.permissions.includes("transaction:create")) return `<div class="head-actions"><button class="button secondary" data-action="statement">${icons.file}Statement</button><button class="button primary" data-modal="deposit">${icons.plus}Record deposit</button></div>`;
@@ -1203,7 +1203,7 @@ function executiveCalendarWidget(items) {
 function executiveQuickPanel() {
   return `<div class="exec-floating"><button class="exec-fab" data-action="executive-quick">${icons.plus}<span>Quick Actions</span></button>${state.execQuickOpen?`<div class="exec-quick-menu">
     <button data-executive-page="executive-approvals">${icons.approvals}Approve requests</button><button data-action="schedule-meeting">${icons.clock}Schedule meeting</button>
-    <button data-action="new-channel">${icons.bell}Send announcement</button><button data-executive-page="executive-reports">${icons.reports}Generate report</button>
+    <button data-action="new-channel">${icons.bell}Send announcement</button>
     <button data-executive-page="notifications">${icons.bell}Urgent notifications</button><button data-action="assign-task">${icons.users}Assign task</button>
     <button data-executive-page="executive-meetings">${icons.clock}Organization calendar</button></div>`:""}</div>`;
 }
@@ -1375,7 +1375,7 @@ function executiveApprovalsView() {
     const list=items.filter(x=>x.activityType===type).slice().sort(byNewest);
     return{label,type,count:list.length,freshness:newestAt(list),empty:`No ${label.toLowerCase()} are waiting.`,body:list.length?list.map(row).join(""):null,subtitle:`${list.length} item${list.length===1?"":"s"} awaiting executive decision`};
   }).sort((a,b)=>(b.count>0)-(a.count>0)||b.freshness-a.freshness||groups.findIndex(g=>g[1]===a.type)-groups.findIndex(g=>g[1]===b.type));
-  return `<div class="exec-approval-summary">${executiveModuleMetric("Waiting now",waitingCount,"red")}${executiveModuleMetric("High-value requests",items.filter(x=>x.amount>=10000000).length,"orange")}${executiveModuleMetric("Document publications",pendingDocuments.length,"violet")}${executiveModuleMetric("Decision trail","Fully audited","green")}</div><div class="exec-approval-page">${sections.map(s=>`<section class="exec-panel"><div class="exec-panel-head"><div><h3>${s.label}</h3><p>${s.subtitle}</p></div></div>${s.body||`<div class="exec-empty">${s.empty}</div>`}</section>`).join("")}</div>${executiveApprovalHistory(history)}`;
+  return `<div class="exec-approval-summary">${executiveModuleMetric("Waiting now",waitingCount,"red")}${executiveModuleMetric("High-value requests",items.filter(x=>x.amount>=10000000).length,"orange")}${executiveModuleMetric("Document publications",pendingDocuments.length,"violet")}${executiveModuleMetric("Decision trail","Fully audited","green")}</div><div class="exec-approval-page">${sections.map(s=>`<section class="exec-panel"><div class="exec-panel-head"><div><h3>${s.label}</h3><p>${s.subtitle}</p></div></div>${s.body||`<div class="exec-empty">${s.empty}</div>`}</section>`).join("")}</div>`;
 }function executiveApprovalHistory(history) {
   const approved=history.filter(x=>x.status==="approved").length,rejected=history.filter(x=>x.status==="rejected").length,returned=history.filter(x=>x.status==="information_requested").length;
   return `<section class="exec-panel exec-approval-history"><div class="exec-panel-head"><div><h3>Approval History</h3><p>Permanent record of Executive requests, loan authorizations and responsible officers</p></div><div class="exec-history-counts"><span>${approved} approved</span><span>${rejected} rejected</span><span>${returned} information requests</span></div></div><div class="table-scroll"><table><thead><tr><th>Reference</th><th>Request</th><th>Requested by</th><th>Requested on</th><th>Decision</th><th>Decision by</th><th>Decision date</th><th>Action</th></tr></thead><tbody>${history.length?history.map(item=>`<tr><td><strong>${escapeHtml(item.reference)}</strong><small>${escapeHtml(item.department)}</small></td><td><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(String(item.activityType||"").replaceAll("-"," "))}${item.amount?` - ${money(item.amount)}`:""}</small></td><td>${escapeHtml(item.createdBy||"—")}</td><td>${item.createdAt?new Date(item.createdAt).toLocaleString():"—"}</td><td><span class="status ${item.status}">${escapeHtml(String(item.status||"").replaceAll("_"," "))}</span></td><td>${escapeHtml(item.decisionBy||(item.recordType==="loan"?"See loan process":"Recorded in audit log"))}</td><td>${item.decisionAt?new Date(item.decisionAt).toLocaleString():"—"}</td><td><button class="mini-btn" data-${item.recordType==="loan"?"loan-detail-id":"exec-details"}="${item.loanId||item.id}" title="View full process">${icons.eye}</button></td></tr>`).join(""):`<tr><td colspan="8">No Executive decisions have been recorded yet.</td></tr>`}</tbody></table></div></section>`;
@@ -1584,6 +1584,10 @@ function savingsRequestAmount(row){
   }
   if(split.welfare>0&&stored>0&&stored<received-0.5){
     return `${money(stored)}<small class="table-sub">Savings · received ${money(received)} · welfare ${money(split.welfare)}</small>`;
+  }
+  if(row.type==="Savings deposit"&&/welfare already taken this month/i.test(String(row.notes||""))){
+    const month=row.createdAt?new Date(row.createdAt).toLocaleDateString("en-GB",{month:"long",timeZone:"Africa/Kampala"}):"this month";
+    return `${money(row.amount)}<small class="table-sub">All savings · ${escapeHtml(month)} welfare was already taken</small>`;
   }
   return money(row.amount);
 }
@@ -2741,10 +2745,8 @@ function creditsQuickPanel() {
 }
 function creditsMembersView() {
   const c=state.credits,p=c.contributionPolicy;
-  const rows=c.members.map(m=>{const variance=Number(m.savingsVariance||0),expected=Number(m.expectedSavingsToDate||0),rate=expected?Math.min(100,Math.round(Number(m.currentYearSavings||0)/expected*100)):0;return [`${m.name}<small class="table-sub">${m.memberNumber}</small>`,m.closingSavings==null?"Not imported":money(m.closingSavings),money(m.totalMemberFunds),`${money(m.currentYearSavings)}<small class="table-sub">${rate}% of amount due</small>`,money(expected),`<span class="${variance<0?"negative":"positive"}">${variance<0?`Short ${money(Math.abs(variance))}`:`Ahead ${money(variance)}`}</span>`,`${money(m.currentYearShares)}<small class="table-sub">of ${money(p?.annualShareTarget||0)}</small>`,`${money(m.currentYearSubscription)}<small class="table-sub">of ${money(p?.annualSubscriptionFee||0)}</small>`,status(m.status),`<button class="mini-btn" data-credits-member="${m.id}">${icons.eye}</button>`];});
   return `<div class="exec-module-metrics">${executiveModuleMetric("SACCO accounts",c.stats.totalMembers,"blue")}${executiveModuleMetric("Savings + capital",money(c.contributionProgress?.totalMemberFunds||0),"green")}${executiveModuleMetric("Savings for completed months",money(c.contributionProgress?.expectedSavingsToDate||0),"violet")}${executiveModuleMetric("Verified this year",money(c.contributionProgress?.verifiedSavings||0),"orange")}</div>
-    <div class="credits-policy-explainer"><strong>${p?.fiscalYear||"Current year"} rules</strong><span>Monthly savings ${money(p?.monthlySavingsTarget||0)}</span><span>Welfare UGX 25,000 once a month from the first deposit</span><span>Annual shares ${money(p?.annualShareTarget||0)}</span><span>Annual subscription ${money(p?.annualSubscriptionFee||0)}</span><small>A 425,000 payment sends 25,000 to welfare and 400,000 to savings the first time that month. Later deposits in the same month stay fully on savings and on the Centenary account.</small></div>
-    ${financeDataTable("Member savings and annual obligations",["Member","Savings at 30 Jun 2026","Current savings + capital","Savings paid this FY","Expected by today","Short / ahead","Shares this FY","Subscription this FY","Status","Profile"],rows)}`;
+    <div class="credits-policy-explainer"><strong>${p?.fiscalYear||"Current year"} rules</strong><span>Monthly savings ${money(p?.monthlySavingsTarget||0)}</span><span>Welfare UGX 25,000 once a month from the first deposit</span><span>Annual shares ${money(p?.annualShareTarget||0)}</span><span>Annual subscription ${money(p?.annualSubscriptionFee||0)}</span><small>A 425,000 payment sends 25,000 to welfare and 400,000 to savings the first time that month. Later deposits in the same month stay fully on savings and on the Centenary account.</small></div>`;
 }function creditsSavingsView() {
   const c=state.credits,rows=c.transactions.filter(t=>["Savings deposit","Withdrawal","Share purchase","Annual subscription fee"].includes(t.type));
   const pendingReview=rows.filter(t=>t.type==="Savings deposit"&&["pending","pending_finance_review"].includes(t.status));
@@ -4433,15 +4435,16 @@ function confirmDialog(message) {
 }
 function openModal(type) {
   const map = {
-    user: ["Create user account","Assign a secure role and temporary password", userForm()],
-    member: ["Register new member","Create a verified organization membership record", memberForm()],
-    deposit: ["Record savings deposit","The transaction will be recorded in the audit log", depositForm("Savings deposit")],
-    repayment: ["Record loan repayment","Post a payment against a member loan", depositForm("Loan repayment")],
-    loan: ["New loan application","Savings and existing obligations will be checked", loanForm()],
-    withdrawal: ["Request withdrawal","A separate authorised person must approve this request", withdrawalForm()],
-    "department-activity": ["Create department activity",`Record work in ${state.departmentData?.department?.name||"this department"}`, departmentActivityForm()]
+    user: ["Create user account","Assign a secure role and temporary password", userForm],
+    member: ["Register new member","Create a verified organization membership record", memberForm],
+    deposit: ["Record savings deposit","The transaction will be recorded in the audit log", ()=>depositForm("Savings deposit")],
+    repayment: ["Record loan repayment","Post a payment against a member loan", ()=>depositForm("Loan repayment")],
+    loan: ["New loan application","Savings and existing obligations will be checked", loanForm],
+    withdrawal: ["Request withdrawal","A separate authorised person must approve this request", withdrawalForm],
+    "department-activity": ["Create department activity",`Record work in ${state.departmentData?.department?.name||"this department"}`, departmentActivityForm]
   };
-  const [title, sub, form] = map[type] || map.deposit;
+  const [title, sub, buildForm] = map[type] || map.deposit;
+  const form = buildForm();
   document.body.insertAdjacentHTML("beforeend", `<div class="modal-backdrop" id="modal-backdrop"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" tabindex="-1"><div class="modal-head"><div><h2 id="modal-title">${title}</h2><p>${sub}</p></div><button class="modal-close" data-close aria-label="Close dialog">${icons.x}</button></div>${form}</div></div>`);
   document.querySelector("[data-close]").onclick=closeModal;
   document.getElementById("modal-backdrop").addEventListener("click", e=>{ if(e.target.id==="modal-backdrop") closeModal(); });

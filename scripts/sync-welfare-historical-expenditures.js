@@ -123,8 +123,7 @@ async function ensureJoshuaHistoryOnly(client) {
   if (existing) {
     if (!dryRun) {
       await client.query(
-        `UPDATE members SET status='exited', deleted_at=COALESCE(deleted_at, NOW()),
-           provisional=true
+        `UPDATE members SET status='exited', deleted_at=NULL, provisional=true
          WHERE id=$1`,
         [existing.id]
       );
@@ -145,8 +144,8 @@ async function ensureJoshuaHistoryOnly(client) {
       `INSERT INTO members
         (member_number, full_name, phone, national_id, savings_balance, share_capital, dividends, fines,
          status, joined_at, provisional, branch_id, deleted_at)
-       VALUES ('G40-HIST-JOSHUA','Joshua Ssewanyana','0700000000','HIST-JOSHUA-EXITED',0,0,0,0,
-         'exited','2024-06-01',true,$1,NOW())
+       VALUES ('G40-HIST-JOSHUA','Ssewanyana Joshua Timothy','0700000000','HIST-JOSHUA-EXITED',0,0,0,0,
+         'exited','2024-06-01',true,$1,NULL)
        RETURNING id, full_name, member_number, status`,
       [branchId]
     )

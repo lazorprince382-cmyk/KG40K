@@ -149,11 +149,8 @@ async function main() {
       );
 
       if (vicent) {
-        await client.query(`UPDATE members SET savings_balance=$1, joined_at=$2::date WHERE id=$3`, [
-          VICENT_SAVINGS,
-          VICENT_SINCE,
-          member.id,
-        ]);
+        // Savings are never reset here: deposits recorded after the September opening figure must survive updates.
+        await client.query(`UPDATE members SET joined_at=$1::date WHERE id=$2`, [VICENT_SINCE, member.id]);
       }
     }
 

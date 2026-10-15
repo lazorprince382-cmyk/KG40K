@@ -410,6 +410,43 @@ async function createVicentAccount20261012(client){
   await client.query(`INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value,updated_at=NOW()`,[key,summary]);
   return summary;
 }
+async function exitedMembersAndPinnedSavings20261015(client){
+  const key="fixExitedMembersPinnedSavings20261015";
+  if((await client.query("SELECT 1 FROM settings WHERE key=$1",[key])).rows[0])return null;
+  const notes=[];
+  const restored=await client.query(`UPDATE members SET deleted_at=NULL,status='exited',full_name='Ssewanyana Joshua Timothy'
+    WHERE member_number='G40-HIST-JOSHUA' RETURNING id`);
+  if(restored.rowCount)notes.push("Joshua restored to exited list");
+  for(const [number,name,nationalId] of [["G40-HIST-BRENDAH","Kabarwant Brendah","HIST-BRENDAH"],["G40-HIST-PATRICK","Birungi Patrick Nzabara","HIST-PATRICK"]]){
+    const existing=(await client.query("SELECT id FROM members WHERE member_number=$1 OR full_name ILIKE $2 LIMIT 1",[number,name])).rows[0];
+    if(existing){
+      await client.query("UPDATE members SET status='exited',deleted_at=NULL WHERE id=$1",[existing.id]);
+    }else{
+      await client.query(`INSERT INTO members (member_number,full_name,email,phone,national_id,occupation,employer,address,next_of_kin,savings_balance,share_capital,status,joined_at)
+        VALUES ($1,$2,NULL,'',$3,'Former member','—','—','—',0,0,'exited','2023-07-01')`,[number,name,nationalId]);
+    }
+    notes.push(`${name} exited`);
+  }
+  for(const pin of [{name:"Vicent Gumisiriza",amount:550000,since:"2026-09-09"},{name:"%Dan%Rwebingira%",amount:8900000,since:"2026-09-13"}]){
+    const member=(await client.query(`SELECT id,full_name,savings_balance::float AS savings FROM members
+      WHERE full_name ILIKE $1 AND deleted_at IS NULL AND status='active' ORDER BY id LIMIT 1 FOR UPDATE`,[pin.name])).rows[0];
+    if(!member||Math.abs(Number(member.savings)-pin.amount)>0.5)continue;
+    const moved=(await client.query(`SELECT
+        COALESCE((SELECT SUM(amount) FROM transactions WHERE member_id=$1 AND type='Savings deposit' AND status='completed'
+          AND COALESCE(verified_at,created_at)>=$2::date),0)::float AS deposits,
+        COALESCE((SELECT SUM(amount) FROM welfare_contributions WHERE member_id=$1 AND payment_method='Savings surplus'
+          AND status IN ('verified','completed','recorded') AND contribution_date>=$2::date),0)::float AS welfare,
+        COALESCE((SELECT SUM(amount) FROM withdrawals WHERE member_id=$1 AND status='processed' AND processed_at>=$2::date),0)::float AS withdrawals`,
+      [member.id,pin.since])).rows[0];
+    const change=Number(moved.deposits)-Number(moved.welfare)-Number(moved.withdrawals);
+    if(change<=0.5)continue;
+    await client.query("UPDATE members SET savings_balance=savings_balance+$1 WHERE id=$2",[change,member.id]);
+    notes.push(`${member.full_name} savings ${pin.amount} + ${change} restored`);
+  }
+  const summary=notes.join("; ")||"nothing to change";
+  await client.query(`INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value,updated_at=NOW()`,[key,summary]);
+  return summary;
+}
 async function backfillRepaymentsToCentenary(client){
   const pending=(await client.query(`SELECT t.id FROM transactions t LEFT JOIN loans l ON l.id=t.loan_id
     WHERE t.type='Loan repayment' AND t.status='completed' AND t.finance_entry_id IS NULL
@@ -4569,6 +4606,7 @@ app.delete("/api/users/:id",auth,permit("user:manage"),asyncRoute(async(req,res)
     await client.query(`UPDATE users SET active=false,locked_until=NOW()+INTERVAL '100 years',
       email='deleted.'||id||'.'||floor(extract(epoch from now()))::text||'@removed.local',
       token_version=token_version+1 WHERE id=$1`,[userId]);
+    if(target.member_id)await client.query(`UPDATE members SET status='exited',deleted_at=NULL WHERE id=$1 AND status<>'exited'`,[target.member_id]);
   });
   await audit({userId:req.user.id,action:"USER_DELETED",entityType:"user",entityId:String(userId),
     details:`${target.full_name} - ${target.email} - ${target.role}; reason=${reason}`,...metadata(req)});
@@ -6400,6 +6438,10 @@ async function runScheduledMaintenance() {
     const vicent=await transaction(client=>createVicentAccount20261012(client));
     if(vicent)console.log(`Vicent account: ${vicent}`);
   }catch(error){console.error("Vicent account creation failed:",error.message);}
+  try{
+    const exited=await transaction(client=>exitedMembersAndPinnedSavings20261015(client));
+    if(exited)console.log(`Exited members / savings repair: ${exited}`);
+  }catch(error){console.error("Exited members / savings repair failed:",error.message);}
   const graceDays=0;
   await transaction(async client=>{
     // No grace window: unpaid installments become overdue the day after the due date.
