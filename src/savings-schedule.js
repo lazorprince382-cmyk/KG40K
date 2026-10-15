@@ -1,15 +1,15 @@
 "use strict";
 /**
  * Monthly savings schedule shared by the member dashboard and the monthly welfare charge.
- * Everyone was expected to hold the benchmark (UGX 9,100,000) at the end of August 2026;
- * every month after that adds the combined monthly contribution (UGX 425,000, of which
- * UGX 25,000 goes to welfare). Members who joined during the current financial year owe
+ * Every member is expected to hold the benchmark (UGX 9,925,000 in savings) at the end of
+ * October 2026; every month after that adds the combined monthly contribution (UGX 425,000,
+ * of which UGX 25,000 goes to welfare). Only members who join after the benchmark month owe
  * the combined amount from their join month instead.
  */
 const { query } = require("./db");
 
-const DEFAULT_BENCHMARK_AMOUNT = 9100000;
-const DEFAULT_BENCHMARK_DATE = "2026-08-31";
+const DEFAULT_BENCHMARK_AMOUNT = 9925000;
+const DEFAULT_BENCHMARK_DATE = "2026-10-31";
 
 const monthIndex = (value) => {
   const [year, month] = String(value).split("-").map(Number);
@@ -49,7 +49,7 @@ async function loadScheduleSettings(runner = { query }) {
 
 /** Savings a member should hold by the end of `month` (savings + welfare taken since the benchmark). */
 function expectedAtEndOf(settings, joinMonth, month) {
-  const joinedThisYear = joinMonth !== null && joinMonth >= settings.yearStartMonth;
+  const joinedThisYear = joinMonth !== null && joinMonth > settings.benchmarkMonth;
   const expected = joinedThisYear
     ? settings.monthlyTarget * Math.max(0, month - joinMonth + 1)
     : settings.benchmarkAmount + settings.monthlyTarget * (month - settings.benchmarkMonth);
@@ -64,7 +64,7 @@ const WELFARE_SINCE_BENCHMARK_SQL = `COALESCE((SELECT SUM(c.amount) FROM welfare
 
 function buildSchedule(settings, { savings, welfareSinceBenchmark, joinMonth }) {
   const { currentMonth, yearStartMonth, yearEndMonth, benchmarkMonth, monthlyTarget, benchmarkAmount } = settings;
-  const joinedThisYear = joinMonth !== null && joinMonth >= yearStartMonth;
+  const joinedThisYear = joinMonth !== null && joinMonth > benchmarkMonth;
   const contributed = Number(savings || 0) + Number(welfareSinceBenchmark || 0);
   const requiredByMonthEnd = expectedAtEndOf(settings, joinMonth, currentMonth);
   const variance = contributed - requiredByMonthEnd;

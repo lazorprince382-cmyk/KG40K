@@ -1,7 +1,7 @@
 /* Self-only member workspace and shared personal account settings. */
 (() => {
-  const pages=["member-dashboard","messages","member-profile","member-savings","member-requests","member-loans","member-guarantorship",
-    "member-welfare","member-documents","member-meetings","member-notifications","member-support"];
+  const pages=["member-dashboard","member-savings","member-loans","member-guarantorship","member-welfare","member-requests",
+    "member-meetings","member-documents","member-profile","member-notifications","messages","member-support"];
   const labels={"member-dashboard":"Dashboard",messages:"Messages","member-profile":"My Profile","member-savings":"My Savings",
     "member-requests":"My Requests","member-loans":"My Loans","member-guarantorship":"Guarantorship",
     "member-welfare":"Welfare","member-documents":"Documents","member-meetings":"Meetings",

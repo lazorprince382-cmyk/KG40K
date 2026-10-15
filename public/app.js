@@ -1,6 +1,6 @@
 /* Ordered application loader. */
 [
-  "app-core.js?v=233",
+  "app-core.js?v=234",
   "department-theme.js?v=64",
   "department-core.js?v=93",
   "audit-dashboard.js?v=82",
@@ -11,10 +11,10 @@
   "legal-family-ui.js?v=2",
   "legal-member-exit-ui.js?v=2",
   "legal-registration-module.js?v=64",
-  "supervisory-module.js?v=81",
+  "supervisory-module.js?v=82",
   "department-events.js?v=63",
   "official-policy-ui.js?v=11",
-  "member-portal.js?v=134",
+  "member-portal.js?v=135",
   "loan-calculator.js?v=7",
   "department-bootstrap.js?v=64"
 ].forEach((source) => document.write(`<script src="${source}"><\/script>`));

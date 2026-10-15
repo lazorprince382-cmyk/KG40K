@@ -1,8 +1,28 @@
 /* Supervisory Department: governance, accountability and strategic performance. */
-.supervisory-sidebar{background:radial-gradient(circle at 108% -5%,rgba(121,197,49,.2),transparent 32%),linear-gradient(180deg,#0b3b70 0%,#0b3b70 54%,#0b3b70 100%)!important}
-.supervisory-sidebar .nav-item.active{background:linear-gradient(100deg,#f36a18,#ff832f)!important;box-shadow:0 8px 22px rgba(243,106,24,.3)!important}
-.supervisory-crest{background:linear-gradient(135deg,#f59e0b,#f97316)!important;color:#fff!important}
+aside.sidebar.supervisory-sidebar{background:linear-gradient(180deg,#0a1f3d 0%,#0b2545 60%,#0a1f3d 100%)!important}
+aside.sidebar.supervisory-sidebar .nav .nav-item.active{background:#1e3a66!important;color:#fff!important;box-shadow:inset 3px 0 0 #93c5fd,0 6px 16px rgba(5,15,35,.35)!important}
+.supervisory-crest{background:linear-gradient(135deg,#1e3a66,#0b2545)!important;color:#fff!important}
 .supervisory-command{display:grid;gap:18px}
+.sup-guide{padding:16px 20px;border-radius:14px;background:#0b2545;color:#dbe7f5}
+.sup-guide h3{margin:0 0 8px;font-size:16px;color:#fff}
+.sup-guide ol{margin:0;padding-left:20px;display:grid;gap:6px;font-size:14px;line-height:1.45}
+.sup-guide b{color:#fff}
+.sup-cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.sup-card{display:flex;flex-direction:column;gap:4px;padding:14px 16px;border:1px solid #dbe4ef;border-left:4px solid #0b2545;border-radius:12px;background:#fff;text-align:left;cursor:pointer}
+.sup-card:hover{border-color:#9fb4cf}
+.sup-card small{font-size:13px;font-weight:700;color:#4b5d73}
+.sup-card strong{font-size:20px;color:#0b2545}
+.sup-card em{font-size:12.5px;font-style:normal;color:#6b7b8e}
+.sup-card.good{border-left-color:#15803d}.sup-card.warn{border-left-color:#c2410c}
+.sup-two-col{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:start}
+.sup-two-col>.dept-panel{margin:0}
+.sup-open-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}
+.sup-open-grid button{padding:12px 8px;border:0;border-radius:10px;background:#eef3f9;text-align:center;cursor:pointer}
+.sup-open-grid strong{display:block;font-size:22px;color:#0b2545}.sup-open-grid span{font-size:12.5px;color:#4b5d73}
+.sup-money-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.sup-money-grid div{padding:14px;border-radius:10px;background:#f3f6fa}
+.sup-money-grid span{display:block;font-size:13px;color:#4b5d73}.sup-money-grid strong{display:block;margin-top:4px;font-size:18px;color:#0b2545}
+@media(max-width:1050px){.sup-cards,.sup-money-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.sup-two-col{grid-template-columns:1fr}}
 .sup-authority{display:flex;align-items:center;gap:14px;padding:14px 18px;border:1px solid #d8e4f3;border-left:5px solid #f59e0b;border-radius:14px;background:linear-gradient(90deg,#fff8e8,#f5f9ff)}
 .sup-authority>svg{width:28px;height:28px;color:#d97706}
 .sup-authority div{display:flex;flex-direction:column;gap:3px;flex:1}

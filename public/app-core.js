@@ -822,10 +822,10 @@ function investmentSidebar() {
     "investment-analytics":"reports","investment-documents":"file","investment-notifications":"bell"};
   const pending=state.investment?.stats?.pendingProposals||0;
   const pages=rolePages[executiveWorkspaceRole()]||rolePages[state.role];
-  const sidebarPages=new Set(["dashboard","messages","investment-projects","investment-revenue","investment-expenses","investment-documents","settings"]);
+  const sidebarPages=new Set(["dashboard","investment-projects","investment-revenue","investment-expenses","investment-documents","messages","settings"]);
   return `<aside class="sidebar executive-sidebar investment-sidebar" id="sidebar">
     <div class="executive-brand"><div class="executive-crest investment-crest">${icons.reports}</div><div><strong>KASANGATI G40<br>KWAGALANA</strong><span>INVESTMENT DEPARTMENT</span></div></div>
-    <nav class="nav executive-nav">${pages.filter(page=>sidebarPages.has(page)).map(page=>`<button class="nav-item ${state.page===page?"active":""}" data-page="${page}">${icons[iconMap[page]||page]||icons.dashboard}<span>${labels[page]}</span>${navAlertDot(page==="investment-proposals"&&pending||page==="messages"&&state.unreadMessages)}</button>`).join("")}</nav>
+    <nav class="nav executive-nav">${[...sidebarPages].filter(page=>pages.includes(page)).map(page=>`<button class="nav-item ${state.page===page?"active":""}" data-page="${page}">${icons[iconMap[page]||page]||icons.dashboard}<span>${labels[page]}</span>${navAlertDot(page==="investment-proposals"&&pending||page==="messages"&&state.unreadMessages)}</button>`).join("")}</nav>
     <div class="sidebar-bottom">${state.executiveWorkspace?`<button class="executive-quick" data-executive-workspace-exit>${icons.arrowUp}<span>Back to Executive</span></button>`:`<button class="executive-quick" data-action="investment-quick">${icons.arrowUp}<span>Quick Actions</span><b>&gt;</b></button>`}
       <div class="sidebar-user"><div class="avatar blue">${initials(actor())}</div><div><div class="user-name">${actor()}</div><div class="user-role">${state.executiveWorkspace?"Executive read-only view":"Investment Department"}</div></div></div></div>
   </aside>`;
@@ -847,13 +847,13 @@ function creditsSidebar() {
   const disburseBadge=canCreditsDisburse()?(c?.stats?.awaitingDisbursement||0):0;
   const approvalBadge=(c?.loans||[]).filter(l=>["committee-review","officer-review"].includes(l.status)).length;
   const pages=rolePages[executiveWorkspaceRole()]||rolePages[state.role];
-  const sidebarPages=new Set(["dashboard","messages","credits-members","credits-savings","credits-applications","credits-approvals","credits-active","credits-disbursement","credits-receipts","credits-repayments","credits-guarantors","credits-recovery","credits-documents","credits-notifications","settings"]);
+  const sidebarPages=new Set(["dashboard","credits-members","credits-savings","credits-applications","credits-approvals","credits-disbursement","credits-active","credits-repayments","credits-receipts","credits-guarantors","credits-recovery","credits-documents","credits-notifications","messages","settings"]);
   if(isExecutiveReadOnly()) sidebarPages.delete("credits-disbursement");
   if(!canCreditsDisburse()) sidebarPages.delete("credits-disbursement");
   const alertFor=page=>page==="credits-applications"&&applicationBadge||page==="credits-approvals"&&approvalBadge||page==="credits-active"&&activeBadge||page==="credits-disbursement"&&disburseBadge||page==="credits-repayments"&&repaymentBadge||page==="credits-guarantors"&&guarantorBadge||page==="credits-recovery"&&(recoveryBadge||dangerBadge)||page==="messages"&&state.unreadMessages;
   return `<aside class="sidebar executive-sidebar credits-sidebar" id="sidebar">
     <div class="executive-brand"><div class="executive-crest credits-crest">${icons.loans}</div><div><strong>KASANGATI G40<br>KWAGALANA</strong><span>SACCO - CREDITS DEPARTMENT</span></div></div>
-    <nav class="nav executive-nav">${pages.filter(page=>sidebarPages.has(page)).map(page=>`<button class="nav-item ${state.page===page?"active":""}" data-page="${page}">${icons[iconMap[page]||page]||icons.dashboard}<span>${labels[page]}</span>${navAlertDot(alertFor(page))}</button>`).join("")}</nav>
+    <nav class="nav executive-nav">${[...sidebarPages].filter(page=>pages.includes(page)).map(page=>`<button class="nav-item ${state.page===page?"active":""}" data-page="${page}">${icons[iconMap[page]||page]||icons.dashboard}<span>${labels[page]}</span>${navAlertDot(alertFor(page))}</button>`).join("")}</nav>
     <div class="sidebar-bottom">${state.executiveWorkspace?`<button class="executive-quick" data-executive-workspace-exit>${icons.arrowUp}<span>Back to Executive</span></button>`:`<button class="executive-quick" data-action="credits-quick">${icons.arrowUp}<span>Quick Actions</span><b>&gt;</b></button>`}
       <div class="sidebar-user"><div class="avatar blue">${initials(actor())}</div><div><div class="user-name">${actor()}</div><div class="user-role">${state.executiveWorkspace?"Executive read-only view":"Credits Department"}</div></div></div></div>
   </aside>`;
@@ -870,11 +870,11 @@ function financeSidebar() {
   const entryPending=(state.finance?.pendingEntries||state.finance?.entries||[]).filter(x=>x.status==="pending_finance_review").length+(state.finance?.pendingSavings||[]).length;
   const investmentPending=(state.finance?.investmentAnalyses||[]).length;
   const pages=rolePages[executiveWorkspaceRole()]||rolePages[state.role];
-  const sidebarPages=new Set(["dashboard","messages","finance-income","finance-expenses","finance-budgets","finance-bank","finance-unit-trust","finance-approvals","finance-documents","settings"]);
+  const sidebarPages=new Set(["dashboard","finance-approvals","finance-income","finance-expenses","finance-bank","finance-unit-trust","finance-budgets","finance-documents","messages","settings"]);
   const alertFor=page=>page==="finance-approvals"&&(pending||entryPending||investmentPending)||page==="messages"&&state.unreadMessages;
   return `<aside class="sidebar executive-sidebar finance-sidebar" id="sidebar">
     <div class="executive-brand"><div class="executive-crest finance-crest">${icons.wallet}</div><div><strong>KASANGATI G40<br>KWAGALANA</strong><span>Finance</span></div></div>
-    <nav class="nav executive-nav">${pages.filter(page=>sidebarPages.has(page)).map(page=>`<button class="nav-item ${state.page===page?"active":""}" data-page="${page}">${icons[iconsByPage[page]||page]||icons.dashboard}<span>${labels[page]}</span>${navAlertDot(alertFor(page))}</button>`).join("")}</nav>
+    <nav class="nav executive-nav">${[...sidebarPages].filter(page=>pages.includes(page)).map(page=>`<button class="nav-item ${state.page===page?"active":""}" data-page="${page}">${icons[iconsByPage[page]||page]||icons.dashboard}<span>${labels[page]}</span>${navAlertDot(alertFor(page))}</button>`).join("")}</nav>
     <div class="sidebar-bottom">${state.executiveWorkspace?`<button class="executive-quick" data-executive-workspace-exit>${icons.arrowUp}<span>Back to Executive</span></button>`:`<button class="executive-quick" data-action="finance-quick">${icons.arrowUp}<span>Quick Actions</span><b>&gt;</b></button>`}
       <div class="sidebar-user"><div class="avatar blue">${initials(actor())}</div><div><div class="user-name">${actor()}</div><div class="user-role">${state.executiveWorkspace?"Executive read-only view":"Finance"}</div></div></div></div>
   </aside>`;
@@ -889,11 +889,11 @@ function executiveSidebar() {
     "executive-meetings":"clock","executive-projects":"building","executive-reports":"reports",
     notifications:"bell","executive-documents":"file",users:"lock"};
   const pending=state.executive?.stats?.pendingApprovals||((state.executive?.approvals||[]).length+((state.executive?.documents||[]).filter(d=>d.status==="pending_executive").length));
-  const sidebarPages=new Set(["dashboard","messages","members","departments","users","executive-approvals","executive-meetings","notifications","executive-documents","settings"]);
+  const sidebarPages=new Set(["dashboard","executive-approvals","members","departments","executive-meetings","executive-documents","users","notifications","messages","settings"]);
   const alertFor=page=>page==="executive-approvals"&&pending||page==="messages"&&state.unreadMessages||page==="notifications"&&(state.notifications||[]).some(n=>!n.readAt);
   return `<aside class="sidebar executive-sidebar" id="sidebar">
     <div class="executive-brand"><div class="executive-crest">${icons.shield}</div><div><strong>KASANGATI G40<br>KWAGALANA</strong><span>Executive Department</span></div></div>
-    <nav class="nav executive-nav">${rolePages[state.role].filter(page=>sidebarPages.has(page)).map(page=>`<button class="nav-item ${state.page===page?"active":""}" data-page="${page}">${icons[iconMap[page]||page]||icons.dashboard}<span>${labels[page]}</span>${navAlertDot(alertFor(page))}</button>`).join("")}</nav>
+    <nav class="nav executive-nav">${[...sidebarPages].filter(page=>rolePages[state.role].includes(page)).map(page=>`<button class="nav-item ${state.page===page?"active":""}" data-page="${page}">${icons[iconMap[page]||page]||icons.dashboard}<span>${labels[page]}</span>${navAlertDot(alertFor(page))}</button>`).join("")}</nav>
     <div class="sidebar-bottom"><button class="executive-quick" data-action="executive-quick">${icons.arrowUp}<span>Quick Actions</span><b>&gt;</b></button>
       <div class="sidebar-user"><div class="avatar blue">${initials(actor())}</div><div><div class="user-name">${actor()}</div><div class="user-role">Executive Department</div></div></div></div>
   </aside>`;
@@ -2624,8 +2624,33 @@ async function advanceInvestmentProposal(id) {
   try{const result=await api(`/api/investment/proposals/${id}/advance`,{method:"POST",body:"{}"});state.investment=await api("/api/investment/command-center");render();toast(result.status==="executive_approval"?"Proposal sent to Executive Approvals.":`Proposal advanced to ${result.status.replaceAll("_"," ")}.`);}catch(error){toast(error.message);}
 }
 async function decideMemberInvestment(id,decision){let comment="";if(decision!=="approve"){comment=await promptDialog(decision==="reject"?"Reason for rejecting this investment request:":"What more information should the member provide?","");if(comment===null)return;}if(!await confirmDialog(`${decision.replaceAll("_"," ")} this member investment request?`))return;try{const result=await api(`/api/investment/member-applications/${id}/decision`,{method:"POST",body:JSON.stringify({decision,comment})});state.investment=await api("/api/investment/command-center");render();toast(`Member investment moved to ${result.status.replaceAll("_"," ")}.`);}catch(error){toast(error.message);}}
-function investmentProjectDetails(id) {
+async function investmentProjectDetails(id) {
   const i=state.investment,p=i.projects.find(x=>String(x.id)===String(id));if(!p)return;
+  let summary=null;
+  try{summary=await api(`/api/investment/projects/${p.id}/summary`);}catch(error){toast(error.message);}
+  if(summary){
+    const tile=(label,value,tone="")=>`<div class="project-summary-tile ${tone}"><span>${label}</span><strong>${value}</strong></div>`;
+    const unit=summary.kind==="unit-trust";
+    const tiles=unit
+      ?[tile("Current UAP balance",money(summary.balance),"blue"),tile("Total interest earned",money(summary.totalInterest),"green"),
+        tile(`Last interest${summary.lastInterestMonth?` (${uapMonthName(summary.lastInterestMonth)})`:""}`,money(summary.lastInterestAmount),"green"),
+        tile("Money put in",money(summary.deposits)),tile("Money taken out",money(summary.withdrawals),"orange")]
+      :[tile("Budget",money(p.budget),"blue"),tile("Capital invested",money(p.capitalInvested)),tile("Current value",money(p.currentValue),"blue"),
+        tile("Revenue",money(p.revenue),"green"),tile("Expenses",money(p.expenses),"orange"),tile("Net profit",money(p.profit),p.profit>=0?"green":"orange")];
+    const head=unit?["Month","Put in","Interest","Taken out","Closing balance"]:["Month","Revenue","Expenses","Net"];
+    const rows=(summary.months||[]).map(m=>unit
+      ?[uapMonthName(m.month),money(m.deposits),money(m.interest),money(m.withdrawals),money(m.closing)]
+      :[uapMonthName(m.month),money(m.revenue),money(m.expenses),money(m.revenue-m.expenses)]);
+    document.body.insertAdjacentHTML("beforeend",`<div class="modal-backdrop" id="modal-backdrop"><div class="modal project-summary-modal"><div class="modal-head"><div><h2>${escapeHtml(p.name)}</h2><p>${escapeHtml(p.reference)} · ${escapeHtml(p.category||"Investment")} · Managed by ${escapeHtml(p.manager||"—")}</p></div><button class="modal-close" data-close>${icons.x}</button></div>
+      <div class="form"><div class="project-summary-grid">${tiles.join("")}</div>
+      <h3 class="project-summary-title">Last ${rows.length||""} months</h3>
+      ${rows.length?`<div class="table-scroll"><table><thead><tr>${head.map(h=>`<th>${h}</th>`).join("")}</tr></thead><tbody>${rows.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`:`<p class="cell-sub">No movement recorded yet.</p>`}
+      ${p.supportingDocument?`<a class="button secondary small" href="${p.supportingDocument}" target="_blank">${icons.eye} Supporting file</a>`:""}
+      <div class="form-actions"><button class="button primary" data-close-2>Done</button></div></div></div></div>`);
+    document.querySelector("[data-close]").onclick=closeModal;document.querySelector("[data-close-2]").onclick=closeModal;
+    document.getElementById("modal-backdrop").addEventListener("click",e=>{if(e.target.id==="modal-backdrop")closeModal();});
+    return;
+  }
   detailModal("Investment project",`${p.reference} - ${p.category}`,[["Project",p.name],["Photo",p.photoUrl?`<img class="record-photo-preview" src="${p.photoUrl}" alt="${escapeHtml(p.name)}">`:"No photo uploaded"],["Description",p.description],["Location",p.location||"?"],["Manager",p.manager||"?"],["Funding source",p.fundingSource||"?"],["Budget",money(p.budget)],["Capital invested",money(p.capitalInvested)],["Current value",money(p.currentValue)],["Revenue",money(p.revenue)],["Expenses",money(p.expenses)],["Net profit",money(p.profit)],["ROI",`${p.roi}%`],["Progress",`${p.progress}%`],["Performance",p.performanceStatus],["Supporting file",p.supportingDocument?`<a class="button secondary" href="${p.supportingDocument}" target="_blank">${icons.eye} View file</a>`:"No file uploaded"]]);
 }
 function investmentAssetDetails(id){const a=state.investment.assets.find(x=>String(x.id)===String(id));if(!a)return;detailModal("Investment asset",`${a.assetCode} - ${a.assetName}`,[["Photo",a.photoUrl?`<img class="record-photo-preview" src="${a.photoUrl}" alt="${escapeHtml(a.assetName)}">`:"No photo uploaded"],["Type",a.assetType],["Project",a.project||"Portfolio-wide"],["Acquisition value",money(a.acquisitionValue)],["Current value",money(a.currentValue)],["Location",a.location||"?"],["Status",a.status],["Supporting file",a.supportingDocument?`<a class="button secondary" href="${a.supportingDocument}" target="_blank">${icons.eye} View file</a>`:"No file uploaded"]]);}

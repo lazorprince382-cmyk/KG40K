@@ -3527,6 +3527,29 @@ app.get("/api/investment/command-center",auth,requireInvestment("view"),asyncRou
       canEdit:Boolean(req.investmentAccess.can_edit),canApprove:Boolean(req.investmentAccess.can_approve)}
   });
 }));
+app.get("/api/investment/projects/:id/summary",auth,requireInvestment("view"),asyncRoute(async(req,res)=>{
+  const project=await one(`SELECT id,reference,name,category,target_amount::float AS budget,raised_amount::float AS "capitalInvested",
+    current_value::float AS "currentValue" FROM investment_projects WHERE id=$1`,[req.params.id]);
+  if(!project)return res.status(404).json({error:"Project not found"});
+  const kampala=(await one(`SELECT (CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date::text AS day`))?.day;
+  if(isUnitTrustRecord(project)){
+    const account=await one(`SELECT balance::float AS balance FROM finance_accounts WHERE account_code='GL-4500' AND active=true`);
+    const totals=await unitTrustInterestTotals({query},kampala);
+    const flows=await one(`SELECT COALESCE(SUM(deposit_amount),0)::float AS deposits,COALESCE(SUM(withdrawal_amount),0)::float AS withdrawals
+      FROM unit_trust_movements WHERE movement_date<=$1::date AND description<>'Opening Balance'`,[kampala]);
+    const months=(await query(`SELECT to_char(date_trunc('month',movement_date),'YYYY-MM') AS month,
+        COALESCE(SUM(deposit_amount) FILTER (WHERE description<>'Opening Balance'),0)::float AS deposits,
+        COALESCE(SUM(interest_amount),0)::float AS interest,COALESCE(SUM(withdrawal_amount),0)::float AS withdrawals,
+        (ARRAY_AGG(balance_after ORDER BY movement_date DESC,id DESC))[1]::float AS closing
+      FROM unit_trust_movements WHERE movement_date<=$1::date GROUP BY 1 ORDER BY 1 DESC LIMIT 6`,[kampala])).rows;
+    return res.json({kind:"unit-trust",project,balance:Number(account?.balance||0),deposits:flows.deposits,withdrawals:flows.withdrawals,...totals,months});
+  }
+  const months=(await query(`SELECT to_char(date_trunc('month',transaction_date),'YYYY-MM') AS month,
+      COALESCE(SUM(amount) FILTER (WHERE transaction_type='revenue'),0)::float AS revenue,
+      COALESCE(SUM(amount) FILTER (WHERE transaction_type<>'revenue'),0)::float AS expenses
+    FROM investment_transactions WHERE project_id=$1 AND deleted_at IS NULL GROUP BY 1 ORDER BY 1 DESC LIMIT 6`,[project.id])).rows;
+  res.json({kind:"project",project,months});
+}));
 app.get("/api/investment/search",auth,requireInvestment("view"),asyncRoute(async(req,res)=>{
   const term=String(req.query.q||"").trim();if(term.length<2)return res.json({results:[]});const like=`%${term}%`;
   const results=await query(`SELECT * FROM (

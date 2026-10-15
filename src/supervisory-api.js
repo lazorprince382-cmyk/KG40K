@@ -10,6 +10,44 @@ module.exports = function registerSupervisoryApi({
     });
   }
 
+  /** Read-only picture of the Kwagalana group: members, savings, loans, money and welfare. */
+  async function loadGroupPicture() {
+    const { loadScheduleSettings, buildSchedule, monthIndex } = require("./savings-schedule");
+    const { loansOutstandingTotal } = require("./loan-totals");
+    const { loadWelfareStanding } = require("./welfare-standing");
+    const settings = await loadScheduleSettings();
+    const members = (await query(`SELECT m.id,m.full_name AS name,m.savings_balance::float AS savings,to_char(m.joined_at,'YYYY-MM') AS "joinMonth",
+        COALESCE((SELECT SUM(c.amount) FROM welfare_contributions c WHERE c.member_id=m.id AND c.status IN ('verified','completed','recorded')
+          AND c.amount>0 AND c.contribution_type NOT ILIKE '%standing%' AND COALESCE(c.reference,'') NOT LIKE 'WEL-STANDING-%'
+          AND c.contribution_date>$1::date),0)::float AS "welfareSinceBenchmark"
+      FROM members m WHERE m.deleted_at IS NULL AND m.status='active' ORDER BY m.full_name`, [settings.benchmarkDate])).rows;
+    const schedule = members.map(m => ({ name: m.name, ...buildSchedule(settings, {
+      savings: m.savings, welfareSinceBenchmark: m.welfareSinceBenchmark, joinMonth: m.joinMonth ? monthIndex(m.joinMonth) : null }) }));
+    const behind = schedule.filter(s => s.shortBy > 0.5).sort((a, b) => b.shortBy - a.shortBy);
+    const loans = await one(`SELECT COUNT(*) FILTER (WHERE status IN ('active','overdue'))::int AS active,
+      COUNT(*) FILTER (WHERE status='overdue')::int AS overdue,
+      COUNT(*) FILTER (WHERE status NOT IN ('active','overdue','completed','closed','rejected'))::int AS waiting FROM loans`);
+    const accounts = (await query(`SELECT account_code AS code,balance::float AS balance FROM finance_accounts WHERE account_code IN ('GL-4104','GL-4500') AND active=true`)).rows;
+    const balance = code => Number(accounts.find(a => a.code === code)?.balance || 0);
+    const welfare = await loadWelfareStanding();
+    const overdueLoans = (await query(`SELECT l.reference,m.full_name AS member,l.balance::float AS balance,
+        (SELECT MIN(s.due_date) FROM loan_repayment_schedule s WHERE s.loan_id=l.id AND s.status='overdue') AS "dueSince"
+      FROM loans l JOIN members m ON m.id=l.member_id WHERE l.status='overdue' ORDER BY l.balance DESC LIMIT 10`)).rows;
+    return {
+      monthLabel: schedule[0]?.monthLabel || null,
+      requiredThisMonth: schedule[0]?.requiredByMonthEnd || 0,
+      activeMembers: members.length,
+      upToDate: members.length - behind.length,
+      behind: behind.map(s => ({ name: s.name, shortBy: Math.round(s.shortBy) })),
+      totalSavings: members.reduce((sum, m) => sum + Number(m.savings || 0), 0),
+      activeLoans: Number(loans?.active || 0), overdueLoans: Number(loans?.overdue || 0), loansWaiting: Number(loans?.waiting || 0),
+      moneyInLoans: await loansOutstandingTotal(one),
+      overdueLoanList: overdueLoans,
+      centenary: balance("GL-4104"), uap: balance("GL-4500"),
+      welfareBalance: Math.max(0, Number(welfare?.closingBalance || 0))
+    };
+  }
+
   app.get("/api/supervisory/command-center", auth, requireSupervisory("view"), asyncRoute(async (req, res) => {
     const [scorecards, followups, executive, committees, resolutions, complaints, projects, recommendations,
       siteVisits, kpis, documents, departments, operationalSummaries] = await Promise.all([
@@ -121,6 +159,7 @@ module.exports = function registerSupervisoryApi({
     ].sort((a,b)=>new Date(a.date)-new Date(b.date));
 
     res.json({
+      group:await loadGroupPicture(),
       stats:{
         departmentPerformance:organizationPerformanceScore,
         departmentsBelowTarget:belowTarget.length,
