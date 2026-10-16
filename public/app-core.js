@@ -2899,11 +2899,14 @@ function creditsActiveLoansView() {
           <p class="credits-borrower-meta"><strong>${escapeHtml(l.memberNumber||"No member number")}</strong>${l.phone?` · ${escapeHtml(l.phone)}`:""}${l.email?` · ${escapeHtml(l.email)}`:""}</p>
           <small>${l.termMonths} months · Applied ${new Date(l.createdAt).toLocaleDateString()} · Cash given ${money(netDisbursed)}</small>
         </div>
+        <div class="credits-loan-status">${status(l.status)}</div>
         <div class="credits-active-figures">
           <div><span>Repaid so far</span><strong>${money(p.totalPaid)}</strong></div>
-          <div><span>Total amount remaining</span><strong>${money(b.total)}</strong><small>${money(b.principal)} principal + ${money(b.interest)} interest + ${money(b.penalty)} penalty</small></div>
+          <div><span>Principal left</span><strong>${money(b.principal)}</strong></div>
+          <div><span>Interest left</span><strong>${money(b.interest)}</strong></div>
+          <div class="${b.penalty>0?"is-penalty":""}"><span>Penalty unpaid</span><strong>${money(b.penalty)}</strong></div>
+          <div class="is-total"><span>Total remaining</span><strong>${money(b.total)}</strong></div>
         </div>
-        ${status(l.status)}
         <div class="credits-row-progress"><div><span>Repayment progress</span><strong>${p.progressPct}%</strong></div><i><u style="width:${p.progressPct}%"></u></i>
           <small>Paid ${money(p.totalPaid)} of ${money(p.totalDue)} · Fee ${money(fee)} · Next ${money(l.nextPaymentAmount||0)}${l.nextDueDate?` on ${new Date(l.nextDueDate).toLocaleDateString()}`:""} (principal + interest + penalty)</small></div>
         ${loanPenaltyBanner(l)}

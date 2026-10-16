@@ -1854,8 +1854,21 @@ tr.pending-receipt{background:#f8fafc;color:#64748b}
 .exec-notification-actions{display:flex;gap:6px;align-items:center}.exec-notification-page button.danger{display:inline-flex;align-items:center;gap:4px;color:#b42318;border-color:#f3c5c0}.exec-notification-page button.danger svg{width:14px}.exec-notification-page article.is-read{opacity:.65}.exec-notification-read{color:#8b98a5;font-size:13px;font-weight:700}
 @media(max-width:760px){.exec-notification-page article>.exec-notification-actions{grid-column:2/-1;justify-self:start}}
 .exec-module-metrics.loan-money-metrics{grid-template-columns:repeat(3,minmax(0,1fr))}
-.credits-active-figures{grid-template-columns:minmax(0,.8fr) minmax(0,1.7fr)}
-.credits-active-figures small{display:block;margin-top:4px;color:#607084;font-size:12px;line-height:1.35}
+.credits-loan-list .credits-active-loan{grid-template-columns:minmax(0,1fr) auto;gap:12px 16px;padding:16px 18px;align-items:start}
+.credits-active-loan .credits-loan-main{grid-column:1;grid-row:1}
+.credits-active-loan .credits-loan-main h3{margin:2px 0}
+.credits-active-loan .credits-borrower-meta{margin:0 0 2px}
+.credits-active-loan .credits-loan-main small{margin-top:2px}
+.credits-active-loan .credits-loan-status{grid-column:2;grid-row:1;justify-self:end}
+.credits-loan-list .credits-active-figures{grid-column:1/-1;grid-row:2;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;text-align:left}
+.credits-loan-list .credits-active-figures>div{padding:8px 10px;border-radius:8px;text-align:left}
+.credits-loan-list .credits-active-figures span{margin-bottom:2px;font-size:11.5px}
+.credits-loan-list .credits-active-figures strong{display:block;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.credits-loan-list .credits-active-figures>div.is-total{border-color:#c9d8ec;background:#eef4fb}
+.credits-loan-list .credits-active-figures>div.is-penalty strong{color:#b42318}
+.credits-active-loan .credits-row-progress small{display:block;margin-top:4px}
+.credits-active-loan .credits-row-progress>div{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+@media(max-width:900px){.credits-loan-list .credits-active-figures{grid-template-columns:repeat(3,minmax(0,1fr))}}
 .loan-math-panel{margin-bottom:16px}.loan-math-panel .exec-panel-head p{max-width:760px}
 .loan-math-table{width:100%;border-collapse:collapse;font-size:13.5px}
 .loan-math-table th{padding:9px 10px;text-align:right;color:#607084;font-size:12px;font-weight:700;border-bottom:1px solid #e5edf5;white-space:nowrap}
@@ -1864,4 +1877,4 @@ tr.pending-receipt{background:#f8fafc;color:#64748b}
 .loan-math-table td small{display:block;color:#7a8898;font-size:12px}
 .loan-math-table tfoot td{font-weight:800;color:#082e57;background:#f4f7fb;border-top:2px solid #d5dfeb}
 @media(max-width:1050px){.exec-module-metrics.loan-money-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:620px){.exec-module-metrics.loan-money-metrics,.credits-active-figures{grid-template-columns:1fr}}
+@media(max-width:620px){.exec-module-metrics.loan-money-metrics{grid-template-columns:1fr}.credits-loan-list .credits-active-figures{grid-template-columns:repeat(2,minmax(0,1fr))}}
