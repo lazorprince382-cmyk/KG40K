@@ -1,14 +1,15 @@
 "use strict";
 /**
  * Monthly savings schedule shared by the member dashboard and the monthly welfare charge.
- * Every member is expected to hold the benchmark (UGX 9,925,000 in savings) at the end of
- * October 2026; every month after that adds the combined monthly contribution (UGX 425,000,
- * of which UGX 25,000 goes to welfare). Only members who join after the benchmark month owe
- * the combined amount from their join month instead.
+ * Every member is expected to hold the benchmark (UGX 9,900,000 in savings) at the end of
+ * October 2026 (UGX 9,100,000 at the end of August: UGX 400,000 savings a month). Every month
+ * after that adds the combined monthly contribution (UGX 425,000, of which UGX 25,000 goes to
+ * welfare), so any surplus covers one month per UGX 425,000. Only members who join after the
+ * benchmark month owe the combined amount from their join month instead.
  */
 const { query } = require("./db");
 
-const DEFAULT_BENCHMARK_AMOUNT = 9925000;
+const DEFAULT_BENCHMARK_AMOUNT = 9900000;
 const DEFAULT_BENCHMARK_DATE = "2026-10-31";
 
 const monthIndex = (value) => {
@@ -50,9 +51,12 @@ async function loadScheduleSettings(runner = { query }) {
 /** Savings a member should hold by the end of `month` (savings + welfare taken since the benchmark). */
 function expectedAtEndOf(settings, joinMonth, month) {
   const joinedThisYear = joinMonth !== null && joinMonth > settings.benchmarkMonth;
+  const savingsPerMonth = Math.max(0, settings.monthlyTarget - settings.welfareAmount);
   const expected = joinedThisYear
     ? settings.monthlyTarget * Math.max(0, month - joinMonth + 1)
-    : settings.benchmarkAmount + settings.monthlyTarget * (month - settings.benchmarkMonth);
+    : month <= settings.benchmarkMonth
+      ? settings.benchmarkAmount - savingsPerMonth * (settings.benchmarkMonth - month)
+      : settings.benchmarkAmount + settings.monthlyTarget * (month - settings.benchmarkMonth);
   return Math.max(0, expected);
 }
 
