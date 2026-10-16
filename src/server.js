@@ -1267,7 +1267,7 @@ app.get("/api/executive/command-center",auth,requireExecutive("view"),asyncRoute
       COALESCE(SUM(amount) FILTER (WHERE entry_type='expense' AND status IN ('pending','pending_finance_review')),0)::float AS pending_payments
       FROM organization_finance_entries`),
     query("SELECT COALESCE(SUM(savings_balance),0)::float AS total FROM members WHERE deleted_at IS NULL"),
-    query(`SELECT COUNT(*) FILTER (WHERE status='active')::int AS active,
+    query(`SELECT COUNT(*) FILTER (WHERE status IN ('active','overdue'))::int AS active,
       COUNT(*) FILTER (WHERE due_date=CURRENT_DATE AND status='active')::int AS due_today,
       COUNT(*) FILTER (WHERE status='overdue')::int AS defaults,
       ROUND(COALESCE(SUM(${LOAN_PRINCIPAL_LEFT_SQL}) FILTER (WHERE status IN ('active','overdue')),0),2)::float AS outstanding,
@@ -2825,6 +2825,10 @@ app.get("/api/credits/command-center",auth,requireCredits("view",{allowFinanceVi
       COALESCE((SELECT SUM(s.paid_amount) FROM loan_repayment_schedule s WHERE s.loan_id=l.id),0)::float AS "totalPaid",
       COALESCE((SELECT SUM(s.interest) FROM loan_repayment_schedule s WHERE s.loan_id=l.id),
         ROUND((l.amount*(p.annual_rate/1200.0)*(l.term_months+1)/2.0)::numeric,2))::float AS "totalInterest",
+      ROUND(LEAST(l.balance,COALESCE((SELECT SUM(GREATEST(s.principal-COALESCE(s.principal_paid,0),0)) FROM loan_repayment_schedule s WHERE s.loan_id=l.id),l.balance))::numeric,2)::float AS "principalRemaining",
+      COALESCE((SELECT ROUND(SUM(GREATEST(s.interest-COALESCE(s.interest_paid,0),0))::numeric,2) FROM loan_repayment_schedule s WHERE s.loan_id=l.id),0)::float AS "interestRemaining",
+      COALESCE((SELECT ROUND(SUM(COALESCE(s.principal_paid,0))::numeric,2) FROM loan_repayment_schedule s WHERE s.loan_id=l.id),0)::float AS "principalPaid",
+      COALESCE((SELECT ROUND(SUM(COALESCE(s.interest_paid,0))::numeric,2) FROM loan_repayment_schedule s WHERE s.loan_id=l.id),0)::float AS "interestPaid",
       COALESCE((SELECT SUM(GREATEST(0,c.amount-c.paid_amount)) FROM loan_charges c WHERE c.loan_id=l.id AND c.status IN ('outstanding','partial') AND c.charge_type <> 'Processing fee' AND c.charge_type <> 'Late payment penalty'),0)::float
         + COALESCE((SELECT SUM(GREATEST(0,c.amount-c.paid_amount)) FROM loan_charges c
             LEFT JOIN loan_repayment_schedule ps ON ps.id=c.schedule_id
@@ -2834,6 +2838,7 @@ app.get("/api/credits/command-center",auth,requireCredits("view",{allowFinanceVi
         LEFT JOIN loan_repayment_schedule ps ON ps.id=c.schedule_id
         WHERE c.loan_id=l.id AND c.status IN ('outstanding','partial') AND c.charge_type='Late payment penalty'
           AND (c.schedule_id IS NULL OR ps.due_date < (CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date)),0)::float AS "penaltyAmount",
+      COALESCE((SELECT SUM(c.paid_amount) FROM loan_charges c WHERE c.loan_id=l.id AND c.charge_type='Late payment penalty'),0)::float AS "penaltyPaid",
       l.purpose,l.status,l.created_at AS "createdAt",l.due_date AS "dueDate",l.verified_amount::float AS "verifiedAmount",
       COALESCE(officer.full_name,'Unassigned') AS "officerHandling",
       COALESCE((SELECT MIN(s.due_date) FROM loan_repayment_schedule s

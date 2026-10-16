@@ -1234,7 +1234,7 @@ function executiveModuleView(module) {
   if(module==="finance") return executiveFinanceSummary(e);
   if(module==="credits") {
     const hasCreditsDesk=Boolean(state.credits?.loans);
-    return `<div class="exec-module-metrics">${executiveModuleMetric("Total savings",money(e.stats.totalSavings),"green")}${executiveModuleMetric("Outstanding loans",money(e.stats.outstandingLoans),"red")}${executiveModuleMetric("Active loans",e.loans.active,"blue")}${executiveModuleMetric("Recovery rate",`${e.loans.recoveryRate}%`,"violet")}</div>
+    return `<div class="exec-module-metrics">${executiveModuleMetric("Total savings",money(e.stats.totalSavings),"green")}${executiveModuleMetric("Outstanding loans (principal)",money(e.stats.outstandingLoans),"red",null,"Money lent still to come back, before interest and penalties")}${executiveModuleMetric("Active loans",e.loans.active,"blue",null,"Running loans, including overdue ones")}${executiveModuleMetric("Recovery rate",`${e.loans.recoveryRate}%`,"violet",null,"Share of all principal lent that has been repaid")}</div>
       <section class="exec-panel" style="margin-bottom:16px"><div class="exec-panel-head"><div><h3>Active loans (Credits desk view)</h3><p>Same live cards Credits officers see — including overdue 5% principal penalties</p></div>
         <button class="button primary" data-executive-workspace="credits">${icons.loans} Open full Credits desk</button></div>
         ${hasCreditsDesk?creditsActiveLoansView():`<div class="exec-empty">Loading Credits portfolio… Open the Credits desk if this stays empty.</div>`}</section>`;
@@ -2843,10 +2843,18 @@ function loanRepaymentProgress(l) {
   const progressPct=totalDue?Math.min(100,Math.round(totalPaid/totalDue*100)):0;
   return {totalDue,totalPaid,totalInterest,remaining,progressPct};
 }
-function loanAmountOwed(l){
+function loanBreakdown(l){
+  const round=n=>Math.round(n*100)/100;
+  const hasSplit=l.principalRemaining!=null&&l.interestRemaining!=null;
   const scheduleLeft=Math.max(0,Number(l.totalDue||l.amount||0)-Number(l.totalPaid||0));
-  return Math.round((scheduleLeft+Math.max(0,Number(l.outstandingCharges||0))+Math.max(0,Number(l.pendingPenaltyAmount||0)))*100)/100;
+  const principal=hasSplit?Math.max(0,Number(l.principalRemaining)):Math.max(0,Number(l.balance||0));
+  const interest=hasSplit?Math.max(0,Number(l.interestRemaining)):Math.max(0,scheduleLeft-principal);
+  const penalty=Math.max(0,Number(l.outstandingCharges||0))+Math.max(0,Number(l.pendingPenaltyAmount||0));
+  const principalPaid=Math.max(0,Number(l.principalPaid||0)),interestPaid=Math.max(0,Number(l.interestPaid||0)),penaltyPaid=Math.max(0,Number(l.penaltyPaid||0));
+  return {principal:round(principal),interest:round(interest),penalty:round(penalty),total:round(principal+interest+penalty),
+    principalPaid:round(principalPaid),interestPaid:round(interestPaid),penaltyPaid:round(penaltyPaid),paid:round(principalPaid+interestPaid+penaltyPaid)};
 }
+function loanAmountOwed(l){return loanBreakdown(l).total;}
 function loanLatePenaltyAmount(l){
   return Math.max(0,Number(l.penaltyAmount||0))+Math.max(0,Number(l.pendingPenaltyAmount||0));
 }
@@ -2863,28 +2871,37 @@ function creditsActiveLoansView() {
   if(!state.credits?.loans)return `<div class="exec-empty">Loading active loans…</div>`;
   const rows=state.credits?.loans?.filter(l=>["active","overdue"].includes(l.status))||[];
   const penaltyWatch=rows.filter(l=>l.inDangerPeriod||l.status==="overdue"||loanLatePenaltyAmount(l)>0).length;
-  return `<div class="exec-module-metrics">${executiveModuleMetric("Active loans",rows.length,"blue")}${(()=>{
-    const scheduleLeft=rows.reduce((n,l)=>n+Math.max(0,Number(l.totalDue||l.amount||0)-Number(l.totalPaid||0)),0);
-    const penalties=rows.reduce((n,l)=>n+Math.max(0,Number(l.outstandingCharges||0))+Math.max(0,Number(l.pendingPenaltyAmount||0)),0);
-    return executiveModuleMetric("Total amount remaining",money(rows.reduce((n,l)=>n+loanAmountOwed(l),0)),"violet",null,
-      `Principal + interest still to pay ${money(scheduleLeft)} · unpaid late penalties ${money(penalties)} · across ${rows.length} active loan${rows.length===1?"":"s"}`);
-  })()}${executiveModuleMetric("Total repayment",money(rows.reduce((n,l)=>n+Number(l.totalPaid||0),0)),"orange")}${executiveModuleMetric(penaltyWatch?"Late / penalty watch":"Cash disbursed",penaltyWatch?penaltyWatch:money(rows.reduce((n,l)=>n+Math.max(0,Number(l.amount||0)-Number(l.processingFee||0)),0)),penaltyWatch?"orange":"green")}</div>
+  const parts=rows.map(l=>({l,b:loanBreakdown(l)}));
+  const sum=key=>Math.round(parts.reduce((n,x)=>n+x.b[key],0)*100)/100;
+  const t={principal:sum("principal"),interest:sum("interest"),penalty:sum("penalty"),total:sum("total"),principalPaid:sum("principalPaid"),interestPaid:sum("interestPaid"),penaltyPaid:sum("penaltyPaid"),paid:sum("paid")};
+  const lent=rows.reduce((n,l)=>n+Number(l.amount||0),0);
+  const breakdown=rows.length?`<section class="exec-panel loan-math-panel"><div class="exec-panel-head"><div><h3>How the remaining amount adds up</h3>
+      <p>Principal left + interest left + unpaid penalties = total amount remaining. Principal left plus principal paid equals the amount lent (${money(lent)}).</p></div></div>
+      <div class="table-wrap"><table class="loan-math-table"><thead><tr><th>Loan</th><th>Principal left</th><th>Interest left</th><th>Penalties unpaid</th><th>Total remaining</th><th>Already repaid</th></tr></thead>
+      <tbody>${parts.map(({l,b})=>`<tr><td><strong>${escapeHtml(l.member)}</strong><small>${escapeHtml(l.reference)} · lent ${money(l.amount)}</small></td><td>${money(b.principal)}</td><td>${money(b.interest)}</td><td>${money(b.penalty)}</td><td><strong>${money(b.total)}</strong></td><td>${money(b.paid)}</td></tr>`).join("")}</tbody>
+      <tfoot><tr><td>Total (${rows.length} loan${rows.length===1?"":"s"})</td><td>${money(t.principal)}</td><td>${money(t.interest)}</td><td>${money(t.penalty)}</td><td>${money(t.total)}</td><td>${money(t.paid)}</td></tr></tfoot></table></div></section>`:"";
+  return `<div class="exec-module-metrics loan-money-metrics">${executiveModuleMetric("Active loans",rows.length,"blue",null,penaltyWatch?`${penaltyWatch} late or with a penalty`:"All on time")}
+    ${executiveModuleMetric("Principal remaining",money(t.principal),"red",null,`Money lent still to come back · ${money(t.principalPaid)} of ${money(lent)} already repaid`)}
+    ${executiveModuleMetric("Interest remaining",money(t.interest),"green",null,`Interest still to be paid · ${money(t.interestPaid)} interest already paid`)}
+    ${executiveModuleMetric("Penalties unpaid",money(t.penalty),"orange",null,`5% late penalties not yet paid · ${money(t.penaltyPaid)} penalties already paid`)}
+    ${executiveModuleMetric("Total amount remaining",money(t.total),"violet",null,`${money(t.principal)} principal + ${money(t.interest)} interest + ${money(t.penalty)} penalties`)}
+    ${executiveModuleMetric("Repaid so far",money(t.paid),"blue",null,`${money(t.principalPaid)} principal + ${money(t.interestPaid)} interest + ${money(t.penaltyPaid)} penalties`)}</div>
+    ${breakdown}
     <div class="credits-loan-list">${rows.map(l=>{
       const p=loanRepaymentProgress(l);
       const fee=Number(l.processingFee||0),netDisbursed=Math.max(0,Number(l.amount||0)-fee);
       const penalty=loanLatePenaltyAmount(l);
-      const remaining=loanAmountOwed(l);
+      const b=loanBreakdown(l);
       return `<article class="credits-active-loan${l.inDangerPeriod||l.status==="overdue"||penalty>0?" danger-period":""}">
         <div class="credits-loan-main">
           <span>${escapeHtml(l.reference)} · ${escapeHtml(l.product)}</span>
           <h3>${escapeHtml(l.member)}</h3>
           <p class="credits-borrower-meta"><strong>${escapeHtml(l.memberNumber||"No member number")}</strong>${l.phone?` · ${escapeHtml(l.phone)}`:""}${l.email?` · ${escapeHtml(l.email)}`:""}</p>
-          <small>${l.termMonths} months · Applied ${new Date(l.createdAt).toLocaleDateString()}</small>
+          <small>${l.termMonths} months · Applied ${new Date(l.createdAt).toLocaleDateString()} · Cash given ${money(netDisbursed)}</small>
         </div>
         <div class="credits-active-figures">
-          <div><span>Total repayment</span><strong>${money(p.totalPaid)}</strong></div>
-          <div><span>Cash given</span><strong>${money(netDisbursed)}</strong></div>
-          <div><span>Total amount remaining</span><strong>${money(remaining)}</strong></div>
+          <div><span>Repaid so far</span><strong>${money(p.totalPaid)}</strong></div>
+          <div><span>Total amount remaining</span><strong>${money(b.total)}</strong><small>${money(b.principal)} principal + ${money(b.interest)} interest + ${money(b.penalty)} penalty</small></div>
         </div>
         ${status(l.status)}
         <div class="credits-row-progress"><div><span>Repayment progress</span><strong>${p.progressPct}%</strong></div><i><u style="width:${p.progressPct}%"></u></i>

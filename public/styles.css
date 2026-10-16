@@ -1853,3 +1853,15 @@ tr.pending-receipt{background:#f8fafc;color:#64748b}
 .uap-action-bar{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:14px}.uap-action-group{flex:1 1 320px;padding:10px 12px;border:1px solid #dfe7ef;border-radius:14px;background:#fff}.uap-action-group>span{display:block;margin-bottom:8px;color:#6a7a8c;font-size:12px;font-weight:800;letter-spacing:.04em;text-transform:uppercase}.uap-action-group>div{display:flex;flex-wrap:wrap;gap:8px}.uap-action-group .button{white-space:nowrap;flex:0 0 auto}
 .exec-notification-actions{display:flex;gap:6px;align-items:center}.exec-notification-page button.danger{display:inline-flex;align-items:center;gap:4px;color:#b42318;border-color:#f3c5c0}.exec-notification-page button.danger svg{width:14px}.exec-notification-page article.is-read{opacity:.65}.exec-notification-read{color:#8b98a5;font-size:13px;font-weight:700}
 @media(max-width:760px){.exec-notification-page article>.exec-notification-actions{grid-column:2/-1;justify-self:start}}
+.exec-module-metrics.loan-money-metrics{grid-template-columns:repeat(3,minmax(0,1fr))}
+.credits-active-figures{grid-template-columns:minmax(0,.8fr) minmax(0,1.7fr)}
+.credits-active-figures small{display:block;margin-top:4px;color:#607084;font-size:12px;line-height:1.35}
+.loan-math-panel{margin-bottom:16px}.loan-math-panel .exec-panel-head p{max-width:760px}
+.loan-math-table{width:100%;border-collapse:collapse;font-size:13.5px}
+.loan-math-table th{padding:9px 10px;text-align:right;color:#607084;font-size:12px;font-weight:700;border-bottom:1px solid #e5edf5;white-space:nowrap}
+.loan-math-table td{padding:9px 10px;text-align:right;border-bottom:1px solid #eef2f7;white-space:nowrap}
+.loan-math-table th:first-child,.loan-math-table td:first-child{text-align:left;white-space:normal}
+.loan-math-table td small{display:block;color:#7a8898;font-size:12px}
+.loan-math-table tfoot td{font-weight:800;color:#082e57;background:#f4f7fb;border-top:2px solid #d5dfeb}
+@media(max-width:1050px){.exec-module-metrics.loan-money-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:620px){.exec-module-metrics.loan-money-metrics,.credits-active-figures{grid-template-columns:1fr}}
