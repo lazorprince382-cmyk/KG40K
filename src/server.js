@@ -447,6 +447,73 @@ async function exitedMembersAndPinnedSavings20261015(client){
   await client.query(`INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value,updated_at=NOW()`,[key,summary]);
   return summary;
 }
+async function matchCentenarySmsRalph20261027(client){
+  const key="fixCentenarySmsRalph850k20261027";
+  if((await client.query("SELECT 1 FROM settings WHERE key=$1",[key])).rows[0])return null;
+  const ralph=(await client.query(`SELECT e.id FROM organization_finance_entries e
+    WHERE e.status='completed' AND e.entry_type='income' AND e.amount=850000
+      AND e.transaction_date='2026-10-27' AND (e.counterparty ILIKE '%ralph%' OR e.description ILIKE '%ralph%')
+    ORDER BY e.id DESC LIMIT 1`)).rows[0];
+  if(!ralph){
+    await client.query(`INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value,updated_at=NOW()`,
+      [key,"skipped: Ralph 850,000 on 27/10/2026 not found"]);
+    return "skipped: Ralph 850,000 on 27/10/2026 not found";
+  }
+  const bank=(await client.query(`SELECT id,balance::float AS balance FROM finance_accounts
+    WHERE account_code='GL-4104' AND active=true LIMIT 1 FOR UPDATE`)).rows[0];
+  if(!bank)return null;
+  const smsAfterRalph=9738523, extra=29025;
+  const current=Math.round(Number(bank.balance));
+  if(current<9767548-0.5){
+    const summary=`no change: Centenary UGX ${current.toLocaleString()} is already below the extra figure`;
+    await client.query(`INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value,updated_at=NOW()`,[key,summary]);
+    return summary;
+  }
+  const recorder=(await client.query(`SELECT id FROM users WHERE active=true AND (full_name ILIKE '%tabula%robert%' OR role IN ('Finance Officer','System Admin'))
+    ORDER BY (full_name ILIKE '%tabula%robert%') DESC,(role='Finance Officer') DESC,id LIMIT 1`)).rows[0]?.id;
+  const department=(await client.query("SELECT id FROM departments WHERE code='finance'")).rows[0];
+  await client.query(`INSERT INTO organization_finance_entries
+    (department_id,reference,entry_type,category,description,counterparty,payment_method,amount,status,receipt_number,transaction_date,approved_at,finance_account_id,recorded_by,approved_by)
+    VALUES ($1,'FIN-CEN-SMS-RALPH-20261027','transfer','Bank reconciliation',$2,'Centenary SMS 27/10/2026','Bank reconciliation',$3,'completed',$4,'2026-10-27',NOW(),$5,$6,$6)`,
+    [department?.id||null,
+      `Removes UGX ${extra.toLocaleString()} extra on Centenary after Ralph Masaba's UGX 850,000 on 27/10/2026. Bank SMS balance after that transfer was UGX ${smsAfterRalph.toLocaleString()}.`,
+      extra,receiptReference("RECON"),bank.id,recorder]);
+  await client.query("UPDATE finance_accounts SET balance=balance-$1,updated_at=NOW() WHERE id=$2",[extra,bank.id]);
+  await syncOrganizationBankBalanceSetting(client,bank.id);
+  const now=(await client.query("SELECT balance::float b FROM finance_accounts WHERE id=$1",[bank.id])).rows[0].b;
+  const summary=`Centenary UGX ${current.toLocaleString()} less ${extra.toLocaleString()} = UGX ${Number(now).toLocaleString()} to match SMS after Ralph 850,000`;
+  await client.query(`INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value,updated_at=NOW()`,[key,summary]);
+  return summary;
+}
+async function fillMemberPhonesFromRoll20261028(client){
+  const key="fixMemberPhonesFromRoll20261028";
+  if((await client.query("SELECT 1 FROM settings WHERE key=$1",[key])).rows[0])return null;
+  const roll=[
+    ["%Simon%Ssemaganda%","0779522296"],["%Justine%Inhensiko%","0772074235"],["%Baraza%Olivia%","0763424032"],
+    ["%Mutiga%Brian%","0774769812"],["%Brian%Mutiga%","0774769812"],["%Jude%Kyobe%","0782458764"],
+    ["%Ntono%Moreen%","0704801045"],["%Moreen%Ntono%","0704801045"],["%Tabula%Robert%","0706501032"],
+    ["%Ssewanyana%Joshua%","0701637623"],["%Josephine%Babirye%","0779575972"],["%Babirye%Josephine%","0779575972"],
+    ["%Mary%Babirye%","0782364222"],["%Ritah%Nakyanzi%","0752557108"],["%Dan%Rwebingira%","0772432118"],
+    ["%Rwebingira%Dan%","0772432118"],["%Francis%Banumba%","0782377969"],["%Ralph%Masaba%","0757858518"],
+    ["%Masaba%Ralph%","0757858518"],["%Vicent%Gumisiriza%","0753995171"],["%Vincent%Gumisiriza%","0753995171"],
+    ["%Christopher%Muhoozi%","0772454425"],["%Denis%Tugume%","0772666438"],["%Tugume%Denis%","0772666438"]
+  ];
+  const placeholders=new Set(["","+256700000000","256700000000","0700000000"]);
+  const updated=[];
+  for(const [pattern,phone] of roll){
+    const members=(await client.query(`SELECT id,full_name,phone FROM members WHERE full_name ILIKE $1 AND deleted_at IS NULL`,[pattern])).rows;
+    for(const member of members){
+      const current=String(member.phone||"").trim();
+      if(current&&!placeholders.has(current)&&current!==phone)continue;
+      await client.query("UPDATE members SET phone=$1 WHERE id=$2",[phone,member.id]);
+      await client.query("UPDATE users SET phone=$1 WHERE member_id=$2",[phone,member.id]);
+      updated.push(`${member.full_name} ${phone}`);
+    }
+  }
+  const summary=updated.length?`filled ${updated.length}: ${[...new Set(updated)].join("; ")}`:"no empty phones to fill";
+  await client.query(`INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value,updated_at=NOW()`,[key,summary]);
+  return summary;
+}
 async function backfillRepaymentsToCentenary(client){
   const pending=(await client.query(`SELECT t.id FROM transactions t LEFT JOIN loans l ON l.id=t.loan_id
     WHERE t.type='Loan repayment' AND t.status='completed' AND t.finance_entry_id IS NULL
@@ -993,6 +1060,7 @@ app.get("/api/health",asyncRoute(async(req,res)=>{
   res.json({status:"ok",service:"organization-management",build:RUNNING_BUILD,disbursementFix:fix||disbursementFixStatus,
     muhooziReconcile:reconcile||muhooziReconcileStatus,
     centenaryReset:(await query("SELECT value FROM settings WHERE key='fixCentenarySyncReset20261008'")).rows[0]?.value||centenaryResetStatus,
+    centenarySms:(await query("SELECT value FROM settings WHERE key='fixCentenarySmsRalph850k20261027'")).rows[0]?.value||"not run yet",
     time:new Date().toISOString()});
 }));
 app.post("/api/auth/login",loginLimiter,asyncRoute(async(req,res)=>{
@@ -2278,13 +2346,14 @@ app.delete("/api/finance/accounts/:id",auth,requireFinance("edit"),asyncRoute(as
 }));
 app.post("/api/finance/expenses",auth,requireFinance("create"),asyncRoute(async(req,res)=>{
   const b=req.body,amount=Number(b.amount);
-  if(!b.supplier||!b.description||!b.category||!b.budgetLine||!b.departmentId||!Number.isFinite(amount)||amount<=0)
-    return res.status(400).json({error:"Supplier, description, category, department, budget line and amount are required"});
+  if(!b.supplier||!b.description||!b.category||!b.departmentId||!Number.isFinite(amount)||amount<=0)
+    return res.status(400).json({error:"Who was paid, department, what it is for, amount and a short reason are required"});
   const number=reference("PV");
+  const budgetLine=String(b.budgetLine||b.category||"").trim()||String(b.category);
   const row=await one(`INSERT INTO finance_payment_vouchers
     (voucher_number,department_id,supplier,description,category,budget_line,amount,payment_method,status,supporting_document,requested_by)
     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'finance_review',$9,$10) RETURNING id,voucher_number AS "voucherNumber"`,
-  [number,b.departmentId,String(b.supplier).trim(),String(b.description).trim(),String(b.category),String(b.budgetLine),
+  [number,b.departmentId,String(b.supplier).trim(),String(b.description).trim(),String(b.category),budgetLine,
     amount,String(b.paymentMethod||"Bank transfer"),String(b.supportingDocument||"").trim()||null,req.user.id]);
   await audit({userId:req.user.id,action:"PAYMENT_VOUCHER_CREATED",entityType:"finance_voucher",entityId:String(row.id),
     details:`${number} - ${b.supplier} - UGX ${amount}`,...metadata(req)});
@@ -6470,6 +6539,14 @@ async function runScheduledMaintenance() {
     const exited=await transaction(client=>exitedMembersAndPinnedSavings20261015(client));
     if(exited)console.log(`Exited members / savings repair: ${exited}`);
   }catch(error){console.error("Exited members / savings repair failed:",error.message);}
+  try{
+    const sms=await transaction(client=>matchCentenarySmsRalph20261027(client));
+    if(sms)console.log(`Centenary SMS match: ${sms}`);
+  }catch(error){console.error("Centenary SMS match failed:",error.message);}
+  try{
+    const phones=await transaction(client=>fillMemberPhonesFromRoll20261028(client));
+    if(phones)console.log(`Member phones: ${phones}`);
+  }catch(error){console.error("Member phone fill failed:",error.message);}
   const graceDays=0;
   await transaction(async client=>{
     // No grace window: unpaid installments become overdue the day after the due date.

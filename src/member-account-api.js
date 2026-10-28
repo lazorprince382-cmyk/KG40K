@@ -471,9 +471,41 @@ module.exports = function registerMemberAccountApi({
     const welfarePaid=Number(contributionsTotal||0);
     const memberName=String(member.fullName||member.full_name||"");
     const memberNumber=String(member.memberNumber||member.member_number||"");
+    const joinDate=member.joinedAt?new Date(member.joinedAt):null;
+    const joinValid=joinDate&&!Number.isNaN(joinDate.getTime());
+    const joinLabel=joinValid?joinDate.toLocaleDateString("en-GB",{day:"numeric",month:"long",year:"numeric",timeZone:"UTC"}):null;
+    const kampalaDay=new Intl.DateTimeFormat("en-CA",{timeZone:"Africa/Kampala",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date());
+    const paidWelfareRows=welfareContributions.rows.filter(item=>["verified","recorded","completed"].includes(item.status)&&Number(item.amount)>0);
+    const paidByMonth={};
+    for(const row of paidWelfareRows){
+      const key=/^\d{4}-\d{2}$/.test(String(row.period||""))?row.period:String(row.contributionDate||"").slice(0,7);
+      if(!/^\d{4}-\d{2}$/.test(key))continue;
+      paidByMonth[key]=(paidByMonth[key]||0)+Number(row.amount);
+    }
+    const welfareMonths=[];
+    if(joinValid){
+      let year=joinDate.getUTCFullYear(),month=joinDate.getUTCMonth();
+      const [endYear,endMonth]=kampalaDay.split("-").map(Number);
+      while(year<endYear||(year===endYear&&month+1<=endMonth)){
+        const key=`${year}-${String(month+1).padStart(2,"0")}`;
+        welfareMonths.push({
+          month:key,
+          label:new Date(Date.UTC(year,month,1)).toLocaleDateString("en-GB",{month:"long",year:"numeric",timeZone:"UTC"}),
+          expected:25000,
+          paid:Number(paidByMonth[key]||0)
+        });
+        month+=1;if(month===12){month=0;year+=1;}
+      }
+    }
+    const welfareFromJoin={
+      joinLabel,
+      paid:paidWelfareRows.reduce((sum,item)=>sum+Number(item.amount),0),
+      expected:welfareMonths.reduce((sum,row)=>sum+row.expected,0),
+      months:welfareMonths
+    };
     const welfareExcluded=false;
     const welfareVicent=(/vicent|vincent/i.test(memberName)&&/gumisiriza/i.test(memberName))||memberNumber==="G40-2026-0002";
-    const welfareSinceLabel=welfareExcluded?null:welfareVicent?"July 2026":"June 2024";
+    const welfareSinceLabel=joinLabel||(welfareExcluded?null:welfareVicent?"July 2026":"June 2024");
     const welfareStanding=await loadWelfareStanding();
     const welfareRemaining=Math.max(0,Number(welfareStanding.closingBalance||0));
     const companyFunds=uapBalance+bankBalance+loansOutstanding+welfareRemaining;
@@ -508,6 +540,7 @@ module.exports = function registerMemberAccountApi({
         welfareCurrentBalance,
         welfareHistoricalShare,
         welfareSinceLabel,
+        welfareFromJoin,
         welfareCardNote,
         activeLoanBalance: activeLoans.reduce((sum, item) => {
           const totalDue=Number(item.totalDue||item.amount||0);
@@ -540,7 +573,8 @@ module.exports = function registerMemberAccountApi({
       welfare: {
         requests: welfareRequests.rows,
         contributions: welfareContributions.rows,
-        assistanceHistory: welfareAssistanceHistory.rows
+        assistanceHistory: welfareAssistanceHistory.rows,
+        fromJoin: welfareFromJoin
       }, meetings: meetings.rows,
       documents: documents.rows, notifications: notifications.rows, announcements: announcements.rows, support: support.rows, recentActivity,
       financialYearProgress, pastYearProgress, closedYears, closingPosition,
