@@ -1,11 +1,11 @@
 /* Ordered application loader. */
 [
-  "app-core.js?v=243",
+  "app-core.js?v=244",
   "department-theme.js?v=64",
   "department-core.js?v=93",
   "audit-dashboard.js?v=82",
   "audit-modules.js?v=63",
-  "welfare-module.js?v=97",
+  "welfare-module.js?v=98",
   "legal-module.js?v=96",
   "legal-biodata-module.js?v=71",
   "legal-family-ui.js?v=2",
@@ -14,7 +14,7 @@
   "supervisory-module.js?v=82",
   "department-events.js?v=63",
   "official-policy-ui.js?v=11",
-  "member-portal.js?v=136",
+  "member-portal.js?v=137",
   "loan-calculator.js?v=7",
   "department-bootstrap.js?v=64"
 ].forEach((source) => document.write(`<script src="${source}"><\/script>`));

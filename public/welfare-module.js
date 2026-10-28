@@ -4,7 +4,8 @@
   const formEnd=label=>`<div class="form-actions"><button type="button" class="button secondary" data-close-modal>Cancel</button><button type="submit" class="button primary">${label}</button></div>`;
   const ago=value=>{if(!value)return "Time unavailable";const seconds=Math.max(0,Math.floor((Date.now()-new Date(value).getTime())/1000));if(seconds<60)return "just now";if(seconds<3600){const n=Math.floor(seconds/60);return `${n} minute${n===1?"":"s"} ago`;}if(seconds<86400){const n=Math.floor(seconds/3600);return `${n} hour${n===1?"":"s"} ago`;}const n=Math.floor(seconds/86400);return `${n} day${n===1?"":"s"} ago`;};
   const members=()=>{
-    const standing=(W()?.welfareStanding?.byMember||W()?.welfareStanding?.standingMembers||[]).filter(x=>x&&x.memberId);
+    const live=x=>typeof isSelectableActiveMember==="function"?isSelectableActiveMember({status:x.status||"active",memberNumber:x.memberNumber||x.id}):!/G40-HIST/i.test(String(x.memberNumber||x.id||""))&&!/^(exited|left|withdrawn|inactive)$/i.test(String(x.status||"active"));
+    const standing=(W()?.welfareStanding?.byMember||W()?.welfareStanding?.standingMembers||[]).filter(x=>x&&x.memberId&&live(x));
     if(standing.length){
       return standing
         .slice()
@@ -12,7 +13,7 @@
         .map(x=>`<option value="${x.memberId}">${esc(x.memberNumber||"")}  -  ${esc(x.member||"")}</option>`)
         .join("");
     }
-    return (state.members||[]).map(x=>`<option value="${x.databaseId||x.id}">${esc(x.id||x.memberNumber||"")}  -  ${esc(x.name||x.member||"")}</option>`).join("");
+    return (state.members||[]).filter(live).map(x=>`<option value="${x.databaseId||x.id}">${esc(x.id||x.memberNumber||"")}  -  ${esc(x.name||x.member||"")}</option>`).join("");
   };
   const memberSelect=()=>`<option value="">Select member</option>${members()||`<option value="" disabled>No members loaded</option>`}`;
   const stat=(label,value,iconName,tone,note,target)=>{const payers=target==="welfare-month-payers";return `<button class="welfare-stat ${tone}" ${payers?"data-welfare-month-payers=\"1\"":`data-dept-target="${target}"`}><span>${icons[iconName]}</span><div><small>${label}</small><strong>${value}</strong><em>${note}</em></div></button>`;};

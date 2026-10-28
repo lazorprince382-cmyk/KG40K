@@ -2000,7 +2000,7 @@ function financeDepartmentOptions() {
 }
 function openFinanceModal(type) {
   const forms={
-    income:["Record income","Posted immediately to Centenary. Welfare and savings are a split of the same bank receipt. Dates show as DD/MM/YYYY.",`<form class="form" data-finance-form="income"><div class="form-grid"><div class="field"><label>Income category</label><select name="category"><option>Member savings</option><option>Membership Fees</option><option>Registration Fees</option><option>Donations</option><option>Grants</option><option>Investment Income</option><option>Rental Income</option><option>Welfare Contributions</option><option>Miscellaneous Income</option></select></div><div class="field" data-savings-member><label>Member</label><select name="memberId">${(state.finance.savingsMembers||[]).map(m=>`<option value="${m.id}">${escapeHtml(m.memberNumber)} — ${escapeHtml(m.name)}</option>`).join("")}</select></div><div class="field"><label>Amount (UGX)</label><input name="amount" type="number" min="1" required></div><div class="field full"><label>Member / Organization paying</label><input name="counterparty" required></div><div class="field"><label>Payment method</label><select name="paymentMethod"><option>Bank transfer</option><option>Cash</option><option>Mobile Money</option><option>Cheque</option></select></div><div class="field"><label>Receiving account</label><select name="accountId" required>${financeAccountOptions()}</select><small data-account-help>Select where the money was received.</small></div><div class="field"><label>Date (DD/MM/YYYY)</label><input name="date" type="date" value="${new Date().toLocaleDateString("en-CA",{timeZone:"Africa/Kampala"})}" required></div><div class="field full"><label>Description</label><textarea name="description" required></textarea></div><div class="field full"><label>Supporting document</label><input name="supportingDocument"></div></div>${formActions("Record income")}</form>`],
+    income:["Record income","Posted immediately to Centenary. Welfare and savings are a split of the same bank receipt. Dates show as DD/MM/YYYY.",`<form class="form" data-finance-form="income"><div class="form-grid"><div class="field"><label>Income category</label><select name="category"><option>Member savings</option><option>Membership Fees</option><option>Registration Fees</option><option>Donations</option><option>Grants</option><option>Investment Income</option><option>Rental Income</option><option>Welfare Contributions</option><option>Miscellaneous Income</option></select></div><div class="field" data-savings-member><label>Member</label><select name="memberId">${(state.finance.savingsMembers||[]).filter(isSelectableActiveMember).map(m=>`<option value="${m.id}">${escapeHtml(m.memberNumber)} — ${escapeHtml(m.name)}</option>`).join("")}</select></div><div class="field"><label>Amount (UGX)</label><input name="amount" type="number" min="1" required></div><div class="field full"><label>Member / Organization paying</label><input name="counterparty" required></div><div class="field"><label>Payment method</label><select name="paymentMethod"><option>Bank transfer</option><option>Cash</option><option>Mobile Money</option><option>Cheque</option></select></div><div class="field"><label>Receiving account</label><select name="accountId" required>${financeAccountOptions()}</select><small data-account-help>Select where the money was received.</small></div><div class="field"><label>Date (DD/MM/YYYY)</label><input name="date" type="date" value="${new Date().toLocaleDateString("en-CA",{timeZone:"Africa/Kampala"})}" required></div><div class="field full"><label>Description</label><textarea name="description" required></textarea></div><div class="field full"><label>Supporting document</label><input name="supportingDocument"></div></div>${formActions("Record income")}</form>`],
     account:["Add finance cash account","Register a bank, cash, petty cash, mobile money or restricted-fund account",`<form class="form" data-finance-form="account"><div class="form-grid"><div class="field"><label>Account type</label><select name="accountType"><option value="bank">Bank account</option><option value="cash">Cash account</option><option value="petty_cash">Petty cash</option><option value="mobile_money">Mobile money</option><option value="restricted">Restricted funds</option></select></div><div class="field"><label>Account code (optional)</label><input name="accountCode" placeholder="Generated if empty"></div><div class="field full"><label>Account name</label><input name="accountName" required placeholder="e.g. Stanbic Operating Account"></div><div class="field"><label>Bank / provider name</label><input name="bankName"></div><div class="field"><label>Account / wallet number</label><input name="accountNumber"></div><div class="field"><label>Opening balance (UGX)</label><input name="openingBalance" type="number" min="0" value="0" required></div><div class="field"><label>Opening balance date</label><input name="openingBalanceDate" type="date" max="${new Date().toISOString().slice(0,10)}" value="${new Date().toISOString().slice(0,10)}" required></div><div class="field"><label class="check-field"><input name="restricted" type="checkbox"> Restricted funds</label></div><div class="field full"><label>Notes / balance description</label><textarea name="notes" placeholder="Explain the source and date of the starting balance"></textarea></div><div class="field full"><label>Opening statement or supporting document</label><input name="supportingDocument"><small>Required when the opening balance is greater than zero.</small></div></div>${formActions("Add account")}</form>`],
     expense:["Record an organization expense","Use this when money leaves Centenary or cash for group work. It goes for Finance then Executive approval before it is paid.",`<form class="form" data-finance-form="expense"><div class="form-grid"><div class="field full"><label>Paid to</label><input name="supplier" required placeholder="Member, supplier or office being paid"></div><div class="field"><label>Department</label><select name="departmentId">${financeDepartmentOptions()}</select></div><div class="field"><label>What this payment is for</label><select name="category"><option>Meeting / AGM</option><option>Welfare assistance</option><option>Member savings withdrawal</option><option>Loan-related cost</option><option>Bank charges</option><option>Transport</option><option>Legal / registration</option><option>Stationery and printing</option><option>Communication</option><option>Training</option><option>Investment related</option><option>Other group expense</option></select></div><div class="field"><label>Amount (UGX)</label><input name="amount" type="number" min="1" required></div><div class="field"><label>Paid from</label><select name="paymentMethod"><option>Bank transfer</option><option>Cash</option><option>Mobile Money</option><option>Cheque</option></select></div><div class="field full"><label>Reason</label><textarea name="description" required placeholder="What happened, which meeting or member, and why the group is paying"></textarea></div><div class="field full"><label>Receipt or supporting document</label><input name="supportingDocument" placeholder="Optional receipt number or file"></div></div>${formActions("Send for approval")}</form>`],
     invoice:["Record supplier invoice","Track an obligation and its due date",`<form class="form" data-finance-form="invoice"><div class="form-grid"><div class="field"><label>Invoice number</label><input name="invoiceNumber" required></div><div class="field"><label>Supplier</label><input name="supplier" required></div><div class="field full"><label>Description</label><input name="description" required></div><div class="field"><label>Amount (UGX)</label><input name="amount" type="number" min="1" required></div><div class="field"><label>Invoice date</label><input name="invoiceDate" type="date" required></div><div class="field"><label>Due date</label><input name="dueDate" type="date" required></div><div class="field full"><label>Supporting document</label><input name="supportingDocument"></div></div>${formActions("Record invoice")}</form>`],
@@ -2795,9 +2795,17 @@ function creditsQuickPanel() {
 }
 function creditsMembersView() {
   const c=state.credits,p=c.contributionPolicy;
-  return `<div class="exec-module-metrics">${executiveModuleMetric("SACCO accounts",c.stats.totalMembers,"blue")}${executiveModuleMetric("Savings + capital",money(c.contributionProgress?.totalMemberFunds||0),"green")}${executiveModuleMetric("Savings for completed months",money(c.contributionProgress?.expectedSavingsToDate||0),"violet")}${executiveModuleMetric("Verified this year",money(c.contributionProgress?.verifiedSavings||0),"orange")}</div>
-    <div class="credits-policy-explainer"><strong>${p?.fiscalYear||"Current year"} rules</strong><span>Monthly savings ${money(p?.monthlySavingsTarget||0)}</span><span>Welfare UGX 25,000 once a month from the first deposit</span><span>Annual shares ${money(p?.annualShareTarget||0)}</span><span>Annual subscription ${money(p?.annualSubscriptionFee||0)}</span><small>A 425,000 payment sends 25,000 to welfare and 400,000 to savings the first time that month. Later deposits in the same month stay fully on savings and on the Centenary account.</small></div>`;
-}function creditsSavingsView() {
+  const members=(c.members||[]).filter(isSelectableActiveMember);
+  const row=m=>`<tr><td><div class="cell-main">${escapeHtml(m.name)}</div><div class="cell-sub">${escapeHtml(m.memberNumber||"")}</div></td><td>${escapeHtml(memberPhoneLabel(m.phone))}</td><td class="mono">${money(m.savings)}</td><td class="mono">${money(m.shares)}</td><td class="mono">${money(m.outstandingBalance)}</td><td>${Number(m.activeLoans||0)}</td><td>${status(m.status||"active")}</td><td><button class="mini-btn" title="Open member account" data-open-member-dashboard="${m.id}">${icons.eye}</button></td></tr>`;
+  const cards=members.map(m=>`<article class="credits-member-card"><header><strong>${escapeHtml(m.name)}</strong>${status(m.status||"active")}</header><small>${escapeHtml(m.memberNumber||"")} · ${escapeHtml(memberPhoneLabel(m.phone))}</small><dl><div><dt>Savings</dt><dd>${money(m.savings)}</dd></div><div><dt>Shares</dt><dd>${money(m.shares)}</dd></div><div><dt>Outstanding loan</dt><dd>${money(m.outstandingBalance)}</dd></div><div><dt>Active loans</dt><dd>${Number(m.activeLoans||0)}</dd></div></dl><button class="button small secondary" data-open-member-dashboard="${m.id}">${icons.eye} Open account</button></article>`).join("");
+  return `<div class="exec-module-metrics">${executiveModuleMetric("Active members",members.length,"blue")}${executiveModuleMetric("Savings + capital",money(c.contributionProgress?.totalMemberFunds||0),"green")}${executiveModuleMetric("Savings for completed months",money(c.contributionProgress?.expectedSavingsToDate||0),"violet")}${executiveModuleMetric("Verified this year",money(c.contributionProgress?.verifiedSavings||0),"orange")}</div>
+    <div class="credits-policy-explainer"><strong>${p?.fiscalYear||"Current year"} rules</strong><span>Monthly savings ${money(p?.monthlySavingsTarget||0)}</span><span>Welfare UGX 25,000 once a month from the first deposit</span><span>Annual shares ${money(p?.annualShareTarget||0)}</span><span>Annual subscription ${money(p?.annualSubscriptionFee||0)}</span><small>A 425,000 payment sends 25,000 to welfare and 400,000 to savings the first time that month. Later deposits in the same month stay fully on savings and on the Centenary account.</small></div>
+    <section class="finance-panel"><div class="finance-panel-head"><div><h3>Member accounts</h3><p>Active members only — open any account for savings, loans and repayments</p></div></div>
+      <div class="table-scroll credits-members-desktop"><table><thead><tr><th>Member</th><th>Contact</th><th>Savings</th><th>Share capital</th><th>Outstanding loan</th><th>Active loans</th><th>Status</th><th></th></tr></thead><tbody>${members.map(row).join("")||`<tr><td colspan="8">No active members.</td></tr>`}</tbody></table></div>
+      <div class="credits-member-cards">${cards||`<div class="exec-empty">No active members.</div>`}</div>
+    </section>`;
+}
+function creditsSavingsView() {
   const c=state.credits,rows=c.transactions.filter(t=>["Savings deposit","Withdrawal","Share purchase","Annual subscription fee"].includes(t.type));
   const pendingReview=rows.filter(t=>t.type==="Savings deposit"&&["pending","pending_finance_review"].includes(t.status));
   const canVerify=Boolean(c.access?.canApprove||c.access?.canEdit)&&!isExecutiveReadOnly();
@@ -2817,6 +2825,13 @@ function creditsMembersView() {
     ];}))}`;
 }
 
+function parseRepaymentSplit(notes){
+  const raw=String(notes||"");
+  const grab=label=>{const m=raw.match(new RegExp(`${label}\\s*=\\s*([\\d,.]+)`,"i"));return m?Number(String(m[1]).replace(/,/g,"")):null;};
+  const principal=grab("principal"),interest=grab("interest"),charges=grab("charges")??grab("penalty");
+  const human=raw.replace(/charges\s*=\s*[\d,.]+/gi,"").replace(/interest\s*=\s*[\d,.]+/gi,"").replace(/principal\s*=\s*[\d,.]+/gi,"").replace(/penalty\s*=\s*[\d,.]+/gi,"").replace(/[;|,]+/g," ").replace(/\s+/g," ").trim();
+  return {principal,interest,charges,human};
+}
 function creditsTransactionDetails(id) {
   const t=state.credits.transactions.find(item=>String(item.id)===String(id));if(!t)return;
   const pending=t.status==="pending";
@@ -2830,7 +2845,27 @@ function creditsTransactionDetails(id) {
     :pending&&canVerify
     ?`<button class="button danger" data-deposit-decision="reject">No / Reject</button><button class="button primary" data-deposit-decision="approve">${isLoanRepayment?"Confirm money received & update loan":"Approve / Confirm money received"}</button>`
     :`<button class="button secondary" data-close-footer>Close</button>`;
-  document.body.insertAdjacentHTML("beforeend",`<div class="modal-backdrop" id="modal-backdrop"><div class="modal loan-detail-modal"><div class="modal-head"><div><h2>${isLoanRepayment?"Loan repayment verification":savingsPending?"Savings awaiting Finance approval":"Contribution verification"}</h2><p>${escapeHtml(t.member)} - ${escapeHtml(t.memberNumber||"")}</p></div><button class="modal-close" data-close>${icons.x}</button></div><div class="form"><div class="transaction-detail-grid"><div><span>Amount claimed</span><strong>${money(t.amount)}</strong></div><div><span>Payment method</span><strong>${escapeHtml(t.method||"—")}</strong></div><div><span>Payment reference</span><strong>${escapeHtml(t.externalReference||"—")}</strong></div>${isLoanRepayment?`<div><span>Loan</span><strong>${escapeHtml(t.loanReference||"—")}</strong></div>`:""}<div><span>Submitted by</span><strong>${escapeHtml(t.officer||t.member)}</strong></div><div><span>Submitted</span><strong>${new Date(t.createdAt).toLocaleString()}</strong></div><div><span>Status</span><strong>${savingsPending?status("pending_finance_review"):status(t.status)}</strong></div><div><span>Official receipt</span><strong>${escapeHtml(t.receiptNumber||"Issued only after approval")}</strong></div><div><span>Verified</span><strong>${t.verifiedAt?new Date(t.verifiedAt).toLocaleString():"Not yet verified"}</strong></div><div class="full"><span>Member notes</span><strong>${escapeHtml(t.notes||"No notes provided")}</strong></div>${t.verificationComment?`<div class="full"><span>Decision</span><strong>${escapeHtml(t.verificationComment)}</strong></div>`:""}</div><h3 class="loan-section-title">Payment evidence</h3>${proof}<div class="modal-actions">${actions}</div></div></div></div>`);
+  const split=isLoanRepayment?parseRepaymentSplit(t.notes):{human:t.notes};
+  const loan=(state.credits.loans||[]).find(l=>String(l.id)===String(t.loanId)||String(l.reference)===String(t.loanReference));
+  const remaining=loan?loanBreakdown(loan):null;
+  const repaymentGrid=isLoanRepayment?`<div><span>Amount received</span><strong>${money(t.amount)}</strong></div>
+      <div><span>Applied to principal</span><strong>${split.principal!=null?money(split.principal):"—"}</strong></div>
+      <div><span>Applied to interest</span><strong>${split.interest!=null?money(split.interest):"—"}</strong></div>
+      <div><span>Applied to penalty</span><strong>${split.charges!=null?money(split.charges):money(0)}</strong></div>
+      <div><span>Loan</span><strong>${escapeHtml(t.loanReference||loan?.reference||"—")}</strong></div>
+      ${remaining?`<div><span>Still remaining on loan</span><strong>${money(remaining.total)}</strong></div>`:""}
+      <div><span>Payment method</span><strong>${escapeHtml(t.method||"—")}</strong></div>
+      <div><span>Bank / mobile reference</span><strong>${escapeHtml(t.externalReference||"—")}</strong></div>
+      <div><span>Official receipt</span><strong>${escapeHtml(t.receiptNumber||"Issued only after approval")}</strong></div>
+      <div><span>Status</span><strong>${status(t.status)}</strong></div>
+      <div><span>Recorded by</span><strong>${escapeHtml(t.officer||t.member)}</strong></div>
+      <div><span>Received</span><strong>${new Date(t.createdAt).toLocaleString()}</strong></div>
+      <div><span>Verified by</span><strong>${escapeHtml(t.verifiedBy||(t.verifiedAt?"Credits":"Not yet verified"))}</strong></div>
+      <div><span>Verified</span><strong>${t.verifiedAt?new Date(t.verifiedAt).toLocaleString():"Not yet verified"}</strong></div>
+      ${split.human?`<div class="full"><span>Notes</span><strong>${escapeHtml(split.human)}</strong></div>`:""}
+      ${t.verificationComment?`<div class="full"><span>Decision</span><strong>${escapeHtml(t.verificationComment)}</strong></div>`:""}`
+    :`<div><span>Amount</span><strong>${money(t.amount)}</strong></div><div><span>Payment method</span><strong>${escapeHtml(t.method||"—")}</strong></div><div><span>Payment reference</span><strong>${escapeHtml(t.externalReference||"—")}</strong></div><div><span>Submitted by</span><strong>${escapeHtml(t.officer||t.member)}</strong></div><div><span>Submitted</span><strong>${new Date(t.createdAt).toLocaleString()}</strong></div><div><span>Status</span><strong>${savingsPending?status("pending_finance_review"):status(t.status)}</strong></div><div><span>Official receipt</span><strong>${escapeHtml(t.receiptNumber||"Issued only after approval")}</strong></div><div><span>Verified</span><strong>${t.verifiedAt?new Date(t.verifiedAt).toLocaleString():"Not yet verified"}</strong></div><div class="full"><span>Notes</span><strong>${escapeHtml(t.notes||"No notes provided")}</strong></div>${t.verificationComment?`<div class="full"><span>Decision</span><strong>${escapeHtml(t.verificationComment)}</strong></div>`:""}`;
+  document.body.insertAdjacentHTML("beforeend",`<div class="modal-backdrop" id="modal-backdrop"><div class="modal loan-detail-modal"><div class="modal-head"><div><h2>${isLoanRepayment?"Loan repayment":savingsPending?"Savings awaiting Finance approval":"Contribution verification"}</h2><p>${escapeHtml(t.member)} - ${escapeHtml(t.memberNumber||"")}</p></div><button class="modal-close" data-close>${icons.x}</button></div><div class="form"><div class="transaction-detail-grid">${repaymentGrid}</div><h3 class="loan-section-title">Payment evidence</h3>${proof}<div class="modal-actions">${actions}</div></div></div></div>`);
   document.querySelector("[data-close]").onclick=closeModal;const footer=document.querySelector("[data-close-footer]");if(footer)footer.onclick=closeModal;
   document.querySelectorAll("[data-deposit-decision]").forEach(button=>button.onclick=()=>decideCreditsDeposit(t.id,button.dataset.depositDecision,isLoanRepayment));
   document.querySelectorAll("[data-finance-savings-review]").forEach(button=>button.onclick=event=>{event.preventDefault();reviewFinanceSavings(t.id,button.dataset.decision);});
@@ -3082,24 +3117,18 @@ function creditsDocumentsView() {
   return `<div class="exec-document-groups">${known.map(type=>{const rows=docs.filter(d=>d.documentType===type);return `<section class="finance-panel"><div class="finance-panel-head"><div><h3>${type}</h3><p>${rows.length} Credits document${rows.length===1?"":"s"}</p></div></div>${rows.map(row).join("")||`<div class="exec-empty">No documents in this category yet.</div>`}</section>`;}).join("")}${other.length?`<section class="finance-panel"><div class="finance-panel-head"><div><h3>Other documents</h3><p>${other.length} custom-typed document${other.length===1?"":"s"}</p></div></div>${other.map(row).join("")}</section>`:""}</div>`;
 }
 function creditsNotificationsView() {
-  return `<section class="finance-panel"><div class="exec-notification-page">${state.credits.notifications.map(n=>`<article><span>${icons.bell}</span><div><small>${n.level}</small><h3>${n.title}</h3><p>Credits Department notification</p></div><time>${relativeTime(n.createdAt||n.time)}</time></article>`).join("")||`<div class="exec-empty">No current Credits notifications.</div>`}</div></section>`;
+  const items=state.credits.notifications||[];
+  return `<section class="finance-panel"><div class="exec-notification-page">${items.map(n=>`<article><span>${icons.bell}</span><div><small>${escapeHtml(n.level||"")}</small><h3>${escapeHtml(n.title)}</h3><p>${escapeHtml(n.detail||"Credits Department notification")}</p></div><time>${relativeTime(n.createdAt||n.time)}</time><div class="exec-notification-actions"><button type="button" class="danger" data-delete-notification="${escapeHtml(n.key||"")}">${icons.trash}Delete</button></div></article>`).join("")||`<div class="exec-empty">No current Credits notifications.</div>`}</div></section>`;
 }
 function creditsSettingsView() {
-  return `<div class="settings-grid"><div class="card setting-card"><div class="card-head" style="padding:0 0 16px"><div><h2 class="card-title">SACCO credit controls</h2><p class="card-subtitle">Savings and lending safeguards</p></div></div>
-    <div class="setting-row"><div class="setting-icon">${icons.savings}</div><div class="setting-copy"><strong>Minimum savings balance</strong><span>${money(Number(state.settings.minimumBalance||100000))} must remain after withdrawal</span></div></div>
-    <div class="setting-row"><div class="setting-icon">${icons.users}</div><div class="setting-copy"><strong>Guarantor capacity</strong><span>Accepted and pending guarantees cannot exceed allowable member savings</span></div>${status("active")}</div>
-    <div class="setting-row"><div class="setting-icon">${icons.clock}</div><div class="setting-copy"><strong>Automatic repayment schedule</strong><span>Created immediately after authorized disbursement</span></div>${status("active")}</div></div>
-    <div class="card setting-card"><div class="card-head" style="padding:0 0 16px"><div><h2 class="card-title">Department boundaries</h2><p class="card-subtitle">Enforced by role and department assignment</p></div></div>
-    <div class="setting-row"><div class="setting-icon">${icons.lock}</div><div class="setting-copy"><strong>Finance isolation</strong><span>Credits cannot manage organization budgets, invoices, procurement or bank accounts</span></div>${status("active")}</div>
-    <div class="setting-row"><div class="setting-icon">${icons.shield}</div><div class="setting-copy"><strong>Approval stages</strong><span>Officer review, guarantor consent, committee decision and authorized disbursement stay separate</span></div>${status("active")}</div>
-    <div class="setting-row"><div class="setting-icon">${icons.audit}</div><div class="setting-copy"><strong>Complete audit trail</strong><span>Applications, decisions, repayments, charges and recovery actions are logged</span></div>${status("active")}</div></div></div>`;
+  return `<div class="notice"><div>${icons.shield}</div><div><strong>Credits workspace</strong><p>Loan, savings and repayment rules run automatically from live member records. There are no extra department cards to configure on this page.</p></div></div>`;
 }
 function creditsSearchView() {
   const results=state.creditsSearchResults||[];
   return `<div class="exec-search-summary">${icons.search}<div><strong>${results.length} Credits result${results.length===1?"":"s"}</strong><span>for &quot;${escapeHtml(state.creditsSearchTerm||"")}&quot;</span></div></div><section class="finance-panel"><div class="exec-global-results">${results.map(r=>`<button data-credits-page="${r.target}"><span>${r.type}</span><div><strong>${r.title}</strong><small>${r.reference} - ${r.detail||""}</small></div><b>&gt;</b></button>`).join("")||`<div class="exec-empty">Type at least two characters to search Credits.</div>`}</div></section>`;
 }
 function creditsMemberOptions(selected="") {
-  return state.credits.members.map(m=>`<option value="${m.id}" ${String(m.id)===String(selected)?"selected":""}>${m.memberNumber} - ${m.name} - ${money(m.savings)}</option>`).join("");
+  return (state.credits.members||[]).filter(isSelectableActiveMember).map(m=>`<option value="${m.id}" ${String(m.id)===String(selected)?"selected":""}>${m.memberNumber} - ${m.name} - ${money(m.savings)}</option>`).join("");
 }
 function creditsLoanOptions(filter=()=>true,selected="") {
   return state.credits.loans.filter(filter).map(l=>`<option value="${l.id}" ${String(l.id)===String(selected)?"selected":""}>${l.reference} - ${l.member} - ${money(l.balance)}</option>`).join("");
@@ -3433,7 +3462,16 @@ function memberPhoneLabel(phone){
   const value=String(phone||"").trim();
   return value&&!PLACEHOLDER_PHONES.has(value)?value:"Not recorded";
 }
-function isExitedMember(m){return /^(exited|left|withdrawn|inactive)$/i.test(String(m.status||""));}
+function isExitedMember(m){return /^(exited|left|withdrawn|inactive)$/i.test(String(m.status||m.memberStatus||""));}
+function isSelectableActiveMember(m){
+  if(!m)return false;
+  if(isExitedMember(m))return false;
+  const status=String(m.status||m.memberStatus||"active").toLowerCase();
+  if(status&&status!=="active")return false;
+  const num=String(m.memberNumber||m.id||m.member_number||"");
+  if(/^G40-HIST/i.test(num))return false;
+  return true;
+}
 function memberDirectoryRow(m){
   const hasPhoto=Boolean(m.hasProfilePhoto||m.hasPassportPhoto);
   const avatar=hasPhoto
@@ -4165,8 +4203,11 @@ function bind() {
     if(!(await (window.confirmDialog?.("Delete this notification?") ?? confirm("Delete this notification?"))))return;
     try{
       el.disabled=true;
-      await api("/api/executive/notifications/delete",{method:"POST",body:JSON.stringify({key:el.dataset.deleteNotification})});
-      state.executive.notifications=(state.executive.notifications||[]).filter(n=>n.key!==el.dataset.deleteNotification);
+      const key=el.dataset.deleteNotification;
+      const credits=/^credits:/.test(key);
+      await api(credits?"/api/credits/notifications/delete":"/api/executive/notifications/delete",{method:"POST",body:JSON.stringify({key})});
+      if(credits)state.credits.notifications=(state.credits.notifications||[]).filter(n=>n.key!==key);
+      else state.executive.notifications=(state.executive.notifications||[]).filter(n=>n.key!==key);
       render();toast("Notification deleted.");
     }catch(error){el.disabled=false;toast(error.message);}
   }));
@@ -4671,7 +4712,7 @@ async function renderSecurePreview(contentHref,title) {
     host.innerHTML=`<div class="document-preview-unavailable">${icons.file}<h3>Preview is unavailable for this file type</h3><p>Use the Download button below to open it in its supported application.</p></div>`;
   } catch(error) {if(host.isConnected)host.innerHTML=`<div class="document-preview-unavailable danger">${icons.bell}<h3>Document could not be displayed</h3><p>${escapeHtml(error.message)}</p></div>`;}
 }
-function memberOptions(selected="") { return state.members.map(m=>`<option value="${m.databaseId}" ${String(m.databaseId)===String(selected)?"selected":""}>${m.id} - ${m.name}</option>`).join(""); }
+function memberOptions(selected="") { return (state.members||[]).filter(isSelectableActiveMember).map(m=>`<option value="${m.databaseId}" ${String(m.databaseId)===String(selected)?"selected":""}>${m.id} - ${m.name}</option>`).join(""); }
 const DESK_ROLES={executive:"Executive Officer",finance:"Finance Officer",credits:"Credits Officer",investment:"Investment Officer",welfare:"Welfare Officer",legal:"Legal Officer",audit:"Auditor",supervisory:"Supervisory Officer"};
 function departmentDeskOptions(selected=""){
   const desks=(state.departments||[]).filter(d=>DESK_ROLES[d.code]);

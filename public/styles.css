@@ -1959,3 +1959,18 @@ html:has(.messages-content),body:has(.messages-content),body:has(.messages-conte
   .chat-messages{padding:12px}
   .message-bubble{max-width:82%}
 }
+
+.table-scroll{max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch}
+.table-scroll table{width:max-content;min-width:100%}
+.table-scroll th,.table-scroll td,.table-scroll strong,.table-scroll small{overflow-wrap:normal;word-break:keep-all;white-space:nowrap}
+.member-history-cards,.credits-member-cards{display:none}
+.member-history-card,.credits-member-card{padding:14px;border:1px solid #e4ebf2;border-radius:14px;background:#fff;display:grid;gap:8px}
+.member-history-card header,.credits-member-card header{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.member-history-card dl,.credits-member-card dl{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:0}
+.member-history-card dt,.credits-member-card dt{font-size:11px;color:#748396;text-transform:uppercase}
+.member-history-card dd,.credits-member-card dd{margin:2px 0 0;font-weight:800;color:#173654}
+.credits-member-card .button{justify-self:start}
+@media(max-width:760px){
+  .member-history-desktop,.credits-members-desktop{display:none}
+  .member-history-cards,.credits-member-cards{display:grid;gap:10px}
+}

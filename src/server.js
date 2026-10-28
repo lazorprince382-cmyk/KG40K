@@ -1632,6 +1632,14 @@ app.post("/api/executive/notifications/delete",auth,requireExecutive("view"),asy
     ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value,updated_at=NOW()`,[`deletedNotifications:${req.user.id}`,JSON.stringify([...new Set(keys)])]);
   res.json({ok:true});
 }));
+app.post("/api/credits/notifications/delete",auth,requireCredits("view"),asyncRoute(async(req,res)=>{
+  const key=String(req.body.key||"").trim();
+  if(!/^credits:/.test(key))return res.status(400).json({error:"That notification cannot be deleted"});
+  const keys=[...(await loadDeletedNotifications(req.user.id)),key].slice(-500);
+  await query(`INSERT INTO settings (key,value) VALUES ($1,$2)
+    ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value,updated_at=NOW()`,[`deletedNotifications:${req.user.id}`,JSON.stringify([...new Set(keys)])]);
+  res.json({ok:true});
+}));
 app.post("/api/executive/approvals/:id/decision",auth,requireExecutive("approve"),asyncRoute(async(req,res)=>{
   const decision=String(req.body.decision||"").toLowerCase();
   const statusMap={approve:"approved",reject:"rejected",more_information:"information_requested"};
@@ -3134,6 +3142,7 @@ app.get("/api/credits/command-center",auth,requireCredits("view",{allowFinanceVi
   const pendingRepaymentVerifications=pendingMemberVerifications.filter(t=>t.type==="Loan repayment");
   const pendingContributionVerifications=pendingMemberVerifications.filter(t=>["Savings deposit","Share purchase","Annual subscription fee"].includes(t.type));
   const primaryCreditsOfficer=await getPrimaryCreditsOfficer({query});
+  const hiddenCreditsNotes=await loadDeletedNotifications(req.user.id);
   res.json({
     stats:{totalMembers:summary.rows[0].active_members,totalSavings,availableFunds,activeLoans:portfolioSummary.rows[0].active,
       pendingApplications:underReview.length,awaitingDisbursement:portfolioSummary.rows[0].awaiting_disbursement,
@@ -3153,15 +3162,15 @@ app.get("/api/credits/command-center",auth,requireCredits("view",{allowFinanceVi
     contributionPolicy,contributionProgress,pastContributionProgress,
     recovery:recovery.rows,charges:charges.rows,documents:documents.rows,monthly,
     notifications:[
-      pendingRepaymentVerifications.length&&{level:"warning",title:`${pendingRepaymentVerifications.length} loan repayment${pendingRepaymentVerifications.length===1?"":"s"} awaiting Credits Officer approval`,detail:"Review on Repayments",target:"credits-repayments",transactionId:pendingRepaymentVerifications[0]?.id,createdAt:pendingRepaymentVerifications[0]?.createdAt},
-      pendingContributionVerifications.length&&{level:"info",title:`${pendingContributionVerifications.length} member contribution${pendingContributionVerifications.length===1?"":"s"} awaiting verification`,detail:"Review on Savings",target:"credits-savings",transactionId:pendingContributionVerifications[0]?.id,createdAt:pendingContributionVerifications[0]?.createdAt},
-      dangerRows.length&&{level:"danger",title:`${dangerRows.length} loan${dangerRows.length===1?"":"s"} past due — remind members before the 5% principal penalty grows`,createdAt:dangerRows[0]?.nextDueDate||dangerRows[0]?.dueDate||dangerRows[0]?.createdAt},
-      overdueRows.length&&{level:"danger",title:`${overdueRows.length} loan${overdueRows.length===1?" is":"s are"} overdue and need recovery follow-up`,createdAt:overdueRows[0]?.dueDate||overdueRows[0]?.createdAt},
-      underReview.length&&{level:"info",title:`${underReview.length} loan applications are moving through approval`,createdAt:underReview[0]?.createdAt},
-      Number(guarantorSummary.rows[0].pending)>0&&{level:"warning",title:`${guarantorSummary.rows[0].pending} guarantor confirmations are pending`,createdAt:guarantors.rows.find(x=>x.status==="pending")?.createdAt},
-      Number(savingsThisMonth)>0&&{level:"success",title:`Savings deposits this month total UGX ${Number(savingsThisMonth).toLocaleString()}`,createdAt:transactionsResult.rows.find(x=>x.type==="Savings deposit"&&x.status==="completed")?.verifiedAt||transactionsResult.rows.find(x=>x.type==="Savings deposit"&&x.status==="completed")?.createdAt},
-      Number(depositSummary.rows[0].repayments_month)>0&&{level:"info",title:`Repayments this month total UGX ${Number(depositSummary.rows[0].repayments_month).toLocaleString()}`,createdAt:transactionsResult.rows.find(x=>x.type==="Loan repayment"&&x.status==="completed")?.verifiedAt||transactionsResult.rows.find(x=>x.type==="Loan repayment"&&x.status==="completed")?.createdAt}
-    ].filter(Boolean),
+      pendingRepaymentVerifications.length&&{key:"credits:pending-repay",level:"warning",title:`${pendingRepaymentVerifications.length} loan repayment${pendingRepaymentVerifications.length===1?"":"s"} awaiting Credits Officer approval`,detail:"Review on Repayments",target:"credits-repayments",transactionId:pendingRepaymentVerifications[0]?.id,createdAt:pendingRepaymentVerifications[0]?.createdAt},
+      pendingContributionVerifications.length&&{key:"credits:pending-contrib",level:"info",title:`${pendingContributionVerifications.length} member contribution${pendingContributionVerifications.length===1?"":"s"} awaiting verification`,detail:"Review on Savings",target:"credits-savings",transactionId:pendingContributionVerifications[0]?.id,createdAt:pendingContributionVerifications[0]?.createdAt},
+      dangerRows.length&&{key:"credits:past-due",level:"danger",title:`${dangerRows.length} loan${dangerRows.length===1?"":"s"} past due — remind members before the 5% principal penalty grows`,createdAt:dangerRows[0]?.nextDueDate||dangerRows[0]?.dueDate||dangerRows[0]?.createdAt},
+      overdueRows.length&&{key:"credits:overdue",level:"danger",title:`${overdueRows.length} loan${overdueRows.length===1?" is":"s are"} overdue and need recovery follow-up`,createdAt:overdueRows[0]?.dueDate||overdueRows[0]?.createdAt},
+      underReview.length&&{key:"credits:under-review",level:"info",title:`${underReview.length} loan applications are moving through approval`,createdAt:underReview[0]?.createdAt},
+      Number(guarantorSummary.rows[0].pending)>0&&{key:"credits:pending-guarantors",level:"warning",title:`${guarantorSummary.rows[0].pending} guarantor confirmations are pending`,createdAt:guarantors.rows.find(x=>x.status==="pending")?.createdAt},
+      Number(savingsThisMonth)>0&&{key:"credits:savings-month",level:"success",title:`Savings deposits this month total UGX ${Number(savingsThisMonth).toLocaleString()}`,createdAt:transactionsResult.rows.find(x=>x.type==="Savings deposit"&&x.status==="completed")?.verifiedAt||transactionsResult.rows.find(x=>x.type==="Savings deposit"&&x.status==="completed")?.createdAt},
+      Number(depositSummary.rows[0].repayments_month)>0&&{key:"credits:repayments-month",level:"info",title:`Repayments this month total UGX ${Number(depositSummary.rows[0].repayments_month).toLocaleString()}`,createdAt:transactionsResult.rows.find(x=>x.type==="Loan repayment"&&x.status==="completed")?.verifiedAt||transactionsResult.rows.find(x=>x.type==="Loan repayment"&&x.status==="completed")?.createdAt}
+    ].filter(Boolean).filter(n=>!hiddenCreditsNotes.has(n.key)),
     access:{authorityLevel:req.creditsAccess.authority_level,canCreate:Boolean(req.creditsAccess.can_create),
       canEdit:Boolean(req.creditsAccess.can_edit),canApprove:Boolean(req.creditsAccess.can_approve)},
     primaryCreditsOfficer:primaryCreditsOfficer?.name||null,
@@ -4921,6 +4930,7 @@ app.post("/api/loans",auth,upload.array("supportingDocument",10),(req,res,next)=
 },asyncRoute(async(req,res)=>{
   const b=req.body,canManageLoans=(permissions[req.user.role]||[]).includes("loan:manage"),memberId=canManageLoans&&b.memberId?Number(b.memberId):Number(req.user.member_id),amount=Number(b.amount),term=Number(b.termMonths);
   const member=await one("SELECT * FROM members WHERE id=$1 AND deleted_at IS NULL",[memberId]),product=await one("SELECT * FROM loan_products WHERE id=$1 AND active=true",[b.productId]);
+  if(member&&String(member.status||"").toLowerCase()!=="active")return res.status(400).json({error:"Exited members cannot take a new loan"});
   const securityType=String(b.securityType||"").trim().toLowerCase().replaceAll(/[^a-z]+/g,"_").replace(/^_|_$/g,"");
   const declaration=String(b.borrowerDeclaration||"")==="accepted",overdueDeclaration=String(b.overdueDeclaration||"")==="accepted";
   const savingsSecurity=isSavingsSecurity(securityType),collateralSecurity=securityType==="collateral";
@@ -5142,7 +5152,7 @@ app.post("/api/loans",auth,upload.array("supportingDocument",10),(req,res,next)=
       WHERE running.member_id=m.id AND running.status IN ('active','overdue')
       ORDER BY CASE WHEN running.status='overdue' THEN 0 ELSE 1 END, running.id DESC LIMIT 1) AS "runningLoanReference"
     FROM members m
-    WHERE m.status='active' AND m.id<>$1
+    WHERE m.status='active' AND m.id<>$1 AND m.member_number NOT LIKE 'G40-HIST-%'
       AND EXISTS (SELECT 1 FROM users u WHERE u.member_id=m.id AND u.active=true)
     ORDER BY m.full_name`,[borrowerId])).rows;
   const candidates=await Promise.all(rows.map(async row=>{
