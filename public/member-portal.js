@@ -654,7 +654,10 @@
   function syncMemberPending(){if(!C())return;const extra=C().welfare.contributions.filter(x=>["pending","pending_finance_review"].includes(x.status)).length;C().summary.pendingRequests+=extra;}
   function openProfilePhoto(src,name){
     if(!src)return;
-    modal(name||"Profile picture",`<div class="member-photo-view"><img class="member-photo-large" src="${esc(src)}" alt="${esc(name||"Profile photo")}"></div>`);
+    if(typeof closeModal==="function")closeModal();
+    document.body.insertAdjacentHTML("beforeend",`<div class="modal-backdrop" id="modal-backdrop"><div class="modal member-photo-modal"><div class="modal-head"><div><h2>${esc(name||"Profile picture")}</h2><p>Profile picture</p></div><button class="modal-close" data-close>${icons.x}</button></div><img class="member-photo-large" src="${esc(src)}" alt="${esc(name||"Profile photo")}"></div></div>`);
+    document.querySelector("#modal-backdrop [data-close]")?.addEventListener("click",closeModal);
+    document.getElementById("modal-backdrop")?.addEventListener("click",event=>{if(event.target.id==="modal-backdrop")closeModal();});
   }
   function bindProfilePhotoClicks(){
     document.querySelectorAll("[data-open-profile-photo]").forEach(el=>{

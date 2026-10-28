@@ -14,7 +14,7 @@
   "supervisory-module.js?v=82",
   "department-events.js?v=63",
   "official-policy-ui.js?v=11",
-  "member-portal.js?v=139",
+  "member-portal.js?v=140",
   "loan-calculator.js?v=7",
   "department-bootstrap.js?v=64"
 ].forEach((source) => document.write(`<script src="${source}"><\/script>`));

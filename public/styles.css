@@ -1880,8 +1880,8 @@ tr.pending-receipt{background:#f8fafc;color:#64748b}
 .credits-active-loan .credits-row-progress>div{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
 .member-photo-btn{padding:0;border:0;cursor:pointer}
 .member-photo-btn:hover{outline:2px solid #176fe1;outline-offset:1px}
-.member-photo-modal{max-width:420px}
-.member-photo-large{display:block;width:100%;max-height:70vh;object-fit:cover;border-radius:12px;background:#eef3f8}
+.member-photo-modal{width:min(920px,96vw);max-width:none;max-height:94vh;overflow:hidden;padding-bottom:16px}
+.member-photo-large,.member-photo-view img{display:block;width:100%;max-height:calc(94vh - 92px);object-fit:contain;object-position:center;border-radius:12px;background:#0f172a}
 @media(max-width:900px){.credits-loan-list .credits-active-figures{grid-template-columns:repeat(3,minmax(0,1fr))}}
 .loan-math-panel{margin-bottom:16px}.loan-math-panel .exec-panel-head p{max-width:760px}
 .loan-math-table{width:100%;border-collapse:collapse;font-size:13.5px}
