@@ -486,7 +486,7 @@ async function matchCentenarySmsRalph20261027(client){
   return summary;
 }
 async function fillMemberPhonesFromRoll20261028(client){
-  const key="fixMemberPhonesVisible20261028";
+  const key="fixMemberPhonesKalembaEzraOketcho20261028";
   if((await client.query("SELECT 1 FROM settings WHERE key=$1",[key])).rows[0])return null;
   const roll=[
     ["%Simon%Ssemaganda%","0779522296"],["%Justine%Inhensiko%","0772074235"],["%Baraza%Olivia%","0763424032"],
@@ -497,7 +497,10 @@ async function fillMemberPhonesFromRoll20261028(client){
     ["%Mary%Babirye%","0782364222"],["%Ritah%Nakyanzi%","0752557108"],["%Dan%Rwebingira%","0772432118"],
     ["%Rwebingira%Dan%","0772432118"],["%Francis%Banumba%","0782377969"],["%Ralph%Masaba%","0757858518"],
     ["%Masaba%Ralph%","0757858518"],["%Vicent%Gumisiriza%","0753995171"],["%Vincent%Gumisiriza%","0753995171"],
-    ["%Christopher%Muhoozi%","0772454425"],["%Denis%Tugume%","0772666438"],["%Tugume%Denis%","0772666438"]
+    ["%Christopher%Muhoozi%","0772454425"],["%Denis%Tugume%","0772666438"],["%Tugume%Denis%","0772666438"],
+    ["%Paul%Kalemba%","0751021656"],["%Kalemba%Paul%","0751021656"],
+    ["%Ezrah%Nayoga%","0772594742"],["%Ezra%Nayoga%","0772594742"],
+    ["%Charles%Oketcho%","0776968604"],["%Oketcho%","0776968604"],["%Okecho%","0776968604"]
   ];
   const updated=[];
   for(const [pattern,phone] of roll){
