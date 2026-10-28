@@ -1358,24 +1358,27 @@ function executiveRecordTable(title,headers,rows) {
   return `<section class="exec-panel exec-table-panel"><div class="exec-panel-head"><div><h3>${title}</h3></div></div><div class="table-scroll"><table><thead><tr>${headers.map(h=>`<th>${h}</th>`).join("")}</tr></thead><tbody>${rows.length?rows.map(r=>`<tr>${r.map(v=>`<td>${v}</td>`).join("")}</tr>`).join(""):`<tr><td colspan="${headers.length}">No records found.</td></tr>`}</tbody></table></div></section>`;
 }
 function executiveApprovalsView() {
-  const items=state.executive.approvals||[],history=state.executive.approvalHistory||[];
+  const items=state.executive.approvals||[];
   const pendingDocuments=(state.executive.documents||[]).filter(d=>d.status==="pending_executive");
-  const waitingCount=items.length+pendingDocuments.length;
-  const groups=[["Large Loans","large-loan"],["Document Publications","documents"],["Department Budgets","finance-budget"],["Large Payments","finance-payment"],["Investment Proposals","investment-proposal"],["Major Welfare Requests","welfare-request"],["Contract Signing","legal-contract"],["Policy Changes","policy"]];
+  const groups=[["Loans","large-loan","Credits has already cleared these. Executive authorizes, returns or rejects."],["Documents to publish","documents","Legal files waiting for Executive to publish."],["Payments","finance-payment","Money leaving the organisation that needs Executive."],["Investment proposals","investment-proposal","Finance has analysed these. Executive decides."],["Department budgets","finance-budget","Spending plans for the year."],["Welfare payouts","welfare-request","Major welfare support that needs Executive."]];
+  const known=new Set(groups.map(g=>g[1]));
   const itemTime=item=>new Date(item?.createdAt||item?.updatedAt||0).getTime()||0;
-  const newestAt=list=>Array.isArray(list)&&list.length?list.reduce((max,item)=>Math.max(max,itemTime(item)),0):0;
   const byNewest=(a,b)=>itemTime(b)-itemTime(a)||Number(b.id||b.loanId||0)-Number(a.id||a.loanId||0);
   const row=x=>{
     const canDecide=Boolean(x.canCurrentUserDecide)||(x.recordType==="loan"&&(x.pendingReviewers||[]).some(r=>Number(r.userId)===Number(state.user?.id)));
     return x.recordType==="loan"?`<div class="exec-approval-row executive-loan-approval"><div><span>${x.reference} - ${x.department}</span><strong>${escapeHtml(x.title)}</strong><p>${escapeHtml(x.description||"")}</p><small>${x.approvalProgress?`${x.approvalProgress.approvedCount}/${x.approvalProgress.requiredCount} Executive approvals recorded. Any remaining Executive member may decide. Credits already cleared this loan.`:`Credits already cleared this loan.`}</small></div><div class="exec-loan-actions">${x.amount?`<b>${money(x.amount)}</b>`:""}${status(x.status)}<button type="button" data-loan-detail-id="${x.loanId||x.id}">View details</button>${canDecide?`<button type="button" class="approve" data-exec-loan-decision="${x.loanId||x.id}" data-decision="authorize">Approve loan</button><button type="button" class="more" data-exec-loan-decision="${x.loanId||x.id}" data-decision="return">Request information</button><button type="button" class="reject" data-exec-loan-decision="${x.loanId||x.id}" data-decision="reject">Reject</button>`:`<span class="maker-checker-note">${(x.pendingReviewers||[]).length?`You already decided, or ${ (x.pendingReviewers||[]).length} other reviewer${(x.pendingReviewers||[]).length===1?"":"s"} still pending`:`Awaiting committee`}</span>`}</div></div>`:`<div class="exec-approval-row"><div><span>${x.reference} - ${x.department}</span><strong>${escapeHtml(x.title)}</strong><p>${escapeHtml(x.description||"")}${x.assignedTo?` - Reviewer: ${escapeHtml(x.assignedTo)}`:""}</p></div><div>${x.amount?`<b>${money(x.amount)}</b>`:""}${status(x.status)}<button type="button" data-exec-details="${x.id}">View details</button><button type="button" data-exec-reviewer="${x.id}">Assign reviewer</button><button type="button" class="approve" data-exec-decision="${x.id}" data-decision="approve">Approve</button><button type="button" class="more" data-exec-decision="${x.id}" data-decision="more_information">Request information</button><button type="button" class="reject" data-exec-decision="${x.id}" data-decision="reject">Reject</button></div></div>`;
   };
   const documentRows=pendingDocuments.slice().sort(byNewest).map(d=>`<div class="exec-approval-row executive-document-approval"><div><span>${escapeHtml(d.reference)} - ${escapeHtml(d.department||"Legal")}</span><strong>${escapeHtml(d.title)}</strong><p>${escapeHtml(d.documentType)} - Version ${escapeHtml(d.version)} awaiting Executive publication approval.</p></div><div>${status(d.status)}${d.hasFile?`<div class="document-actions"><a href="/api/documents/${d.id}/view" target="_blank" title="View document">${icons.eye}<span>View</span></a><a href="/api/documents/${d.id}/download" title="Download document">${icons.download}</a></div>`:`<span class="status pending no-file-badge">No file</span>`}<button class="approve" data-document-publication="${d.id}" data-decision="approve">Publish</button><button class="more" data-document-publication="${d.id}" data-decision="reject">Return</button></div></div>`);
-  const sections=groups.map(([label,type])=>{
-    if(type==="documents")return{label,type,count:pendingDocuments.length,freshness:newestAt(pendingDocuments),empty:`No document publications are waiting.`,body:documentRows.length?documentRows.join(""):null,subtitle:`${pendingDocuments.length} document${pendingDocuments.length===1?"":"s"} awaiting Executive publication`};
+  const other=items.filter(x=>!known.has(x.activityType));
+  const sections=groups.map(([label,type,hint])=>{
+    if(type==="documents")return pendingDocuments.length?{label,hint,body:documentRows.join(""),count:pendingDocuments.length}:null;
     const list=items.filter(x=>x.activityType===type).slice().sort(byNewest);
-    return{label,type,count:list.length,freshness:newestAt(list),empty:`No ${label.toLowerCase()} are waiting.`,body:list.length?list.map(row).join(""):null,subtitle:`${list.length} item${list.length===1?"":"s"} awaiting executive decision`};
-  }).sort((a,b)=>(b.count>0)-(a.count>0)||b.freshness-a.freshness||groups.findIndex(g=>g[1]===a.type)-groups.findIndex(g=>g[1]===b.type));
-  return `<div class="exec-approval-summary">${executiveModuleMetric("Waiting now",waitingCount,"red")}${executiveModuleMetric("High-value requests",items.filter(x=>x.amount>=10000000).length,"orange")}${executiveModuleMetric("Document publications",pendingDocuments.length,"violet")}${executiveModuleMetric("Decision trail","Fully audited","green")}</div><div class="exec-approval-page">${sections.map(s=>`<section class="exec-panel"><div class="exec-panel-head"><div><h3>${s.label}</h3><p>${s.subtitle}</p></div></div>${s.body||`<div class="exec-empty">${s.empty}</div>`}</section>`).join("")}</div>`;
+    return list.length?{label,hint,body:list.map(row).join(""),count:list.length}:null;
+  }).filter(Boolean);
+  if(other.length)sections.push({label:"Other decisions",hint:"Anything else sent to Executive.",body:other.slice().sort(byNewest).map(row).join(""),count:other.length});
+  const waiting=items.length+pendingDocuments.length;
+  if(!sections.length)return `<div class="exec-empty exec-approval-empty"><strong>Nothing needs Executive now</strong><p>Loans after Credits, documents to publish, payments, investment proposals, budgets and welfare payouts appear here when they are waiting.</p></div>`;
+  return `<div class="exec-approval-summary">${executiveModuleMetric("Waiting now",waiting,"red")}</div><div class="exec-approval-page">${sections.map(s=>`<section class="exec-panel"><div class="exec-panel-head"><div><h3>${s.label}</h3><p>${escapeHtml(s.hint)} · ${s.count} waiting</p></div></div>${s.body}</section>`).join("")}</div>`;
 }function executiveApprovalHistory(history) {
   const approved=history.filter(x=>x.status==="approved").length,rejected=history.filter(x=>x.status==="rejected").length,returned=history.filter(x=>x.status==="information_requested").length;
   return `<section class="exec-panel exec-approval-history"><div class="exec-panel-head"><div><h3>Approval History</h3><p>Permanent record of Executive requests, loan authorizations and responsible officers</p></div><div class="exec-history-counts"><span>${approved} approved</span><span>${rejected} rejected</span><span>${returned} information requests</span></div></div><div class="table-scroll"><table><thead><tr><th>Reference</th><th>Request</th><th>Requested by</th><th>Requested on</th><th>Decision</th><th>Decision by</th><th>Decision date</th><th>Action</th></tr></thead><tbody>${history.length?history.map(item=>`<tr><td><strong>${escapeHtml(item.reference)}</strong><small>${escapeHtml(item.department)}</small></td><td><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(String(item.activityType||"").replaceAll("-"," "))}${item.amount?` - ${money(item.amount)}`:""}</small></td><td>${escapeHtml(item.createdBy||"—")}</td><td>${item.createdAt?new Date(item.createdAt).toLocaleString():"—"}</td><td><span class="status ${item.status}">${escapeHtml(String(item.status||"").replaceAll("_"," "))}</span></td><td>${escapeHtml(item.decisionBy||(item.recordType==="loan"?"See loan process":"Recorded in audit log"))}</td><td>${item.decisionAt?new Date(item.decisionAt).toLocaleString():"—"}</td><td><button class="mini-btn" data-${item.recordType==="loan"?"loan-detail-id":"exec-details"}="${item.loanId||item.id}" title="View full process">${icons.eye}</button></td></tr>`).join(""):`<tr><td colspan="8">No Executive decisions have been recorded yet.</td></tr>`}</tbody></table></div></section>`;
@@ -1426,17 +1429,37 @@ function executiveNotificationsView() {
   const items=state.executive.notifications||[],read=dismissedAlertKeys();
   return `<section class="exec-panel"><div class="exec-notification-page">${items.map(n=>{const isRead=read.has(alertKey(n));return `<article class="${isRead?"is-read":""}"><span>${icons.bell}</span><div><small>${escapeHtml(n.type||"")}</small><h3>${escapeHtml(n.title||"")}</h3><p>${escapeHtml(n.detail||"")}</p></div><time>${relativeTime(n.createdAt||n.time)}</time><div class="exec-notification-actions">${isRead?`<span class="exec-notification-read">Read</span>`:`<button type="button" data-dismiss-alert="${escapeHtml(alertKey(n))}">Mark read</button>`}${n.deletable&&n.key?`<button type="button" class="danger" data-delete-notification="${escapeHtml(n.key)}">${icons.trash}Delete</button>`:""}</div></article>`;}).join("")||`<div class="exec-empty">No notifications.</div>`}</div></section>`;
 }
+function documentLibraryBucket(d){
+  const t=`${d.documentType||""} ${d.title||""}`.toLowerCase();
+  if(/constitution/.test(t))return "Constitution";
+  if(/bylaw/.test(t))return "Bylaws";
+  if(/minute/.test(t))return "Minutes";
+  if(/audit/.test(t))return "Audit reports";
+  if(/policy|loan application/.test(t))return "Policies";
+  if(/resolution/.test(t))return "Resolutions";
+  if(/attorney|deed|surrender/.test(t))return "Legal instruments";
+  if(/contract|agreement/.test(t))return "Agreements";
+  if(/welfare/.test(t))return "Welfare";
+  if(/financial statement|bank recon|payment support/.test(t))return "Finance records";
+  if(/report|action point/.test(t))return "Reports";
+  const known={"Policies":"Policies","Minutes":"Minutes","Board Minutes":"Minutes","Meeting Minutes":"Minutes","Signed Contracts":"Agreements","Annual Reports":"Reports","Audit Reports":"Audit reports","Legal Documents":"Legal instruments","Constitution":"Constitution","Bylaws":"Bylaws"};
+  return known[d.documentType]||"Other";
+}
+function documentLibraryRow(d){
+  const who=d.visibilityLevel!=null?` · ${Number(d.visibilityLevel)<=1?"Members":Number(d.visibilityLevel)===3?"Selected departments":"All departments"}`:"";
+  return `<div class="exec-document-row doc-row"><span>${icons.file}</span><div class="exec-document-copy"><strong>${escapeHtml(d.title)}</strong><small>${escapeHtml(d.documentType)}${d.department?` · ${escapeHtml(d.department)}`:""}${who}</small></div><div class="exec-document-controls">${d.hasFile?`<div class="document-actions"><a href="/api/documents/${d.id}/view" target="_blank" title="View">${icons.eye}<span>View</span></a><a href="/api/documents/${d.id}/download" title="Download">${icons.download}</a></div>`:`<span class="status pending no-file-badge">No file</span>`}<button type="button" class="document-delete" data-delete-document="${d.id}" data-document-title="${escapeHtml(d.title)}" title="Delete">${icons.trash}</button></div></div>`;
+}
+function documentLibraryView(docs,pendingCount=0,openApprovals=false){
+  const order=["Constitution","Bylaws","Policies","Resolutions","Minutes","Agreements","Legal instruments","Audit reports","Reports","Finance records","Welfare","Other"];
+  const grouped=new Map();
+  docs.forEach(d=>{const bucket=documentLibraryBucket(d);if(!grouped.has(bucket))grouped.set(bucket,[]);grouped.get(bucket).push(d);});
+  const sections=order.filter(name=>(grouped.get(name)||[]).length).map(name=>`<section class="exec-panel"><div class="exec-panel-head"><div><h3>${name}</h3><p>${grouped.get(name).length}</p></div></div>${grouped.get(name).map(documentLibraryRow).join("")}</section>`).join("");
+  return `${pendingCount?`<div class="credits-verification-banner"><div>${icons.info}<span><strong>${pendingCount} document${pendingCount===1?"":"s"} awaiting publication</strong><small>Review them from Approvals.</small></span></div>${openApprovals?`<button class="button small primary" data-executive-page="executive-approvals">Open Approvals</button>`:""}</div>`:""}<div class="exec-document-groups doc-library">${sections||`<div class="exec-empty">No published documents yet.</div>`}</div>`;
+}
 function executiveDocumentsView() {
-  const types=["Constitution","Bylaws","Policies","Minutes","Signed Contracts","Annual Reports","Audit Reports","Legal Documents"];
   const libraryDocs=(state.executive.documents||[]).filter(d=>d.status!=="pending_executive");
   const pendingCount=(state.executive.documents||[]).filter(d=>d.status==="pending_executive").length;
-  const matchesType=(d,type)=>type==="Minutes"?["Minutes","Board Minutes","Meeting Minutes"].includes(d.documentType):d.documentType===type;
-  const knownSet=new Set(types.flatMap(t=>t==="Minutes"?["Minutes","Board Minutes","Meeting Minutes"]:[t]));
-  const other=libraryDocs.filter(d=>!knownSet.has(d.documentType));
-  const who=(d)=>d.visibilityLevel!=null?` · Who can see: ${Number(d.visibilityLevel)<=1?"Members":Number(d.visibilityLevel)===3?"Selected departments":"All departments"}`:"";
-  const row=(d)=>`<div class="exec-document-row"><span>${icons.file}</span><div class="exec-document-copy"><strong>${escapeHtml(d.title)}</strong><small>${escapeHtml(d.reference)} - ${escapeHtml(d.documentType)} - Version ${escapeHtml(d.version)} - ${escapeHtml(d.department||"")}${who(d)}</small></div><div class="exec-document-controls">${status(d.status)}${d.hasFile?`<div class="document-actions"><a href="/api/documents/${d.id}/view" target="_blank" title="View document">${icons.eye}<span>View</span></a><a href="/api/documents/${d.id}/download" title="Download document">${icons.download}</a></div>`:`<span class="status pending no-file-badge">No file</span>`}<button type="button" class="document-delete" data-delete-document="${d.id}" data-document-title="${escapeHtml(d.title)}" title="Delete document">${icons.trash}</button></div></div>`;
-  const groups=types.map(type=>{const docs=libraryDocs.filter(d=>matchesType(d,type));return docs.length?`<section class="exec-panel"><div class="exec-panel-head"><div><h3>${type}</h3><p>${docs.length} official document${docs.length===1?"":"s"}</p></div></div>${docs.map(row).join("")}</section>`:"";}).join("");
-  return `${pendingCount?`<div class="credits-verification-banner"><div>${icons.info}<span><strong>${pendingCount} document${pendingCount===1?"":"s"} awaiting publication</strong><small>Review and publish them from the Approvals tab.</small></span></div><button class="button small primary" data-executive-page="executive-approvals">Open Approvals</button></div>`:""}<div class="exec-document-groups">${groups||`<div class="exec-empty">No published documents yet.</div>`}${other.length?`<section class="exec-panel"><div class="exec-panel-head"><div><h3>Other documents</h3><p>${other.length} custom-typed document${other.length===1?"":"s"}</p></div></div>${other.map(row).join("")}</section>`:""}</div>`;
+  return documentLibraryView(libraryDocs,pendingCount,true);
 }
 function financialYearsCard() {
   const data=state.financialYears;
@@ -1797,10 +1820,22 @@ function financeExpensesView() {
 }
 function financeVouchersView() {
   const f=state.finance;
-  return `${financeSavingsApprovalQueue(f)}${financeInvestmentAnalysisQueue(f)}<div class="finance-voucher-filters">${["finance_review","executive_approval","finance_approved","executive_approved","processed","returned_for_correction","rejected"].map(value=>`<span>${value.replaceAll("_"," ")} <b>${f.vouchers.filter(v=>v.status===value).length}</b></span>`).join("")}</div>
-    <div class="finance-voucher-list">${f.vouchers.map(v=>`<article><div class="finance-voucher-main"><span>${v.voucherNumber} - ${v.department}</span><h3>${v.supplier}</h3><p>${v.description} - ${v.category} - ${v.budgetLine}</p><small>Requested by ${v.requestedBy}${v.reviewedBy?` - Reviewed by ${v.reviewedBy}`:""}</small></div><div class="finance-voucher-value"><strong>${money(v.amount)}</strong>${status(v.status)}</div><div class="finance-voucher-actions">${financeApprovalActions(v)}${["executive_approved"].includes(v.status)?`<button class="process" data-finance-process="${v.id}">Process payment</button>`:""}<button data-finance-voucher-detail="${v.id}">Details</button></div></article>`).join("")}</div>`;
+  const actionable=new Set(["finance_review","executive_approval","finance_approved","executive_approved","returned_for_correction"]);
+  const open=(f.vouchers||[]).filter(v=>actionable.has(v.status));
+  const queues=`${financeSavingsApprovalQueue(f)}${financeInvestmentAnalysisQueue(f)}${financePendingEntriesWidget(f)}`;
+  if(!open.length&&!queues)return `<div class="exec-empty exec-approval-empty"><strong>Nothing waiting in Finance</strong><p>Member savings to post, expenses to approve, and investment analyses appear here.</p></div>`;
+  const chips=["finance_review","executive_approval","finance_approved","executive_approved","returned_for_correction"].map(value=>{
+    const count=open.filter(v=>v.status===value).length;
+    return count?`<span>${value.replaceAll("_"," ")} <b>${count}</b></span>`:"";
+  }).join("");
+  return `${queues}${open.length?`${chips?`<div class="finance-voucher-filters">${chips}</div>`:""}
+    <div class="finance-voucher-list">${open.map(v=>`<article><div class="finance-voucher-main"><span>${v.voucherNumber} - ${v.department}</span><h3>${v.supplier}</h3><p>${v.description} - ${v.category}${v.budgetLine?` - ${v.budgetLine}`:""}</p><small>Requested by ${v.requestedBy}${v.reviewedBy?` - Reviewed by ${v.reviewedBy}`:""}</small></div><div class="finance-voucher-value"><strong>${money(v.amount)}</strong>${status(v.status)}</div><div class="finance-voucher-actions">${financeApprovalActions(v)}${["executive_approved"].includes(v.status)?`<button class="process" data-finance-process="${v.id}">Process payment</button>`:""}<button data-finance-voucher-detail="${v.id}">Details</button></div></article>`).join("")}</div>`:""}`;
 }
-function financeInvestmentAnalysisQueue(f){const items=f.investmentAnalyses||[];return `<section class="finance-panel finance-analysis-queue"><div class="finance-panel-head"><div><h3>Investment Financial Analysis</h3><p>Finance feasibility review required before a proposal reaches Executive</p></div><strong>${items.length} waiting</strong></div>${items.map(p=>`<article><div><span>${p.reference} - ${escapeHtml(p.category)}</span><h3>${escapeHtml(p.title)}</h3><p>${escapeHtml(p.description)}</p><small>Submitted by ${escapeHtml(p.createdBy)} - Risk: ${escapeHtml(p.riskAssessment)}</small></div><div><strong>${money(p.estimatedCost)}</strong><small>Expected revenue ${money(p.expectedRevenue)} - ROI ${p.expectedRoi}%</small>${p.supportingDocument?`<a href="${p.supportingDocument}" target="_blank">${icons.file} Evidence</a>`:""}</div><div class="record-actions"><button data-finance-investment="${p.id}" data-decision="approve">Approve analysis</button><button data-finance-investment="${p.id}" data-decision="more_information">More information</button><button class="danger-action" data-finance-investment="${p.id}" data-decision="reject">Reject</button></div></article>`).join("")||`<div class="exec-empty">No investment proposals await Finance analysis.</div>`}</section>`;}
+function financeInvestmentAnalysisQueue(f){
+  const items=f.investmentAnalyses||[];
+  if(!items.length)return "";
+  return `<section class="finance-panel finance-analysis-queue"><div class="finance-panel-head"><div><h3>Investment analysis</h3><p>Review before a proposal goes to Executive</p></div><strong>${items.length} waiting</strong></div>${items.map(p=>`<article><div><span>${p.reference} - ${escapeHtml(p.category)}</span><h3>${escapeHtml(p.title)}</h3><p>${escapeHtml(p.description)}</p><small>Submitted by ${escapeHtml(p.createdBy)} - Risk: ${escapeHtml(p.riskAssessment)}</small></div><div><strong>${money(p.estimatedCost)}</strong><small>Expected revenue ${money(p.expectedRevenue)} - ROI ${p.expectedRoi}%</small>${p.supportingDocument?`<a href="${p.supportingDocument}" target="_blank">${icons.file} Evidence</a>`:""}</div><div class="record-actions"><button data-finance-investment="${p.id}" data-decision="approve">Approve analysis</button><button data-finance-investment="${p.id}" data-decision="more_information">More information</button><button class="danger-action" data-finance-investment="${p.id}" data-decision="reject">Reject</button></div></article>`).join("")}</section>`;
+}
 async function financeInvestmentDecision(id,decision){
   let analysis="",recommendation="";
   if(decision==="approve"){
@@ -1945,21 +1980,10 @@ function financeForecastWidget(f) {
   return `<section class="finance-panel"><div class="finance-panel-head"><div><h3>Financial Forecast</h3><p>Projected next-quarter net position</p></div></div><div class="finance-forecast"><strong>${money(avg*3)}</strong><span>Projected three-month surplus</span>${progress("Forecast confidence","82%",82,"lime")}<p>Based on six-month revenue and expenditure trends.</p></div></section>`;
 }
 function financeDocumentsView() {
-  const known=["Annual Reports","Audit Reports","Financial Statements","Bank Reconciliations","Payment Support","Policies","Minutes"];
-  const docs=state.finance.documents||[];
-  const other=docs.filter(d=>!known.includes(d.documentType));
-  const row=(d)=>`<div class="exec-document-row"><span>${icons.file}</span><div><strong>${escapeHtml(d.title)}</strong><small>${escapeHtml(d.reference)} - ${escapeHtml(d.documentType)} - Version ${escapeHtml(d.version)}${d.visibilityLevel!=null?` · Who can see: ${Number(d.visibilityLevel)<=1?"Members":Number(d.visibilityLevel)===3?"Selected departments":"All departments"}`:""}</small></div>${status(d.status)}${d.hasFile?`<div class="document-actions"><a href="/api/documents/${d.id}/view" target="_blank">${icons.eye}View</a><a href="/api/documents/${d.id}/download">${icons.download}</a></div>`:`<span class="status pending">No file</span>`}</div>`;
-  return `<div class="exec-document-groups">${known.map(type=>{const rows=docs.filter(d=>d.documentType===type);return `<section class="finance-panel"><div class="finance-panel-head"><div><h3>${type}</h3><p>${rows.length} finance document${rows.length===1?"":"s"}</p></div></div>${rows.map(row).join("")||`<div class="exec-empty">No documents in this category yet.</div>`}</section>`;}).join("")}${other.length?`<section class="finance-panel"><div class="finance-panel-head"><div><h3>Other documents</h3><p>${other.length} custom-typed document${other.length===1?"":"s"}</p></div></div>${other.map(row).join("")}</section>`:""}</div>`;
+  return documentLibraryView(state.finance.documents||[]);
 }
 function financeSettingsView() {
-  return `<div class="settings-grid">${financialYearsCard()}<div class="card setting-card"><div class="card-head" style="padding:0 0 16px"><div><h2 class="card-title">Finance controls</h2><p class="card-subtitle">Accounting and payment safeguards</p></div></div>
-    <div class="setting-row"><div class="setting-icon">${icons.approvals}</div><div class="setting-copy"><strong>Large-payment threshold</strong><span>UGX 10,000,000 - Executive approval required</span></div></div>
-    <div class="setting-row"><div class="setting-icon">${icons.reports}</div><div class="setting-copy"><strong>Budget alerts</strong><span>Warnings at 80%, 90% and 100%</span></div></div>
-    <div class="setting-row"><div class="setting-icon">${icons.building}</div><div class="setting-copy"><strong>Fiscal period</strong><span>FY 2026</span></div></div></div>
-    <div class="card setting-card"><div class="card-head" style="padding:0 0 16px"><div><h2 class="card-title">Separation of duties</h2><p class="card-subtitle">Enforced by the server</p></div></div>
-    <div class="setting-row"><div class="setting-icon">${icons.lock}</div><div class="setting-copy"><strong>SACCO isolation</strong><span>Finance cannot read or modify member savings, loans or guarantors</span></div>${status("active")}</div>
-    <div class="setting-row"><div class="setting-icon">${icons.shield}</div><div class="setting-copy"><strong>Self-approval prevention</strong><span>Finance officers cannot approve their own payment requests</span></div>${status("active")}</div>
-    <div class="setting-row"><div class="setting-icon">${icons.audit}</div><div class="setting-copy"><strong>Permanent audit trail</strong><span>Receipts, vouchers, decisions and payments are logged</span></div>${status("active")}</div></div></div>`;
+  return `<div class="settings-grid">${financialYearsCard()}</div>`;
 }
 function financeSearchView() {
   const results=state.financeSearchResults||[];
@@ -3874,7 +3898,7 @@ function openForwardMessage(message) {
 
 function ensureSystemAccountStyles(){
   if(document.querySelector('link[href*="legal-biodata-styles.css"]'))return;
-  const link=document.createElement("link");link.rel="stylesheet";link.href="/legal-biodata-styles.css?v=36";document.head.appendChild(link);
+  const link=document.createElement("link");link.rel="stylesheet";link.href="/legal-biodata-styles.css?v=38";document.head.appendChild(link);
 }
 function formatUserLastLogin(value){
   if(!value)return "Never";
@@ -3917,26 +3941,52 @@ function userAccountCompleteness(u){
   if(u.role!=="Member"&&!(u.assignments||[]).length&&!(u.governanceDepartments||[]).length)missing.push("department");
   return {complete:!missing.length,missing};
 }
+function bioPair(label,value){return value==null||value===""?"":`<div><dt>${label}</dt><dd>${value}</dd></div>`;}
+function prettyLabel(value){return String(value||"").replaceAll("_"," ").replace(/\b\w/g,c=>c.toUpperCase());}
 function userAccountCard(u){
-  const assignments=u.assignments||[];
-  const completeness=userAccountCompleteness(u);
-  return `<article class="bio-card ${u.active?"active-user":"inactive"} ${completeness.complete?"filled-up":"need-editing"}">
-    <header><div class="bio-avatar">${u.hasProfilePhoto?profileImage(u.id,u.fullName,true):initials(u.fullName)}</div><div><small>${escapeHtml(u.memberNumber||u.role)}</small><h3>${escapeHtml(u.fullName)}</h3><span>${escapeHtml(u.email)}</span></div>${status(u.active?"active":"suspended")}</header>
-    <div class="bio-dept-tags">${assignments.length?assignments.slice(0,3).map(a=>`<span class="bio-dept-tag" title="${escapeHtml(a.position||"")}">${escapeHtml(a.department)} · L${a.level}</span>`).join(""):`<span class="bio-dept-tag">No department assignment</span>`}${assignments.length>3?`<span class="bio-dept-tag">+${assignments.length-3} more</span>`:""}${completeness.complete?`<span class="bio-dept-tag filled">Filled up</span>`:`<span class="bio-dept-tag need-edit">Needs editing</span>`}</div>
-    <dl><div><dt>Role</dt><dd>${escapeHtml(u.role)}</dd></div><div><dt>Phone</dt><dd>${escapeHtml(u.phone||"—")}</dd></div><div><dt>Branch</dt><dd>${escapeHtml(u.branch||"—")}</dd></div><div><dt>Last login</dt><dd>${formatUserLastLogin(u.lastLogin)}</dd></div></dl>
-    <div class="bio-login-summary ${u.active?"active":"inactive"}"><span>${icons.lock}</span><div><small>Login security</small><strong>${u.mustChangePassword?"Temporary password pending change":"Password is set"}</strong><em>${u.active?"Active and allowed to sign in":"Account deactivated"}</em></div></div>
-    <footer><button data-user-view="${u.id}">${icons.eye}View details</button>${u.id!==state.user.id?`<button data-user-access="${u.id}">Change access</button>`:""}<button data-user-reset="${u.id}">${icons.lock}Reset password</button>${u.id!==state.user.id?`<button class="${u.active?"danger-action":""}" data-user-status="${u.id}" data-active="${u.active?0:1}">${u.active?"Deactivate":"Activate"}</button><button class="danger-action" data-user-delete="${u.id}">${icons.trash||icons.x}Delete</button>`:""}</footer>
+  const desk=(u.assignments||[])[0];
+  const access=desk?desk.department:(u.role==="Member"?"Member only":u.role);
+  return `<article class="bio-card account-card ${u.active?"active-user":"inactive"}">
+    <header><div class="bio-avatar">${u.hasProfilePhoto?profileImage(u.id,u.fullName,true):initials(u.fullName)}</div><div><small>${escapeHtml(u.memberNumber||"Login")}</small><h3>${escapeHtml(u.fullName)}</h3><span>${escapeHtml(u.email)}</span></div>${status(u.active?"active":"suspended")}</header>
+    <p class="account-card-access"><strong>${escapeHtml(access)}</strong><span>${escapeHtml(u.phone||"No phone")} · ${u.lastLogin?"Last in "+formatUserLastLogin(u.lastLogin):"Never signed in"}</span></p>
+    <footer class="account-card-actions">
+      <div class="account-card-main"><button data-user-view="${u.id}">${icons.eye}Details</button>${u.id!==state.user.id?`<button data-user-access="${u.id}">Change access</button>`:""}</div>
+      <div class="account-card-more"><button data-user-reset="${u.id}">Reset password</button>${u.id!==state.user.id?`<button data-user-status="${u.id}" data-active="${u.active?0:1}">${u.active?"Deactivate":"Activate"}</button><button class="danger-action" data-user-delete="${u.id}">Delete</button>`:""}</div>
+    </footer>
   </article>`;
 }
 function openUserAccountDetail(id){
   const user=(state.users||[]).find(u=>String(u.id)===String(id));if(!user)return;
   const assignments=user.assignments||[];
-  document.body.insertAdjacentHTML("beforeend",`<div class="modal-backdrop" id="modal-backdrop"><div class="modal"><div class="modal-head"><div><h2>System account</h2><p>${escapeHtml(user.fullName)} — ${escapeHtml(user.email)}</p></div><button class="modal-close" data-close-modal>${icons.x}</button></div>
+  const gender={female:"Female",male:"Male",other:"Other",prefer_not_to_say:"Prefer not to say"}[user.gender]||prettyLabel(user.gender);
+  document.body.insertAdjacentHTML("beforeend",`<div class="modal-backdrop" id="modal-backdrop"><div class="modal exec-register-modal"><div class="modal-head"><div><h2>${escapeHtml(user.fullName)}</h2><p>${escapeHtml(user.memberNumber||user.role)} · ${escapeHtml(user.email)}</p></div><button class="modal-close" data-close-modal>${icons.x}</button></div>
     <div class="bio-detail">
-      <header><div class="bio-avatar large">${user.hasProfilePhoto?profileImage(user.id,user.fullName,true):initials(user.fullName)}</div><div><small>${escapeHtml(user.memberNumber||"Staff account")} · Created ${formatUserLastLogin(user.createdAt).replace("Never","—")}</small><h2>${escapeHtml(user.fullName)}</h2><p>${escapeHtml(user.role)}${user.branch?` · ${escapeHtml(user.branch)}`:""}</p></div>${status(user.active?"active":"suspended")}</header>
-      <section><h3>Login credentials</h3><dl><div><dt>Email</dt><dd>${escapeHtml(user.email)}</dd></div><div><dt>Phone</dt><dd>${escapeHtml(user.phone||"—")}</dd></div><div><dt>Last login</dt><dd>${formatUserLastLogin(user.lastLogin)}</dd></div><div><dt>Password</dt><dd>Protected — cannot be displayed</dd></div><div><dt>Password status</dt><dd>${user.mustChangePassword?"Temporary password must be changed at next sign-in":"Password is set"}</dd></div><div><dt>Account status</dt><dd>${user.active?"Active":"Inactive"}</dd></div></dl></section>
-      <section><h3>Department access</h3>${assignments.length?`<dl>${assignments.map(a=>`<div><dt>${escapeHtml(a.department)}</dt><dd>${escapeHtml(a.position||"Assigned")} · Level ${a.level}${a.canApprove?" · Can approve":""}${a.canEdit?" · Can edit":""}${a.canCreate?" · Can create":""}</dd></div>`).join("")}</dl>`:`<p>No active department assignments recorded for this account.</p>`}</section>
-      <div class="form-actions"><button type="button" class="button secondary" data-close-modal>Close</button>${user.id!==state.user.id?`<button type="button" class="button secondary" data-user-access="${user.id}">Change access</button>`:""}<button type="button" class="button secondary" data-user-reset="${user.id}">${icons.lock}Reset password</button>${user.id!==state.user.id?`<button type="button" class="button ${user.active?"danger":"primary"}" data-user-status="${user.id}" data-active="${user.active?0:1}">${user.active?"Deactivate account":"Activate account"}</button>`:""}</div>
+      <header><div class="bio-avatar large">${user.hasProfilePhoto?profileImage(user.id,user.fullName,true):initials(user.fullName)}</div><div><small>${escapeHtml(user.role)}${user.branch?` · ${escapeHtml(user.branch)}`:""}</small><h2>${escapeHtml(user.fullName)}</h2><p>${user.active?"Active login":"Inactive"} · ${user.mustChangePassword?"Temporary password pending change":"Password is set"}</p></div>${status(user.active?"active":"suspended")}</header>
+      <section><h3>Membership bio</h3>${user.memberId?`<dl>
+        ${bioPair("Member number",escapeHtml(user.memberNumber||"—"))}
+        ${bioPair("Phone",escapeHtml(user.phone||"—"))}
+        ${bioPair("National ID",escapeHtml(user.nationalId||"—"))}
+        ${bioPair("Date of birth",user.dateOfBirth?formatLedgerDate(user.dateOfBirth):"—")}
+        ${bioPair("Gender",gender||"—")}
+        ${bioPair("Marital status",prettyLabel(user.maritalStatus)||"—")}
+        ${bioPair("Nationality",escapeHtml(user.nationality||"—"))}
+        ${bioPair("Occupation",escapeHtml(user.occupation||"—"))}
+        ${bioPair("Employer / business",escapeHtml(user.employer||"—"))}
+        ${bioPair("Home district",escapeHtml(user.homeDistrict||"—"))}
+        ${bioPair("Residence",escapeHtml(user.address||"—"))}
+        ${bioPair("Joined",user.joinedAt?formatLedgerDate(user.joinedAt):"—")}
+        ${bioPair("Share capital",user.shares!=null?money(user.shares):"—")}
+        ${bioPair("Savings",user.savings!=null?money(user.savings):"—")}
+        ${bioPair("Next of kin",escapeHtml(user.nextOfKin||"—"))}
+        ${bioPair("Emergency contact",escapeHtml([user.emergencyContactName,user.emergencyContactPhone,user.emergencyContactRelationship].filter(Boolean).join(" · ")||"—"))}
+      </dl>`:`<p>This login is not linked to a membership record.</p>`}</section>
+      <section><h3>Login</h3><dl>
+        ${bioPair("Email",escapeHtml(user.email))}
+        ${bioPair("Last login",formatUserLastLogin(user.lastLogin))}
+        ${bioPair("Password","Protected")}
+      </dl></section>
+      <section><h3>Department access</h3>${assignments.length?`<dl>${assignments.map(a=>`<div><dt>${escapeHtml(a.department)}</dt><dd>${escapeHtml(a.position||"Assigned")}</dd></div>`).join("")}</dl>`:`<p>Member only — no department desk.</p>`}</section>
+      <div class="form-actions"><button type="button" class="button secondary" data-close-modal>Close</button>${user.id!==state.user.id?`<button type="button" class="button secondary" data-user-access="${user.id}">Change access</button>`:""}<button type="button" class="button secondary" data-user-reset="${user.id}">Reset password</button>${user.id!==state.user.id?`<button type="button" class="button ${user.active?"danger":"primary"}" data-user-status="${user.id}" data-active="${user.active?0:1}">${user.active?"Deactivate":"Activate"}</button>`:""}</div>
     </div></div></div>`);
   document.querySelectorAll("#modal-backdrop [data-close-modal]").forEach(el=>el.addEventListener("click",closeModal));
   document.querySelector("#modal-backdrop [data-user-reset]")?.addEventListener("click",()=>{closeModal();resetUserPassword(user.id);});

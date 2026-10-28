@@ -4593,7 +4593,16 @@ require("./legal-membership-api")({app,auth,asyncRoute,departmentPermission,quer
 app.get("/api/users",auth,permit("user:manage"),asyncRoute(async(req,res)=>{
   const users=(await query(`SELECT u.id,u.full_name AS "fullName",u.email,u.phone,u.role,u.active,u.must_change_password AS "mustChangePassword",
     (u.profile_photo_stored_name IS NOT NULL) AS "hasProfilePhoto",
-    u.last_login AS "lastLogin",u.created_at AS "createdAt",b.name AS branch,m.member_number AS "memberNumber",
+    u.last_login AS "lastLogin",u.created_at AS "createdAt",b.name AS branch,u.member_id AS "memberId",
+    m.member_number AS "memberNumber",m.email AS "memberEmail",
+    CASE WHEN m.national_id ILIKE 'PROVISIONAL%' THEN NULL ELSE m.national_id END AS "nationalId",
+    m.occupation,m.employer,m.address,m.next_of_kin AS "nextOfKin",
+    m.savings_balance::float AS savings,m.share_capital::float AS shares,
+    m.status AS "membershipStatus",m.joined_at AS "joinedAt",
+    bio.date_of_birth AS "dateOfBirth",bio.gender,bio.marital_status AS "maritalStatus",
+    COALESCE(bio.nationality,'Ugandan') AS nationality,bio.home_district AS "homeDistrict",
+    bio.emergency_contact_name AS "emergencyContactName",bio.emergency_contact_phone AS "emergencyContactPhone",
+    bio.emergency_contact_relationship AS "emergencyContactRelationship",
     COALESCE((SELECT json_agg(json_build_object('department',d.name,'code',d.code,'position',da.position_title,
       'level',da.authority_level,'canCreate',da.can_create,'canEdit',da.can_edit,'canApprove',da.can_approve) ORDER BY d.sort_order)
       FROM department_assignments da JOIN departments d ON d.id=da.department_id
@@ -4602,6 +4611,7 @@ app.get("/api/users",auth,permit("user:manage"),asyncRoute(async(req,res)=>{
       'title',od.body_name||': '||od.position_title) ORDER BY od.dept_name)
       FROM (${officialMemberDepts}) od WHERE od.member_id=u.member_id),'[]') AS "governanceDepartments"
     FROM users u LEFT JOIN branches b ON b.id=u.branch_id LEFT JOIN members m ON m.id=u.member_id
+    LEFT JOIN member_bio_data bio ON bio.member_id=m.id
     WHERE u.email NOT ILIKE 'deleted.%@removed.local'
     ORDER BY u.id DESC`)).rows;
   const departmentRoster=(await query(`SELECT d.code,d.name,

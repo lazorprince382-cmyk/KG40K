@@ -5,7 +5,7 @@
   const {esc,date,badge,panel,empty,table,modal}=D,config=D.configs["Legal Officer"];
   if(!config)return;
   if(!document.querySelector('link[href*="legal-biodata-styles.css"]')){
-    const link=document.createElement("link");link.rel="stylesheet";link.href="/legal-biodata-styles.css?v=37";document.head.appendChild(link);
+    const link=document.createElement("link");link.rel="stylesheet";link.href="/legal-biodata-styles.css?v=38";document.head.appendChild(link);
   }
   if(!config.pages.includes("legal-bio-data"))config.pages.splice(1,0,"legal-bio-data");
   config.labels["legal-bio-data"]="Bio Data";
