@@ -198,7 +198,7 @@
   }
   function accountSettings(){
     const photo=state.user?.has_profile_photo,m=C()?.member;
-    return `<section class="account-settings"><div class="account-settings-head"><div><p class="eyebrow">Personal account</p><h2>Account & security</h2><p>Edit your profile information, profile picture and password. Changes sync to Legal bio data.</p></div><div class="account-photo">${photo?`<img src="/api/account/profile-photo?v=${state.profilePhotoVersion||0}" alt="Profile photo">`:`<span>${initials(actor())}</span>`}</div></div>
+    return `<section class="account-settings"><div class="account-settings-head"><div><p class="eyebrow">Personal account</p><h2>Account & security</h2><p>Edit your profile information, profile picture and password. Changes sync to Legal bio data.</p></div>${photo?`<button type="button" class="account-photo is-photo" data-open-profile-photo="/api/account/profile-photo?v=${state.profilePhotoVersion||0}" data-photo-name="${esc(actor())}" title="View photo"><img src="/api/account/profile-photo?v=${state.profilePhotoVersion||0}" alt="Profile photo"></button>`:`<div class="account-photo"><span>${initials(actor())}</span></div>`}</div>
       <div class="account-settings-grid">
         <form class="card account-form account-profile-form" data-account-profile><h3>Profile information</h3><p>Saved details update your linked member record and Legal bio-data register.</p><div class="form-grid">
           <div class="field"><label>Full name</label><input name="fullName" value="${esc(actor())}" minlength="2" maxlength="120" required></div>
@@ -206,7 +206,7 @@
           <div class="field"><label>Phone number</label><input name="phone" value="${esc(state.user?.phone||m?.phone||"")}" minlength="7" maxlength="30" placeholder="Optional if not yet recorded"></div>
           ${m?`<div class="field"><label>National ID</label><input name="nationalId" value="${esc(m.nationalId||"")}"></div><div class="field"><label>Date of birth</label><input name="dateOfBirth" type="date" value="${m.dateOfBirth?String(m.dateOfBirth).slice(0,10):""}"></div><div class="field"><label>Gender</label><select name="gender"><option value="">Not recorded</option>${["female","male","other","prefer_not_to_say"].map(x=>`<option value="${x}" ${m.gender===x?"selected":""}>${x.replaceAll("_"," ")}</option>`).join("")}</select></div><div class="field"><label>Marital status</label><select name="maritalStatus"><option value="">Not recorded</option>${["single","married","divorced","widowed","separated","other"].map(x=>`<option value="${x}" ${m.maritalStatus===x?"selected":""}>${x}</option>`).join("")}</select></div><div class="field"><label>Nationality</label><input name="nationality" value="${esc(m.nationality||"Ugandan")}"></div><div class="field"><label>Occupation</label><input name="occupation" value="${esc(m.occupation||"")}"></div><div class="field"><label>Employer</label><input name="employer" value="${esc(m.employer||"")}"></div><div class="field full"><label>Residence / address</label><input name="address" value="${esc(m.address||"")}"></div><div class="field"><label>Home district</label><input name="homeDistrict" value="${esc(m.homeDistrict||"")}"></div><div class="field"><label>Subcounty</label><input name="subcounty" value="${esc(m.subcounty||"")}"></div><div class="field"><label>Parish</label><input name="parish" value="${esc(m.parish||"")}"></div><div class="field"><label>Next of kin</label><input name="nextOfKin" value="${esc(m.nextOfKin||"")}"></div><div class="field"><label>Beneficiaries</label><input name="beneficiaries" value="${esc(m.beneficiaries||"")}"></div><div class="field"><label>Emergency contact</label><input name="emergencyContactName" value="${esc(m.emergencyContactName||"")}"></div><div class="field"><label>Emergency phone</label><input name="emergencyContactPhone" value="${esc(m.emergencyContactPhone||"")}"></div><div class="field"><label>Emergency relationship</label><input name="emergencyContactRelationship" value="${esc(m.emergencyContactRelationship||"")}"></div><input type="hidden" name="membershipStatus" value="${esc(m.status||"active")}">`:""}
         </div><button class="button primary" type="submit">Save profile information</button></form>
-        <form class="card account-form" data-account-photo><h3>Profile picture</h3><p>Any image format or size. You will crop it before saving.</p><div class="field"><label>Choose photo</label><input name="photo" type="file" accept="image/*" data-photo-pick></div><div class="photo-crop-preview" data-photo-crop-preview hidden><img alt="Cropped preview" data-photo-crop-img><small data-photo-crop-label>Cropped photo ready to save</small></div><div class="form-actions"><button class="button primary" type="submit" data-photo-save disabled>Save profile picture</button>${photo?`<button class="button secondary" type="button" data-remove-photo>Remove</button>`:""}</div></form>
+        <form class="card account-form" data-account-photo><h3>Profile picture</h3><p>Any image format or size. You will crop it before saving.</p><div class="field"><label>Choose photo</label><input name="photo" type="file" accept="image/*" data-photo-pick></div><div class="photo-crop-preview" data-photo-crop-preview hidden><button type="button" class="photo-crop-thumb" data-open-crop-preview title="View cropped photo"><img alt="Cropped preview" data-photo-crop-img></button><div><strong>Cropped photo ready to save</strong><small data-photo-crop-label>Tap the photo to view it larger, then save.</small></div></div><div class="form-actions"><button class="button primary" type="submit" data-photo-save disabled>Save profile picture</button>${photo?`<button class="button secondary" type="button" data-remove-photo>Remove</button>`:""}</div></form>
         <form class="card account-form" data-account-password><h3>Change password</h3><p>Changing it signs out every session.</p><div class="field"><label>Current password</label><input name="currentPassword" type="password" required></div><div class="field"><label>New password</label><input name="newPassword" type="password" minlength="8" required><small>Uppercase, lowercase, number and symbol.</small></div><button class="button primary">Change password</button></form>
       </div></section>`;
   }
@@ -256,7 +256,8 @@
   }
   function profile(){
     const m=C().member,items=[["Member ID",m.memberNumber],["Membership status",m.status],["National ID",m.nationalId],["Phone",m.phone],["Email",m.email||"Not recorded"],["Joined",date(m.joinedAt)],["Date of birth",date(m.dateOfBirth)],["Gender",m.gender||"Not recorded"],["Nationality",m.nationality||"Not recorded"],["Address",m.address||"Not recorded"],["Occupation",m.occupation||"Not recorded"],["Employer",m.employer||"Not recorded"],["Next of kin",m.nextOfKin||"Not recorded"],["Emergency contact",`${m.emergencyContactName||"Not recorded"} ${m.emergencyContactPhone||""}`]];
-    return `<div class="member-profile-layout"><section class="card member-identity"><div class="member-passport">${state.user.has_profile_photo?`<img src="/api/account/profile-photo?v=${state.profilePhotoVersion||0}" alt="Profile photo">`:m.hasPassportPhoto?`<img src="/api/member/passport-photo" alt="Passport photo">`:`<span>${initials(m.fullName)}</span>`}</div><div><p class="eyebrow">Verified membership record</p><h2>${esc(m.fullName)}</h2><p>${esc(m.memberNumber)} - ${esc(m.branch||"Organization")}</p>${status(m.bioStatus||"pending")}</div></section>
+    const photoSrc=state.user.has_profile_photo?`/api/account/profile-photo?v=${state.profilePhotoVersion||0}`:m.hasPassportPhoto?"/api/member/passport-photo":"";
+    return `<div class="member-profile-layout"><section class="card member-identity">${photoSrc?`<button type="button" class="member-passport is-photo" data-open-profile-photo="${photoSrc}" data-photo-name="${esc(m.fullName)}" title="View photo"><img src="${photoSrc}" alt="Profile photo"></button>`:`<div class="member-passport"><span>${initials(m.fullName)}</span></div>`}<div><p class="eyebrow">Verified membership record</p><h2>${esc(m.fullName)}</h2><p>${esc(m.memberNumber)} - ${esc(m.branch||"Organization")}</p>${status(m.bioStatus||"pending")}</div></section>
       ${panel("Personal information","Official membership data maintained by Legal",`<dl class="member-profile-grid">${items.map(([a,b])=>`<div><dt>${a}</dt><dd>${esc(b)}</dd></div>`).join("")}</dl>`)}${accountSettings()}</div>`;
   }
   function savings(){
@@ -651,7 +652,21 @@
     syncMemberPending();render();if(message)toast(message);
   }
   function syncMemberPending(){if(!C())return;const extra=C().welfare.contributions.filter(x=>["pending","pending_finance_review"].includes(x.status)).length;C().summary.pendingRequests+=extra;}
+  function openProfilePhoto(src,name){
+    if(!src)return;
+    modal(name||"Profile picture",`<div class="member-photo-view"><img class="member-photo-large" src="${esc(src)}" alt="${esc(name||"Profile photo")}"></div>`);
+  }
+  function bindProfilePhotoClicks(){
+    document.querySelectorAll("[data-open-profile-photo]").forEach(el=>{
+      el.addEventListener("click",()=>openProfilePhoto(el.dataset.openProfilePhoto,el.dataset.photoName));
+    });
+    document.querySelector("[data-open-crop-preview]")?.addEventListener("click",()=>{
+      const img=document.querySelector("[data-photo-crop-img]");
+      if(img?.src)openProfilePhoto(img.src,"Cropped photo");
+    });
+  }
   function bindMember(){
+    bindProfilePhotoClicks();
     document.querySelectorAll("[data-member-page]").forEach(x=>x.onclick=async()=>{if(typeof window.setSidebarOpen==="function")window.setSidebarOpen(false);state.memberContext=true;state.page=x.dataset.memberPage;if(state.page==="messages"){state.messenger=null;window.render();await loadMessenger();}window.render();window.scrollTo(0,0);});
     document.querySelectorAll("[data-member-reveal]").forEach(btn=>{
       btn.addEventListener("click",()=>{

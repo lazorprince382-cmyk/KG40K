@@ -1974,3 +1974,13 @@ html:has(.messages-content),body:has(.messages-content),body:has(.messages-conte
   .member-history-desktop,.credits-members-desktop{display:none}
   .member-history-cards,.credits-member-cards{display:grid;gap:10px}
 }
+.member-passport img,.account-photo img{width:100%;height:100%;object-fit:cover;display:block}
+.member-passport.is-photo,.account-photo.is-photo{padding:0;border:0;cursor:pointer}
+.member-passport.is-photo:hover,.account-photo.is-photo:hover{outline:3px solid rgba(11,59,112,.28);outline-offset:2px}
+.photo-crop-preview{display:flex;align-items:center;gap:12px;margin:4px 0 8px;padding:10px;border:1px solid var(--line);border-radius:14px;background:#f7fafb}
+.photo-crop-preview[hidden]{display:none!important}
+.photo-crop-thumb{padding:0;border:0;background:transparent;cursor:pointer;flex:0 0 auto}
+.photo-crop-preview img,.photo-crop-thumb img{display:block;width:88px;height:88px;object-fit:cover;border-radius:14px;background:#e8eef4}
+.photo-crop-preview strong{display:block;font-size:14px;color:#173654}
+.photo-crop-preview small{display:block;margin-top:4px;color:#6d7c8b}
+.member-photo-view{padding:0 4px 8px}
