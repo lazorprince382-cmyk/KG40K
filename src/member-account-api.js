@@ -224,7 +224,7 @@ module.exports = function registerMemberAccountApi({
   async function buildMemberCommandCenter(memberId, { viewerUserId = null } = {}) {
     const [member, transactions, loans, guarantees, investments, welfareRequests, welfareContributions,
       welfareAssistanceHistory, meetings, documents, notifications, announcements, support] = await Promise.all([
-      one(`SELECT m.id,m.member_number AS "memberNumber",m.full_name AS "fullName",m.email,CASE WHEN m.provisional THEN NULL ELSE m.phone END AS phone,CASE WHEN m.provisional THEN NULL ELSE m.national_id END AS "nationalId",
+      one(`SELECT m.id,m.member_number AS "memberNumber",m.full_name AS "fullName",m.email,NULLIF(TRIM(m.phone),'') AS phone,CASE WHEN m.provisional THEN NULL ELSE m.national_id END AS "nationalId",
         m.occupation,m.employer,m.address,m.next_of_kin AS "nextOfKin",m.beneficiaries,m.status,m.joined_at AS "joinedAt",
         m.savings_balance::float AS savings,m.share_capital::float AS shares,m.dividends::float,br.name AS branch,
         b.date_of_birth AS "dateOfBirth",b.gender,b.marital_status AS "maritalStatus",b.nationality,

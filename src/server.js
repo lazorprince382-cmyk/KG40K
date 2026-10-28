@@ -486,31 +486,33 @@ async function matchCentenarySmsRalph20261027(client){
   return summary;
 }
 async function fillMemberPhonesFromRoll20261028(client){
-  const key="fixMemberPhonesFromRoll20261028";
+  const key="fixMemberPhonesVisible20261028";
   if((await client.query("SELECT 1 FROM settings WHERE key=$1",[key])).rows[0])return null;
   const roll=[
     ["%Simon%Ssemaganda%","0779522296"],["%Justine%Inhensiko%","0772074235"],["%Baraza%Olivia%","0763424032"],
-    ["%Mutiga%Brian%","0774769812"],["%Brian%Mutiga%","0774769812"],["%Jude%Kyobe%","0782458764"],
-    ["%Ntono%Moreen%","0704801045"],["%Moreen%Ntono%","0704801045"],["%Tabula%Robert%","0706501032"],
-    ["%Ssewanyana%Joshua%","0701637623"],["%Josephine%Babirye%","0779575972"],["%Babirye%Josephine%","0779575972"],
+    ["%Mutiga%Brian%","0774769812"],["%Brian%Mutiga%","0774769812"],["%Jude%Tadieus%Kyobe%","0782458764"],
+    ["%Jude%Tadius%Kyobe%","0782458764"],["%Ntono%Moreen%","0704801045"],["%Moreen%Ntono%","0704801045"],
+    ["%Tabula%Robert%","0706501032"],["%Ssewanyana%Joshua%","0701637623"],
+    ["%Josephine%Babirye%","0779575972"],["%Babirye%Josephine%","0779575972"],
     ["%Mary%Babirye%","0782364222"],["%Ritah%Nakyanzi%","0752557108"],["%Dan%Rwebingira%","0772432118"],
     ["%Rwebingira%Dan%","0772432118"],["%Francis%Banumba%","0782377969"],["%Ralph%Masaba%","0757858518"],
     ["%Masaba%Ralph%","0757858518"],["%Vicent%Gumisiriza%","0753995171"],["%Vincent%Gumisiriza%","0753995171"],
     ["%Christopher%Muhoozi%","0772454425"],["%Denis%Tugume%","0772666438"],["%Tugume%Denis%","0772666438"]
   ];
-  const placeholders=new Set(["","+256700000000","256700000000","0700000000"]);
   const updated=[];
   for(const [pattern,phone] of roll){
     const members=(await client.query(`SELECT id,full_name,phone FROM members WHERE full_name ILIKE $1 AND deleted_at IS NULL`,[pattern])).rows;
     for(const member of members){
-      const current=String(member.phone||"").trim();
-      if(current&&!placeholders.has(current)&&current!==phone)continue;
+      if(String(member.phone||"").trim()===phone){
+        await client.query("UPDATE users SET phone=$1 WHERE member_id=$2 AND COALESCE(phone,'')<>$1",[phone,member.id]);
+        continue;
+      }
       await client.query("UPDATE members SET phone=$1 WHERE id=$2",[phone,member.id]);
       await client.query("UPDATE users SET phone=$1 WHERE member_id=$2",[phone,member.id]);
       updated.push(`${member.full_name} ${phone}`);
     }
   }
-  const summary=updated.length?`filled ${updated.length}: ${[...new Set(updated)].join("; ")}`:"no empty phones to fill";
+  const summary=updated.length?`filled ${updated.length}: ${[...new Set(updated)].join("; ")}`:"phones already on file";
   await client.query(`INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value,updated_at=NOW()`,[key,summary]);
   return summary;
 }
@@ -1162,7 +1164,7 @@ app.get("/api/bootstrap",auth,asyncRoute(async(req,res)=>{
     ||(!usesDepartmentCenter&&["Finance Officer","System Admin","Investment Officer"].includes(req.user.role));
   const empty={rows:[]};
   const [membersResult,txResult,loansResult,withdrawalsResult,productsResult,settingsResult,announcementsResult,notificationsResult,unreadResult,guarantorRequestsResult,organization,workspaces]=await Promise.all([
-    needsMemberDirectory?query(`SELECT m.id AS "databaseId",m.member_number AS id,m.full_name AS name,m.email,CASE WHEN m.provisional THEN NULL ELSE m.phone END AS phone,CASE WHEN m.provisional THEN NULL ELSE m.national_id END AS national_id,m.occupation,m.employer,m.address,m.next_of_kin,
+    needsMemberDirectory?query(`SELECT m.id AS "databaseId",m.member_number AS id,m.full_name AS name,m.email,NULLIF(TRIM(m.phone),'') AS phone,CASE WHEN m.provisional THEN NULL ELSE m.national_id END AS national_id,m.occupation,m.employer,m.address,m.next_of_kin,
       m.savings_balance::float AS savings,m.share_capital::float AS shares,m.dividends::float,m.fines::float,m.status,m.joined_at AS joined,b.name AS branch
       FROM members m LEFT JOIN branches b ON b.id=m.branch_id ${memberFilter} ORDER BY m.id DESC LIMIT 500`,args):Promise.resolve(empty),
     canSeeTransactions?query(`SELECT t.id AS "databaseId",t.reference AS id,t.type,t.method,t.amount::float,t.status,t.external_reference,t.created_at AS date,
@@ -2863,7 +2865,7 @@ function requireCredits(action="view",{allowFinanceView=false}={}) {
 }
 app.get("/api/credits/command-center",auth,requireCredits("view",{allowFinanceView:true}),asyncRoute(async(req,res)=>{
   const [members,transactionsResult,loansResult,guarantors,recovery,charges,documents,summary,depositSummary,portfolioSummary,guarantorSummary]=await Promise.all([
-    query(`SELECT m.id,m.member_number AS "memberNumber",m.full_name AS name,m.email,CASE WHEN m.provisional THEN NULL ELSE m.phone END AS phone,m.status,
+    query(`SELECT m.id,m.member_number AS "memberNumber",m.full_name AS name,m.email,NULLIF(TRIM(m.phone),'') AS phone,m.status,
       m.savings_balance::float AS savings,m.share_capital::float AS shares,m.joined_at AS "joinedAt",
       legacy.savings_balance::float AS "closingSavings",legacy.share_capital::float AS "closingShares",
       legacy.expected_savings::float AS "closingExpected",legacy.deficit_surplus::float AS "closingVariance",
@@ -2885,7 +2887,7 @@ app.get("/api/credits/command-center",auth,requireCredits("view",{allowFinanceVi
       WHERE NOT (t.type='Loan repayment' AND COALESCE(l.reference,'') LIKE 'LN-HIST-%')
       ORDER BY t.created_at DESC,t.id DESC LIMIT 150`),
     query(`SELECT l.id,l.reference,m.id AS "memberId",m.member_number AS "memberNumber",m.full_name AS member,
-      CASE WHEN m.provisional THEN NULL ELSE m.phone END AS phone,m.email,m.status AS "memberStatus",
+      NULLIF(TRIM(m.phone),'') AS phone,m.email,m.status AS "memberStatus",
       CASE WHEN NULLIF(l.custom_product_name,'') IS NOT NULL THEN p.name||' ('||l.custom_product_name||')' ELSE p.name END AS product,
       l.custom_product_name AS "customProductName",p.annual_rate::float AS "annualRate",
       l.amount::float,l.balance::float,l.term_months AS "termMonths",l.processing_fee::float AS "processingFee",

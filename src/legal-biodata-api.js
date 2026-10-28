@@ -11,7 +11,7 @@ module.exports = function registerLegalBioDataApi({
   // Official Executive Memo committees → department filter codes (Board is not a department roster).
   const { officialDeptSql, officialMemberDepts } = require("./official-department-roster");
   const selectBio=`SELECT m.id AS "memberId",m.member_number AS "memberNumber",m.full_name AS "fullName",
-    m.email,CASE WHEN m.provisional THEN NULL ELSE m.phone END AS phone,CASE WHEN m.provisional THEN NULL ELSE m.national_id END AS "nationalId",m.occupation,m.employer,m.address,m.next_of_kin AS "nextOfKin",
+    m.email,NULLIF(TRIM(m.phone),'') AS phone,CASE WHEN m.provisional THEN NULL ELSE m.national_id END AS "nationalId",m.occupation,m.employer,m.address,m.next_of_kin AS "nextOfKin",
     m.beneficiaries,m.status AS "membershipStatus",m.joined_at AS "joinedAt",br.name AS branch,
     b.date_of_birth AS "dateOfBirth",b.gender,b.marital_status AS "maritalStatus",
     COALESCE(b.nationality,'Ugandan') AS nationality,b.home_district AS "homeDistrict",b.subcounty,b.parish,b.village,
