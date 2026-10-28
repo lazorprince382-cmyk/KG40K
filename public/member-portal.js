@@ -392,7 +392,13 @@
       "member-guarantorship":guarantees,"member-welfare":welfare,
       "member-documents":documents,"member-meetings":meetings,"member-notifications":notifications,"member-support":support}[state.page]||dashboard)();
   }
-  function modal(title,form){document.body.insertAdjacentHTML("beforeend",`<div class="modal-backdrop" id="modal-backdrop"><div class="modal"><div class="modal-head"><h2>${title}</h2><button class="modal-close" data-close>${icons.x}</button></div>${form}</div></div>`);document.querySelector("[data-close]").onclick=closeModal;}
+  function modal(title,formOrSub,maybeForm){
+    const form=maybeForm!=null?maybeForm:formOrSub,sub=maybeForm!=null?formOrSub:"";
+    if(typeof closeModal==="function")closeModal();
+    document.body.insertAdjacentHTML("beforeend",`<div class="modal-backdrop" id="modal-backdrop"><div class="modal"><div class="modal-head">${sub?`<div><h2>${title}</h2><p>${sub}</p></div>`:`<h2>${title}</h2>`}<button class="modal-close" data-close>${icons.x}</button></div>${form}</div></div>`);
+    document.querySelector("#modal-backdrop [data-close]")?.addEventListener("click",closeModal);
+    document.getElementById("modal-backdrop")?.addEventListener("click",event=>{if(event.target.id==="modal-backdrop")closeModal();});
+  }
   function loanEligibilityCheck(){
     const past=C()?.pastYearProgress,fy=C()?.financialYearProgress;
     const running=(C()?.loans||[]).filter(l=>["active","overdue"].includes(l.status));
@@ -804,7 +810,8 @@
         const minSide=Math.min(naturalW,naturalH);
         let zoom=1,offsetX=0,offsetY=0,dragging=false,lastX=0,lastY=0;
         modal("Crop profile picture","Adjust the square crop, then save",`<div class="photo-crop-modal"><div class="photo-crop-stage" data-crop-stage><canvas data-crop-canvas width="360" height="360"></canvas></div><div class="field"><label>Zoom</label><input type="range" min="1" max="3" step="0.01" value="1" data-crop-zoom></div><p class="photo-crop-hint">Drag to reposition. Any image format works — the crop is saved as a square photo.</p><div class="form-actions"><button type="button" class="button secondary" data-crop-cancel>Cancel</button><button type="button" class="button primary" data-crop-apply>Use this crop</button></div></div>`);
-        const canvas=document.querySelector("[data-crop-canvas]"),stage=document.querySelector("[data-crop-stage]"),zoomInput=document.querySelector("[data-crop-zoom]");
+        const root=document.getElementById("modal-backdrop");
+        const canvas=root?.querySelector("[data-crop-canvas]"),stage=root?.querySelector("[data-crop-stage]"),zoomInput=root?.querySelector("[data-crop-zoom]");
         const ctx=canvas?.getContext("2d");
         if(!canvas||!ctx||!stage||!zoomInput){URL.revokeObjectURL(url);closeModal();return reject(new Error("Crop tool failed to open"));}
         const draw=()=>{
