@@ -24,7 +24,7 @@ const {
 const { getRunningLoan, getSavingsTargetStatus, getGuarantorEligibility } = require("./loan-eligibility");
 const { loadWelfareStanding, loadWelfareMonth, enforceOneMonthlyWelfareCharge } = require("./welfare-standing");
 const { chargeWelfareFromCoveredSavings, loadMemberSchedule } = require("./savings-schedule");
-const { isWordUpload, convertWordUploadToPdf } = require("./services/office-pdf");
+const { isWordUpload, convertWordUploadToPdf, convertPlainTextToPdf } = require("./services/office-pdf");
 
 function mimeFromFilename(name="",fallback="application/octet-stream"){
   const ext=path.extname(String(name||"")).toLowerCase();
@@ -816,6 +816,39 @@ async function ensureOrganizationVersionIsPdf(version){
     try{fs.unlinkSync(sourcePath);}catch(_){/* ignore */}
   }
   return {...version,original_name:pdf.originalname,stored_name:pdf.filename,mime_type:pdf.mimetype,file_size:pdf.size,sha256};
+}
+function isPlainTextDocumentVersion(version){
+  const mime=String(effectiveDocumentMime(version)||"").toLowerCase();
+  const name=`${version?.original_name||""} ${version?.stored_name||""}`.toLowerCase();
+  return mime.startsWith("text/")||mime.includes("csv")||/\.txt(?:\b|$)/.test(name);
+}
+async function persistConvertedDocumentPdf(version,pdf){
+  const sha256=crypto.createHash("sha256").update(fs.readFileSync(pdf.path)).digest("hex");
+  await query(`UPDATE organization_document_versions
+    SET original_name=$1,stored_name=$2,mime_type=$3,file_size=$4,sha256=$5 WHERE id=$6`,
+    [pdf.originalname,pdf.filename,pdf.mimetype,pdf.size,sha256,version.id]);
+  await query("UPDATE organization_documents SET file_name=$1,updated_at=NOW() WHERE id=$2",
+    [pdf.originalname,version.document_id]);
+  return {...version,original_name:pdf.originalname,stored_name:pdf.filename,mime_type:pdf.mimetype,file_size:pdf.size,sha256};
+}
+async function ensureOrganizationVersionIsViewablePdf(version){
+  if(!version)return version;
+  if(String(effectiveDocumentMime(version)||"").toLowerCase()==="application/pdf")return version;
+  version=await ensureOrganizationVersionIsPdf(version);
+  if(String(effectiveDocumentMime(version)||"").toLowerCase()==="application/pdf")return version;
+  if(!isPlainTextDocumentVersion(version))return version;
+  const sourcePath=resolveOrganizationDocumentFile(version);
+  if(!sourcePath)return version;
+  const pdf=await convertPlainTextToPdf({
+    path:sourcePath,originalname:version.original_name,filename:version.stored_name
+  },uploadsDir);
+  if(!pdf)return version;
+  const previous=resolveOrganizationDocumentFile(version);
+  const next=await persistConvertedDocumentPdf(version,pdf);
+  if(previous&&path.resolve(previous).startsWith(path.resolve(uploadsDir))&&path.resolve(previous)!==path.resolve(pdf.path)){
+    try{fs.unlinkSync(previous);}catch(_){/* ignore */}
+  }
+  return next;
 }
 function resolveOrganizationDocumentFile(version){
   const stored=path.basename(String(version?.stored_name||""));
@@ -4975,30 +5008,36 @@ app.post("/api/transactions/:id/verify",auth,asyncRoute(async(req,res,next)=>{
 }));
 async function findLoanPolicyDocument(){
   return one(`SELECT doc.id,doc.reference,doc.title,doc.version,doc.status,
-      latest.id AS "versionId"
+      latest.id AS "versionId", latest.mime_type AS "mimeType"
     FROM organization_documents doc
     LEFT JOIN LATERAL (
-      SELECT id FROM organization_document_versions v
+      SELECT id, mime_type FROM organization_document_versions v
       WHERE v.document_id=doc.id
       ORDER BY CASE WHEN mime_type='application/pdf' THEN 0 ELSE 1 END, created_at DESC LIMIT 1
     ) latest ON true
     WHERE doc.status<>'archived'
       AND (
-        doc.reference IN ('DOC-LOAN-AGREEMENT','DOC-LOAN-POLICY')
-        OR doc.title ILIKE '%loan policy%'
+        doc.reference IN ('DOC-LOAN-POLICY','DOC-LOAN-AGREEMENT')
+        OR doc.title ILIKE '%loan polic%'
+        OR doc.title ILIKE '%policies and guid%'
+        OR doc.document_type ILIKE '%loan polic%'
         OR doc.title ILIKE '%kwagalana loan agreement%'
         OR doc.document_type ILIKE 'Loan Agreement'
-        OR doc.document_type ILIKE '%loan policy%'
       )
     ORDER BY CASE
-      WHEN doc.reference='DOC-LOAN-AGREEMENT' THEN 0
-      WHEN doc.reference='DOC-LOAN-POLICY' THEN 1
-      WHEN doc.title ILIKE '%loan policy%' THEN 2
-      ELSE 3 END, doc.updated_at DESC
+      WHEN (doc.title ILIKE '%loan polic%' OR doc.document_type ILIKE '%loan polic%' OR doc.title ILIKE '%policies and guid%')
+           AND COALESCE(latest.mime_type,'') ILIKE '%pdf%' THEN 0
+      WHEN doc.title ILIKE '%loan polic%' OR doc.document_type ILIKE '%loan polic%' OR doc.title ILIKE '%policies and guid%' THEN 1
+      WHEN doc.reference='DOC-LOAN-POLICY' THEN 2
+      WHEN COALESCE(latest.mime_type,'') ILIKE '%pdf%' AND (doc.title ILIKE '%loan%' OR doc.document_type ILIKE '%loan%') THEN 3
+      WHEN doc.reference='DOC-LOAN-AGREEMENT' THEN 4
+      ELSE 5 END,
+      doc.updated_at DESC
     LIMIT 1`);
 }
 function loanPolicyFallbackPath(){
   const candidates=[
+    path.join(__dirname,"..","storage","official-pdf","kasangati-g40-kwagalana-loan-agreement--2-.pdf"),
     path.join(__dirname,"..","storage","official-text","kasangati-g40-kwagalana-loan-agreement--2-.txt"),
     path.join(__dirname,"..","database","seed-documents","loan-agreement.txt")
   ];
@@ -5021,7 +5060,7 @@ app.get("/api/loans/policy/content",auth,asyncRoute(async(req,res)=>{
     let version=await one(`SELECT * FROM organization_document_versions WHERE document_id=$1
       ORDER BY CASE WHEN mime_type='application/pdf' THEN 0 ELSE 1 END, created_at DESC LIMIT 1`,[document.id]);
     if(version){
-      version=await ensureOrganizationVersionIsPdf(version);
+      version=await ensureOrganizationVersionIsViewablePdf(version);
       const filePath=resolveOrganizationDocumentFile(version);
       if(filePath){
         const content=await fs.promises.readFile(filePath);
@@ -5035,9 +5074,15 @@ app.get("/api/loans/policy/content",auth,asyncRoute(async(req,res)=>{
   }
   const fallback=loanPolicyFallbackPath();
   if(!fallback)return res.status(404).json({error:"The Kwagalana loan policy file is not available yet. Ask Legal to publish it in Documents."});
-  const content=await fs.promises.readFile(fallback);
-  await audit({userId:req.user.id,action:"LOAN_POLICY_VIEWED",entityType:"loan_policy",entityId:"fallback",details:path.basename(fallback),...metadata(req)});
-  res.set("X-Document-Mime-Type","text/plain; charset=utf-8");
+  let filePath=fallback;
+  let mime=mimeFromFilename(fallback,"text/plain");
+  if(mime!=="application/pdf"){
+    const pdf=await convertPlainTextToPdf({path:fallback,originalname:path.basename(fallback)},uploadsDir);
+    if(pdf){filePath=pdf.path;mime="application/pdf";}
+  }
+  const content=await fs.promises.readFile(filePath);
+  await audit({userId:req.user.id,action:"LOAN_POLICY_VIEWED",entityType:"loan_policy",entityId:"fallback",details:path.basename(filePath),...metadata(req)});
+  res.set("X-Document-Mime-Type",mime);
   res.type("application/octet-stream").send(content);
 }));
 app.post("/api/loans",auth,upload.array("supportingDocument",10),(req,res,next)=>{

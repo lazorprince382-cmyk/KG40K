@@ -184,8 +184,48 @@ async function convertWordUploadToPdf(file, uploadsDir) {
   }
 }
 
+async function convertPlainTextToPdf(file, uploadsDir) {
+  if (!file?.path || !fs.existsSync(file.path)) return null;
+  const PDFDocument = require("pdfkit");
+  fs.mkdirSync(uploadsDir, { recursive: true });
+  const pdfName = `${Date.now()}-${crypto.randomBytes(10).toString("hex")}.pdf`;
+  const pdfPath = path.join(uploadsDir, pdfName);
+  const baseName = path.parse(String(file.originalname || file.filename || "document.txt")).name || "document";
+  const body = fs.readFileSync(file.path, "utf8").replace(/\r\n/g, "\n").trim();
+  const paragraphs = body.split(/\n{2,}/).map((block) => block.replace(/\s*\n\s*/g, " ").trim()).filter(Boolean);
+  await new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ margin: 54, size: "A4", info: { Title: baseName } });
+    const stream = fs.createWriteStream(pdfPath);
+    doc.pipe(stream);
+    stream.on("finish", resolve);
+    stream.on("error", reject);
+    doc.on("error", reject);
+    doc.font("Times-Bold").fontSize(16).fillColor("#0b1f3b").text(baseName.replace(/[-_]+/g, " "), { align: "center" });
+    doc.moveDown(0.8);
+    doc.font("Times-Roman").fontSize(11).fillColor("#1f2a33");
+    (paragraphs.length ? paragraphs : [body]).forEach((paragraph, index) => {
+      if (index) doc.moveDown(0.45);
+      doc.text(paragraph, { align: "justify", lineGap: 3 });
+    });
+    doc.end();
+  });
+  if (!fs.existsSync(pdfPath) || fs.statSync(pdfPath).size < 20) {
+    try { fs.unlinkSync(pdfPath); } catch (_) { /* ignore */ }
+    return null;
+  }
+  return {
+    filename: pdfName,
+    originalname: `${baseName}.pdf`,
+    mimetype: "application/pdf",
+    size: fs.statSync(pdfPath).size,
+    path: pdfPath,
+    convertedFrom: path.basename(String(file.originalname || file.filename || "document.txt")),
+  };
+}
+
 module.exports = {
   isWordUpload,
   convertWordUploadToPdf,
+  convertPlainTextToPdf,
   libreOfficeBinary,
 };
