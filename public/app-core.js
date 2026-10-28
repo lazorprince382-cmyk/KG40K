@@ -769,7 +769,7 @@ function render() {
             <button class="date-chip" data-action="logout">Sign out</button>
           </div>
         </header>
-        <div class="content">
+        <div class="content${state.page==="messages"?" messages-content":""}">
           <div class="page-head">
             <div><p class="eyebrow${state.page==="dashboard"?" eyebrow-lg":""}">${eyebrow}</p>${title?`<h1>${title}</h1>`:""}${subtitle()?`<p class="page-subtitle">${subtitle()}</p>`:""}</div>
             ${headActions()}
@@ -2901,10 +2901,12 @@ function creditsActiveLoansView() {
   const t={principal:sum("principal"),interest:sum("interest"),penalty:sum("penalty"),total:sum("total"),principalPaid:sum("principalPaid"),interestPaid:sum("interestPaid"),penaltyPaid:sum("penaltyPaid"),paid:sum("paid")};
   const lent=rows.reduce((n,l)=>n+Number(l.amount||0),0);
   const breakdown=rows.length?`<section class="exec-panel loan-math-panel"><div class="exec-panel-head"><div><h3>How the remaining amount adds up</h3>
-      <p>Principal left + interest left + unpaid penalties = total amount remaining. Principal left plus principal paid equals the amount lent (${money(lent)}).</p></div></div>
-      <div class="table-wrap"><table class="loan-math-table"><thead><tr><th>Loan</th><th>Principal left</th><th>Interest left</th><th>Penalties unpaid</th><th>Total remaining</th><th>Already repaid</th></tr></thead>
+      <p>Principal left + interest left + unpaid penalties = total remaining. Principal left plus principal paid equals the amount lent (${money(lent)}).</p></div></div>
+      <div class="table-wrap loan-math-desktop"><table class="loan-math-table"><thead><tr><th>Loan</th><th>Principal left</th><th>Interest left</th><th>Penalties unpaid</th><th>Total remaining</th><th>Already repaid</th></tr></thead>
       <tbody>${parts.map(({l,b})=>`<tr><td><strong>${escapeHtml(l.member)}</strong><small>${escapeHtml(l.reference)} · lent ${money(l.amount)}</small></td><td>${money(b.principal)}</td><td>${money(b.interest)}</td><td>${money(b.penalty)}</td><td><strong>${money(b.total)}</strong></td><td>${money(b.paid)}</td></tr>`).join("")}</tbody>
-      <tfoot><tr><td>Total (${rows.length} loan${rows.length===1?"":"s"})</td><td>${money(t.principal)}</td><td>${money(t.interest)}</td><td>${money(t.penalty)}</td><td>${money(t.total)}</td><td>${money(t.paid)}</td></tr></tfoot></table></div></section>`:"";
+      <tfoot><tr><td>Total (${rows.length} loan${rows.length===1?"":"s"})</td><td>${money(t.principal)}</td><td>${money(t.interest)}</td><td>${money(t.penalty)}</td><td>${money(t.total)}</td><td>${money(t.paid)}</td></tr></tfoot></table></div>
+      <div class="loan-math-cards">${parts.map(({l,b})=>`<article class="loan-math-card"><header><strong>${escapeHtml(l.member)}</strong><small>${escapeHtml(l.reference)} · lent ${money(l.amount)}</small></header><dl><div><dt>Principal left</dt><dd>${money(b.principal)}</dd></div><div><dt>Interest left</dt><dd>${money(b.interest)}</dd></div><div><dt>Penalties unpaid</dt><dd>${money(b.penalty)}</dd></div><div class="is-total"><dt>Total remaining</dt><dd>${money(b.total)}</dd></div><div><dt>Already repaid</dt><dd>${money(b.paid)}</dd></div></dl></article>`).join("")}
+        <article class="loan-math-card is-sum"><header><strong>All ${rows.length} loan${rows.length===1?"":"s"}</strong></header><dl><div><dt>Principal left</dt><dd>${money(t.principal)}</dd></div><div><dt>Interest left</dt><dd>${money(t.interest)}</dd></div><div><dt>Penalties unpaid</dt><dd>${money(t.penalty)}</dd></div><div class="is-total"><dt>Total remaining</dt><dd>${money(t.total)}</dd></div><div><dt>Already repaid</dt><dd>${money(t.paid)}</dd></div></dl></article></div></section>`:"";
   return `<div class="exec-module-metrics loan-money-metrics">${executiveModuleMetric("Active loans",rows.length,"blue",null,penaltyWatch?`${penaltyWatch} late or with a penalty`:"All on time")}
     ${executiveModuleMetric("Principal remaining",money(t.principal),"red",null,`Money lent still to come back · ${money(t.principalPaid)} of ${money(lent)} already repaid`)}
     ${executiveModuleMetric("Interest remaining",money(t.interest),"green",null,`Interest still to be paid · ${money(t.interestPaid)} interest already paid`)}
@@ -3554,22 +3556,25 @@ function auditView() {
   <div class="card table-card"><div class="card-head"><div><h2 class="card-title">System activity</h2><p class="card-subtitle">Who did what, and when</p></div></div><div class="table-scroll"><table><thead><tr><th>Event</th><th>User</th><th>Role</th><th>Action</th><th>Details</th><th>Time</th></tr></thead><tbody>${state.audit.map(a=>`<tr><td class="cell-main">${a.id}</td><td>${a.actor}</td><td>${a.role}</td><td class="cell-main">${a.action}</td><td>${a.detail}</td><td>${a.time}</td></tr>`).join("")}</tbody></table></div></div>`;
 }
 
+function messengerIsPhone(){return window.matchMedia("(max-width:760px)").matches;}
 function messagesView() {
   const messenger=state.messenger;
-  if(!messenger) return `<div class="card messenger-loading"><div class="spinner"></div><p>Loading your conversations?</p></div>`;
+  if(!messenger) return `<div class="card messenger-loading"><div class="spinner"></div><p>Loading conversations…</p></div>`;
   const conversations=messenger.conversations||[], active=messenger.active;
+  const canChannel=["Executive Officer","System Admin"].includes(state.role);
   return `<div class="messenger ${active?"chat-open":""}">
     <aside class="conversation-panel">
-      <div class="conversation-search">${icons.search}<input id="conversation-search" placeholder="Search conversations"></div>
-      <div class="chat-filters"><button class="active" data-chat-filter="all">All</button><button data-chat-filter="group">Groups</button><button data-chat-filter="channel">Channels</button><button data-chat-filter="unread">Unread</button><button data-chat-filter="archived">Archived</button><button class="chat-search-action" data-action="message-search" title="Search messages">${icons.search}</button></div>
+      <div class="wa-list-head"><h2>Chats</h2><div class="wa-list-tools">${canChannel?`<button type="button" class="icon-button" data-action="new-channel" title="New channel">${icons.bell}</button>`:""}<button type="button" class="icon-button" data-action="new-group" title="New group">${icons.users}</button><button type="button" class="icon-button" data-action="new-message" title="New chat">${icons.plus}</button></div></div>
+      <div class="conversation-search">${icons.search}<input id="conversation-search" placeholder="Search or start a new chat"></div>
+      <div class="chat-filters"><button class="active" data-chat-filter="all">All</button><button data-chat-filter="unread">Unread</button><button data-chat-filter="group">Groups</button><button data-chat-filter="channel">Channels</button></div>
       <div class="conversation-list" id="conversation-list">
-        ${conversations.length?conversations.map(c=>conversationItem(c,active?.conversationId)).join(""):`<div class="message-empty compact">${icons.messages}<strong>No conversations yet</strong><span>Start a message with any member or staff user.</span></div>`}
+        ${conversations.length?conversations.map(c=>conversationItem(c,active?.conversationId)).join(""):`<div class="message-empty compact">${icons.messages}<strong>No chats yet</strong><span>Tap the + button to message a member.</span></div>`}
       </div>
-      <div class="conversation-footer"><button class="button primary" data-action="new-message">${icons.plus} Start new chat</button></div>
     </aside>
     <section class="chat-panel">
-      ${active?chatView(active):`<div class="message-empty">${icons.messages}<strong>Your organization conversations</strong><span>Choose a conversation or start a new message.</span><button class="button primary" data-action="new-message">${icons.plus}New message</button></div>`}
+      ${active?chatView(active):`<div class="message-empty wa-empty-desktop">${icons.messages}<strong>Kasangati G40 Kwagalana</strong><span>Select a chat to read and send private messages.</span></div>`}
     </section>
+    <button type="button" class="wa-fab" data-action="new-message" title="New chat">${icons.plus}</button>
   </div>`;
 }
 function conversationItem(c,activeId) {
@@ -3582,18 +3587,15 @@ function conversationItem(c,activeId) {
 }
 function chatView(active) {
   const cannotPost=active.onlyAdminsCanPost&&active.memberRole!=="admin";
-  return `<header class="chat-head"><button class="chat-back" data-action="chat-back" title="Back to conversations">${icons.arrowDown}</button><span class="chat-avatar chat-head-avatar ${active.type!=="direct"?"group":""} ${active.type==="direct"?"clickable-profile":""}" ${active.type==="direct"?`data-user-profile="${active.other.id}"`:""}>${active.type!=="direct"?(active.type==="channel"?icons.bell:icons.users):profileImage(active.other.id,active.other.fullName,active.other.hasProfilePhoto)}${active.other.online?`<i></i>`:""}</span><div class="chat-head-copy"><strong>${active.other.fullName}</strong><span>${active.typingUsers?.length?`${active.typingUsers.join(", ")} typing?`:active.other.online?"Online":active.other.role}${active.type==="group"&&active.onlyAdminsCanPost?" - Admins post only":""}</span></div><button class="icon-button" data-action="chat-info">${icons.info}</button></header>
+  return `<header class="chat-head"><button class="chat-back" data-action="chat-back" title="Back">${icons.arrowDown}</button><span class="chat-avatar chat-head-avatar ${active.type!=="direct"?"group":""} ${active.type==="direct"?"clickable-profile":""}" ${active.type==="direct"?`data-user-profile="${active.other.id}"`:""}>${active.type!=="direct"?(active.type==="channel"?icons.bell:icons.users):profileImage(active.other.id,active.other.fullName,active.other.hasProfilePhoto)}${active.other.online?`<i></i>`:""}</span><div class="chat-head-copy"><strong>${active.other.fullName}</strong><span>${active.typingUsers?.length?`${active.typingUsers.join(", ")} typing…`:active.other.online?"Online":active.other.role}${active.type==="group"&&active.onlyAdminsCanPost?" · Admins post only":""}</span></div><div class="chat-head-tools"><button type="button" class="icon-button" data-action="message-search" title="Search">${icons.search}</button><button type="button" class="icon-button" data-action="chat-info" title="Chat info">${icons.info}</button></div></header>
     <div class="chat-messages" id="chat-messages">
-      <div class="chat-day"><span>Secure conversation</span></div>
-      ${active.messages.length?active.messages.map(messageBubble).join(""):`<div class="message-empty compact">${icons.messages}<strong>Say hello to ${active.other.fullName.split(" ")[0]}</strong><span>Messages are private to participants.</span></div>`}
+      ${active.messages.length?active.messages.map(messageBubble).join(""):`<div class="message-empty compact"><strong>Say hello to ${escapeHtml(active.other.fullName.split(" ")[0])}</strong><span>Messages stay inside Kwagalana.</span></div>`}
     </div>
     <div class="reply-preview ${state.messageReply?"show":""}" id="reply-preview">${state.messageReply?`<div><span>Replying to ${state.messageReply.senderName}</span><strong>${escapeHtml(state.messageReply.body)}</strong></div><button data-action="cancel-reply">${icons.x}</button>`:""}</div>
     ${cannotPost?`<div class="admin-only-notice">${icons.lock} Only administrators can send messages in this conversation.</div>`:`<form class="message-composer" id="message-form">
-      <button type="button" class="composer-tool" data-action="attach-file" title="Share files">${icons.plus}</button><input type="file" id="message-files" multiple hidden accept="image/*,video/mp4,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.txt,.csv">
-      <button type="button" class="composer-tool" data-action="emoji" title="Add emoji">:)</button>
-      <textarea name="body" rows="1" maxlength="2000" placeholder="Type a message? Use @name to mention someone" required></textarea>
-      <span class="composer-count" id="composer-count">0/2000</span>
-      <button class="send-button" type="submit" aria-label="Send message">${icons.arrowUp}</button>
+      <button type="button" class="composer-tool" data-action="attach-file" title="Attach">${icons.plus}</button><input type="file" id="message-files" multiple hidden accept="image/*,video/mp4,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.txt,.csv">
+      <textarea name="body" rows="1" maxlength="2000" placeholder="Type a message" required></textarea>
+      <button class="send-button" type="submit" aria-label="Send">${icons.arrowUp}</button>
     </form>`}`;
 }
 function messageBubble(message) {
@@ -3631,7 +3633,8 @@ function escapeHtml(value) {
 async function loadMessenger(preferredId=null) {
   const result=await api("/api/messages/conversations");
   if(preferredId)state.messengerClosed=false;
-  const currentId=preferredId||state.messenger?.active?.conversationId||(state.messengerClosed?null:result.conversations.find(c=>!c.archived)?.id);
+  const keepOpen=state.messenger?.active?.conversationId;
+  const currentId=preferredId||keepOpen||(state.messengerClosed||messengerIsPhone()?null:result.conversations.find(c=>!c.archived)?.id);
   let active=null;
   if(currentId) active=await api(`/api/messages/conversations/${currentId}`);
   state.messenger={conversations:result.conversations,active};
@@ -4340,7 +4343,7 @@ function bind() {
   if(messageForm) {
     messageForm.addEventListener("submit",sendMessage);
     const area=messageForm.querySelector("textarea");
-    area.addEventListener("input",()=>{document.getElementById("composer-count").textContent=`${area.value.length}/2000`;area.style.height="auto";area.style.height=`${Math.min(area.scrollHeight,120)}px`;signalTyping();});
+    area.addEventListener("input",()=>{const count=document.getElementById("composer-count");if(count)count.textContent=`${area.value.length}/2000`;area.style.height="auto";area.style.height=`${Math.min(area.scrollHeight,120)}px`;signalTyping();});
     area.addEventListener("keydown",event=>{if(event.key==="Enter"&&!event.shiftKey){event.preventDefault();messageForm.requestSubmit();}});
     requestAnimationFrame(()=>{const box=document.getElementById("chat-messages");if(box)box.scrollTop=box.scrollHeight;});
   }
