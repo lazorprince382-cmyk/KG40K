@@ -519,6 +519,31 @@ async function fillMemberPhonesFromRoll20261028(client){
   await client.query(`INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value,updated_at=NOW()`,[key,summary]);
   return summary;
 }
+async function maryCollateral85m20261028(client){
+  const key="maryCollateral85m20261028";
+  if((await client.query("SELECT 1 FROM settings WHERE key=$1",[key])).rows[0])return null;
+  const description="Land at NAKATETE Bulemezi, Block 445 Plot 26, Area 1.2140 ha, PIN 64000115908, Instrument LUW-00101779. Owner BABIRYE MARY NIN CF700071087GYL. No encumbrances (search LUW00207557 dated 04/Aug/2026).";
+  const result=await client.query(
+    `UPDATE loans l
+     SET collateral_value=85000000,
+         collateral_owner=COALESCE(NULLIF(TRIM(l.collateral_owner),''),'Mary Babirye'),
+         collateral_description=COALESCE(NULLIF(TRIM(l.collateral_description),''),$1)
+     FROM members m
+     WHERE l.member_id=m.id AND m.deleted_at IS NULL
+       AND (m.full_name ILIKE '%Mary%Babirye%' OR m.full_name ILIKE '%Babirye%Mary%')
+       AND (
+         l.collateral_description ILIKE '%NAKATETE%'
+         OR l.collateral_description ILIKE '%Block 445%'
+         OR l.purpose ILIKE '%Block 445%'
+         OR COALESCE(l.collateral_value,0) IN (0,25000000,80000000)
+       )
+     RETURNING l.reference, l.collateral_value`,
+    [description]
+  );
+  const summary=result.rowCount?`set ${result.rows.map(r=>`${r.reference}=${Number(r.collateral_value).toLocaleString()}`).join(", ")}`:"no matching Mary Babirye collateral loan";
+  await client.query(`INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value,updated_at=NOW()`,[key,summary]);
+  return summary;
+}
 async function backfillRepaymentsToCentenary(client){
   const pending=(await client.query(`SELECT t.id FROM transactions t LEFT JOIN loans l ON l.id=t.loan_id
     WHERE t.type='Loan repayment' AND t.status='completed' AND t.finance_entry_id IS NULL
@@ -1207,10 +1232,14 @@ app.get("/api/bootstrap",auth,asyncRoute(async(req,res)=>{
     query("SELECT key,value FROM settings"),
     query(`SELECT a.id,a.title,a.body,a.created_at AS date,u.full_name AS author FROM announcements a JOIN users u ON u.id=a.created_by ORDER BY a.id DESC LIMIT 10`),
     query("SELECT * FROM notifications WHERE user_id=$1 OR member_id=$2 ORDER BY id DESC LIMIT 30",[req.user.id,req.user.member_id||-1]),
-    query(`SELECT COUNT(*)::int AS count FROM messages msg
-      JOIN conversation_members cm ON cm.conversation_id=msg.conversation_id AND cm.user_id=$1
-      WHERE msg.sender_id<>$1 AND msg.deleted_at IS NULL
-      AND NOT EXISTS (SELECT 1 FROM message_reads mr WHERE mr.message_id=msg.id AND mr.user_id=$1)`,[req.user.id]),
+    query(`SELECT COUNT(*)::int AS count FROM conversation_members cm
+      WHERE cm.user_id=$1 AND COALESCE(cm.hidden,false)=false
+        AND EXISTS (
+          SELECT 1 FROM messages msg
+          WHERE msg.conversation_id=cm.conversation_id AND msg.sender_id<>$1 AND msg.deleted_at IS NULL
+            AND (cm.cleared_at IS NULL OR msg.created_at>cm.cleared_at)
+            AND NOT EXISTS (SELECT 1 FROM message_reads mr WHERE mr.message_id=msg.id AND mr.user_id=$1)
+        )`,[req.user.id]),
     req.user.member_id?query(`SELECT l.id AS "databaseId",l.reference AS id,l.amount::float,l.term_months AS "termMonths",
       l.purpose,l.status,p.name AS product,borrower.full_name AS member,borrower.savings_balance::float AS "borrowerSavings",
       lg.id AS "guarantorRequestId",lg.status AS "guarantorStatus",lg.response_note AS "responseNote"
@@ -6700,6 +6729,10 @@ async function runScheduledMaintenance() {
     const phones=await transaction(client=>fillMemberPhonesFromRoll20261028(client));
     if(phones)console.log(`Member phones: ${phones}`);
   }catch(error){console.error("Member phone fill failed:",error.message);}
+  try{
+    const collateral=await transaction(client=>maryCollateral85m20261028(client));
+    if(collateral)console.log(`Mary collateral: ${collateral}`);
+  }catch(error){console.error("Mary collateral 85m update failed:",error.message);}
   const graceDays=0;
   await transaction(async client=>{
     // No grace window: unpaid installments become overdue the day after the due date.

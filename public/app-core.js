@@ -585,7 +585,7 @@ function hydrateBootstrapInBackground(){
     state.guarantorRequests=normalized.guarantorRequests;
     state.audit=normalized.audit;
     state.settings={...state.settings,...(normalized.settings||{})};
-    if(typeof data.unreadMessages==="number")state.unreadMessages=data.unreadMessages;
+    if(typeof data.unreadMessages==="number"){state.unreadMessages=data.unreadMessages;state.unreadChats=data.unreadMessages;}
   }).catch(error=>console.warn("Background bootstrap hydrate failed",error.message));
 }
 function permissionsForRole(role){
@@ -693,6 +693,13 @@ function canCreditsDisburse(){
 function navAlertDot(show){
   return show?`<span class="nav-alert-dot" aria-hidden="true"></span>`:"";
 }
+function unreadChatCount(conversations){
+  return (conversations||[]).filter(c=>Number(c.unreadCount||0)>0).length;
+}
+function messagesNavBadge(){
+  const n=Number(state.unreadChats||0);
+  return n?`<span class="nav-badge">${n}</span>`:"";
+}
 let idleTimer=null;
 let idleInstalled=false;
 let sessionLocked=false;
@@ -736,6 +743,7 @@ async function returnToSignIn(){
   loginView();
 }
 function render() {
+  const sidebarWasOpen=Boolean(document.getElementById("sidebar")?.classList.contains("open"));
   const workspaceRole=executiveWorkspaceRole();
   const allowed = rolePages[workspaceRole]||rolePages[state.role];
   const linkedMemberPage=Boolean(state.memberContext&&window.MemberPortal?.pages?.includes(state.page));
@@ -784,7 +792,7 @@ function render() {
     if(node)node.innerHTML=`${profileImage(other.id,other.fullName,other.hasProfilePhoto)}${other.online?"<i></i>":""}`;
   }
   bind();
-  if(typeof setSidebarOpen==="function")setSidebarOpen(false);
+  if(sidebarWasOpen&&typeof setSidebarOpen==="function")setSidebarOpen(true);
   if(state.page==="executive-credits") ensureExecutiveCreditsDesk();
   ensureIdleLock();
 }
@@ -803,7 +811,7 @@ function sidebar() {
   return injectWorkspaceSwitcher(`<aside class="sidebar" id="sidebar">
     <div class="brand"><div class="brand-mark">${icons.logo}</div><div><div class="brand-name">Kasangati G40</div><div class="brand-sub">Kwagalana</div></div></div>
     <div class="nav-label">Workspace</div>
-    <nav class="nav">${allowed.map(page => `<button class="nav-item ${state.page === page ? "active" : ""}" data-page="${page}">${icons[page] || icons.dashboard}<span>${labels[page]}</span>${page === "approvals" && badge ? `<span class="nav-badge">${badge}</span>` : page==="messages"&&state.unreadMessages ? `<span class="nav-badge">${state.unreadMessages}</span>` : ""}</button>`).join("")}</nav>
+    <nav class="nav">${allowed.map(page => `<button class="nav-item ${state.page === page ? "active" : ""}" data-page="${page}">${icons[page] || icons.dashboard}<span>${labels[page]}</span>${page === "approvals" && badge ? `<span class="nav-badge">${badge}</span>` : page==="messages"?messagesNavBadge():""}</button>`).join("")}</nav>
     <div class="sidebar-bottom">
       <div class="role-picker"><label>Secure session</label><div style="font-size:12px;font-weight:700">${state.role}</div><div style="margin-top:4px;color:#86a397;font-size:12px">${state.organization?.name || "Kasangati G40 Kwagalana"}</div></div>
       <div class="sidebar-user"><div class="avatar">${initials(actor())}</div><div><div class="user-name">${actor()}</div><div class="user-role">${state.role}</div></div></div>
@@ -825,7 +833,7 @@ function investmentSidebar() {
   const sidebarPages=new Set(["dashboard","investment-projects","investment-revenue","investment-expenses","investment-documents","messages","settings"]);
   return `<aside class="sidebar executive-sidebar investment-sidebar" id="sidebar">
     <div class="executive-brand"><div class="executive-crest investment-crest">${icons.reports}</div><div><strong>KASANGATI G40<br>KWAGALANA</strong><span>INVESTMENT DEPARTMENT</span></div></div>
-    <nav class="nav executive-nav">${[...sidebarPages].filter(page=>pages.includes(page)).map(page=>`<button class="nav-item ${state.page===page?"active":""}" data-page="${page}">${icons[iconMap[page]||page]||icons.dashboard}<span>${labels[page]}</span>${navAlertDot(page==="investment-proposals"&&pending||page==="messages"&&state.unreadMessages)}</button>`).join("")}</nav>
+    <nav class="nav executive-nav">${[...sidebarPages].filter(page=>pages.includes(page)).map(page=>`<button class="nav-item ${state.page===page?"active":""}" data-page="${page}">${icons[iconMap[page]||page]||icons.dashboard}<span>${labels[page]}</span>${page==="messages"?messagesNavBadge():navAlertDot(page==="investment-proposals"&&pending)}</button>`).join("")}</nav>
     <div class="sidebar-bottom">${state.executiveWorkspace?`<button class="executive-quick" data-executive-workspace-exit>${icons.arrowUp}<span>Back to Executive</span></button>`:`<button class="executive-quick" data-action="investment-quick">${icons.arrowUp}<span>Quick Actions</span><b>&gt;</b></button>`}
       <div class="sidebar-user"><div class="avatar blue">${initials(actor())}</div><div><div class="user-name">${actor()}</div><div class="user-role">${state.executiveWorkspace?"Executive read-only view":"Investment Department"}</div></div></div></div>
   </aside>`;
@@ -850,10 +858,10 @@ function creditsSidebar() {
   const sidebarPages=new Set(["dashboard","credits-members","credits-savings","credits-applications","credits-approvals","credits-disbursement","credits-active","credits-repayments","credits-receipts","credits-guarantors","credits-recovery","credits-documents","credits-notifications","messages","settings"]);
   if(isExecutiveReadOnly()) sidebarPages.delete("credits-disbursement");
   if(!canCreditsDisburse()) sidebarPages.delete("credits-disbursement");
-  const alertFor=page=>page==="credits-applications"&&applicationBadge||page==="credits-approvals"&&approvalBadge||page==="credits-active"&&activeBadge||page==="credits-disbursement"&&disburseBadge||page==="credits-repayments"&&repaymentBadge||page==="credits-guarantors"&&guarantorBadge||page==="credits-recovery"&&(recoveryBadge||dangerBadge)||page==="messages"&&state.unreadMessages;
+  const alertFor=page=>page==="credits-applications"&&applicationBadge||page==="credits-approvals"&&approvalBadge||page==="credits-active"&&activeBadge||page==="credits-disbursement"&&disburseBadge||page==="credits-repayments"&&repaymentBadge||page==="credits-guarantors"&&guarantorBadge||page==="credits-recovery"&&(recoveryBadge||dangerBadge);
   return `<aside class="sidebar executive-sidebar credits-sidebar" id="sidebar">
     <div class="executive-brand"><div class="executive-crest credits-crest">${icons.loans}</div><div><strong>KASANGATI G40<br>KWAGALANA</strong><span>SACCO - CREDITS DEPARTMENT</span></div></div>
-    <nav class="nav executive-nav">${[...sidebarPages].filter(page=>pages.includes(page)).map(page=>`<button class="nav-item ${state.page===page?"active":""}" data-page="${page}">${icons[iconMap[page]||page]||icons.dashboard}<span>${labels[page]}</span>${navAlertDot(alertFor(page))}</button>`).join("")}</nav>
+    <nav class="nav executive-nav">${[...sidebarPages].filter(page=>pages.includes(page)).map(page=>`<button class="nav-item ${state.page===page?"active":""}" data-page="${page}">${icons[iconMap[page]||page]||icons.dashboard}<span>${labels[page]}</span>${page==="messages"?messagesNavBadge():navAlertDot(alertFor(page))}</button>`).join("")}</nav>
     <div class="sidebar-bottom">${state.executiveWorkspace?`<button class="executive-quick" data-executive-workspace-exit>${icons.arrowUp}<span>Back to Executive</span></button>`:`<button class="executive-quick" data-action="credits-quick">${icons.arrowUp}<span>Quick Actions</span><b>&gt;</b></button>`}
       <div class="sidebar-user"><div class="avatar blue">${initials(actor())}</div><div><div class="user-name">${actor()}</div><div class="user-role">${state.executiveWorkspace?"Executive read-only view":"Credits Department"}</div></div></div></div>
   </aside>`;
@@ -871,10 +879,10 @@ function financeSidebar() {
   const investmentPending=(state.finance?.investmentAnalyses||[]).length;
   const pages=rolePages[executiveWorkspaceRole()]||rolePages[state.role];
   const sidebarPages=new Set(["dashboard","finance-approvals","finance-income","finance-expenses","finance-bank","finance-unit-trust","finance-budgets","finance-documents","messages","settings"]);
-  const alertFor=page=>page==="finance-approvals"&&(pending||entryPending||investmentPending)||page==="messages"&&state.unreadMessages;
+  const alertFor=page=>page==="finance-approvals"&&(pending||entryPending||investmentPending);
   return `<aside class="sidebar executive-sidebar finance-sidebar" id="sidebar">
     <div class="executive-brand"><div class="executive-crest finance-crest">${icons.wallet}</div><div><strong>KASANGATI G40<br>KWAGALANA</strong><span>Finance</span></div></div>
-    <nav class="nav executive-nav">${[...sidebarPages].filter(page=>pages.includes(page)).map(page=>`<button class="nav-item ${state.page===page?"active":""}" data-page="${page}">${icons[iconsByPage[page]||page]||icons.dashboard}<span>${labels[page]}</span>${navAlertDot(alertFor(page))}</button>`).join("")}</nav>
+    <nav class="nav executive-nav">${[...sidebarPages].filter(page=>pages.includes(page)).map(page=>`<button class="nav-item ${state.page===page?"active":""}" data-page="${page}">${icons[iconsByPage[page]||page]||icons.dashboard}<span>${labels[page]}</span>${page==="messages"?messagesNavBadge():navAlertDot(alertFor(page))}</button>`).join("")}</nav>
     <div class="sidebar-bottom">${state.executiveWorkspace?`<button class="executive-quick" data-executive-workspace-exit>${icons.arrowUp}<span>Back to Executive</span></button>`:`<button class="executive-quick" data-action="finance-quick">${icons.arrowUp}<span>Quick Actions</span><b>&gt;</b></button>`}
       <div class="sidebar-user"><div class="avatar blue">${initials(actor())}</div><div><div class="user-name">${actor()}</div><div class="user-role">${state.executiveWorkspace?"Executive read-only view":"Finance"}</div></div></div></div>
   </aside>`;
@@ -890,10 +898,10 @@ function executiveSidebar() {
     notifications:"bell","executive-documents":"file",users:"lock"};
   const pending=state.executive?.stats?.pendingApprovals||((state.executive?.approvals||[]).length+((state.executive?.documents||[]).filter(d=>d.status==="pending_executive").length));
   const sidebarPages=new Set(["dashboard","executive-approvals","members","departments","executive-meetings","executive-documents","users","notifications","messages","settings"]);
-  const alertFor=page=>page==="executive-approvals"&&pending||page==="messages"&&state.unreadMessages||page==="notifications"&&(state.notifications||[]).some(n=>!n.readAt);
+  const alertFor=page=>page==="executive-approvals"&&pending||page==="notifications"&&(state.notifications||[]).some(n=>!n.readAt);
   return `<aside class="sidebar executive-sidebar" id="sidebar">
     <div class="executive-brand"><div class="executive-crest">${icons.shield}</div><div><strong>KASANGATI G40<br>KWAGALANA</strong><span>Executive Department</span></div></div>
-    <nav class="nav executive-nav">${[...sidebarPages].filter(page=>rolePages[state.role].includes(page)).map(page=>`<button class="nav-item ${state.page===page?"active":""}" data-page="${page}">${icons[iconMap[page]||page]||icons.dashboard}<span>${labels[page]}</span>${navAlertDot(alertFor(page))}</button>`).join("")}</nav>
+    <nav class="nav executive-nav">${[...sidebarPages].filter(page=>rolePages[state.role].includes(page)).map(page=>`<button class="nav-item ${state.page===page?"active":""}" data-page="${page}">${icons[iconMap[page]||page]||icons.dashboard}<span>${labels[page]}</span>${page==="messages"?messagesNavBadge():navAlertDot(alertFor(page))}</button>`).join("")}</nav>
     <div class="sidebar-bottom"><button class="executive-quick" data-action="executive-quick">${icons.arrowUp}<span>Quick Actions</span><b>&gt;</b></button>
       <div class="sidebar-user"><div class="avatar blue">${initials(actor())}</div><div><div class="user-name">${actor()}</div><div class="user-role">Executive Department</div></div></div></div>
   </aside>`;
@@ -3676,24 +3684,26 @@ async function loadMessenger(preferredId=null) {
   let active=null;
   if(currentId) active=await api(`/api/messages/conversations/${currentId}`);
   state.messenger={conversations:result.conversations,active};
-  state.unreadMessages=result.conversations.reduce((sum,c)=>sum+Number(c.unreadCount||0),0);
   if(active) {
     const conversation=state.messenger.conversations.find(c=>String(c.id)===String(active.conversationId));
     if(conversation) conversation.unreadCount=0;
-    state.unreadMessages=state.messenger.conversations.reduce((sum,c)=>sum+Number(c.unreadCount||0),0);
   }
+  state.unreadChats=unreadChatCount(state.messenger.conversations);
+  state.unreadMessages=state.unreadChats;
   if(!messagePoll) messagePoll=setInterval(pollMessages,5000);
 }
 async function pollMessages() {
   if(state.page!=="messages") return;
   if(document.activeElement?.closest?.(".message-composer")) return;
+  if(document.getElementById("sidebar")?.classList.contains("open")) return;
   try {
-    const previousUnread=Number(state.unreadMessages||0);
+    const previousUnread=Number(state.unreadChats||0);
     const current=state.messenger?.active?.conversationId;
     await loadMessenger(current);
-    if(state.unreadMessages>previousUnread&&"Notification" in window&&Notification.permission==="granted") {
+    if(state.unreadChats>previousUnread&&"Notification" in window&&Notification.permission==="granted") {
       new Notification("New Kasangati G40 message",{body:"You have a new secure message.",icon:"/icon.svg"});
     }
+    if(document.getElementById("sidebar")?.classList.contains("open")) return;
     render();
   } catch {}
 }
