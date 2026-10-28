@@ -342,6 +342,10 @@ tbody tr:hover { background: #fbfdfc; }
 .field textarea { min-height:78px; resize:vertical; }
 .field small { display:block; margin-top:5px; color:#8b9590; font-size:14px; }
 .form-actions { display:flex; justify-content:flex-end; gap:9px; margin-top:20px; padding-top:16px; border-top:1px solid var(--line); }
+.modal.exec-register-modal{width:min(720px,100%)}
+.legal-form-section{margin:0 0 16px;padding:14px 14px 4px;border:1px solid var(--line);border-radius:14px;background:#f7fafc}
+.legal-form-section h3{margin:0 0 12px;font:800 13px Manrope;color:#0b3b70;letter-spacing:.02em;text-transform:uppercase}
+.form .legal-form-section .form-grid{margin-bottom:10px}
 
 #toast-root { position:fixed; z-index:200; right:24px; bottom:24px; display:grid; gap:8px; }
 .toast { min-width:260px; max-width:360px; padding:13px 15px; display:flex; align-items:flex-start; gap:10px; border-radius:12px; color:#fff; background:var(--green-900); box-shadow:0 15px 40px rgba(0,0,0,.2); animation:toastIn .25s ease; font-size:14px; }

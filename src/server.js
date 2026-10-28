@@ -4622,69 +4622,154 @@ app.post("/api/members",auth,permit("member:manage","user:manage"),asyncRoute(as
   const phone=String(b.phone||"").trim();
   const nationalId=String(b.nationalId||"").trim();
   const nextOfKin=String(b.nextOfKin||"").trim();
+  const nextOfKinPhone=String(b.nextOfKinPhone||"").trim();
+  const address=String(b.address||"").trim();
+  const occupation=String(b.occupation||"").trim();
+  const dateOfBirth=String(b.dateOfBirth||"").trim();
+  const gender=String(b.gender||"").trim().toLowerCase();
   const email=String(b.email||"").trim().toLowerCase();
+  const createAccount=["true","1","on","yes"].includes(String(b.createAccount||"").toLowerCase());
   if(!fullName||fullName.length<2)return res.status(400).json({error:"Full legal name is required"});
   if(!phone)return res.status(400).json({error:"Phone number is required"});
   if(!nationalId)return res.status(400).json({error:"National ID is required"});
+  if(!dateOfBirth)return res.status(400).json({error:"Date of birth is required"});
+  if(!["female","male","other","prefer_not_to_say"].includes(gender))return res.status(400).json({error:"Choose a valid gender"});
+  if(!address)return res.status(400).json({error:"Residence / address is required"});
+  if(!occupation)return res.status(400).json({error:"Occupation is required"});
   if(!nextOfKin)return res.status(400).json({error:"Next of kin is required"});
+  if(!nextOfKinPhone)return res.status(400).json({error:"Next of kin phone is required"});
+  if(createAccount&&(!email||!email.includes("@")))return res.status(400).json({error:"Email is required to create a member login"});
   const memberNumber=`G40-${new Date().getFullYear()}-${crypto.randomUUID().replaceAll("-","").slice(0,8).toUpperCase()}`;
   const savings=Math.max(0,Number(b.savings||0));
   const shares=Math.max(0,Number(b.shares||0));
+  const joinedOn=/^\d{4}-\d{2}-\d{2}$/.test(String(b.joinedAt||""))?b.joinedAt:null;
+  const kinRecord=nextOfKinPhone?`${nextOfKin} · ${nextOfKinPhone}`:nextOfKin;
+  let temporaryPassword=null;
   try{
     const created=await transaction(async client=>{
       const branchId=Number(b.branchId||req.user.branch_id||(await client.query(`SELECT id FROM branches WHERE active=true ORDER BY id LIMIT 1`)).rows[0]?.id||1);
-      return (await client.query(`INSERT INTO members
-        (member_number,full_name,email,phone,national_id,occupation,employer,address,next_of_kin,branch_id,savings_balance,share_capital,status,joined_at,created_by)
-        VALUES ($1,$2,NULLIF($3,''),$4,$5,NULLIF($6,''),NULLIF($7,''),NULLIF($8,''),$9,$10,$11,$12,'active',CURRENT_DATE,$13)
+      const member=(await client.query(`INSERT INTO members
+        (member_number,full_name,email,phone,national_id,occupation,employer,address,next_of_kin,branch_id,savings_balance,share_capital,status,joined_at,created_by,provisional)
+        VALUES ($1,$2,NULLIF($3,''),$4,$5,$6,NULLIF($7,''),$8,$9,$10,$11,$12,'active',COALESCE($13::date,CURRENT_DATE),$14,false)
         RETURNING id,member_number AS "memberNumber",full_name AS "fullName"`,
-        [memberNumber,fullName,email,phone,nationalId,String(b.occupation||"").trim(),String(b.employer||"").trim(),
-         String(b.address||"").trim(),nextOfKin,branchId,savings,shares,req.user.id])).rows[0];
+        [memberNumber,fullName,email,phone,nationalId,occupation,String(b.employer||"").trim(),
+         address,kinRecord,branchId,savings,shares,joinedOn,req.user.id])).rows[0];
+      await client.query(`INSERT INTO member_bio_data
+        (member_id,date_of_birth,gender,marital_status,nationality,home_district,emergency_contact_name,emergency_contact_phone,
+         emergency_contact_relationship,bio_status,created_by,updated_at)
+        VALUES ($1,$2::date,$3,NULLIF($4,''),COALESCE(NULLIF($5,''),'Ugandan'),NULLIF($6,''),NULLIF($7,''),NULLIF($8,''),NULLIF($9,''),'complete',$10,NOW())
+        ON CONFLICT (member_id) DO UPDATE SET date_of_birth=EXCLUDED.date_of_birth,gender=EXCLUDED.gender,
+          marital_status=EXCLUDED.marital_status,nationality=EXCLUDED.nationality,home_district=EXCLUDED.home_district,
+          emergency_contact_name=EXCLUDED.emergency_contact_name,emergency_contact_phone=EXCLUDED.emergency_contact_phone,
+          emergency_contact_relationship=EXCLUDED.emergency_contact_relationship,bio_status='complete',updated_at=NOW()`,
+        [member.id,dateOfBirth,gender,["single","married","divorced","widowed","separated","other"].includes(String(b.maritalStatus||"").trim())?String(b.maritalStatus).trim():"",String(b.nationality||"Ugandan").trim(),
+         String(b.homeDistrict||"").trim(),String(b.emergencyContactName||nextOfKin).trim(),
+         String(b.emergencyContactPhone||nextOfKinPhone).trim(),String(b.emergencyContactRelationship||"Next of kin").trim(),req.user.id]);
+      if(createAccount){
+        temporaryPassword=b.password?String(b.password):generateTemporaryPassword();
+        if(!strongPassword(temporaryPassword)){const error=new Error("Password must include uppercase, lowercase, number and symbol");error.status=400;throw error;}
+        await client.query(`INSERT INTO users
+          (full_name,email,phone,password_hash,role,branch_id,member_id,created_by,must_change_password)
+          VALUES ($1,$2,$3,$4,'Member',$5,$6,$7,true)`,
+          [fullName,email,phone,await bcrypt.hash(temporaryPassword,12),branchId,member.id,req.user.id]);
+      }
+      return member;
     });
     await audit({userId:req.user.id,action:"MEMBER_CREATED",entityType:"member",entityId:String(created.id),
       details:`${fullName} - ${created.memberNumber}`,...metadata(req)});
-    res.status(201).json({id:created.id,memberNumber:created.memberNumber,fullName:created.fullName});
+    res.status(201).json({id:created.id,memberNumber:created.memberNumber,fullName:created.fullName,temporaryPassword});
   }catch(error){
-    if(error.code==="23505")return res.status(409).json({error:"A member with this phone or National ID already exists"});
+    if(error.status===400)return res.status(400).json({error:error.message});
+    if(error.code==="23505")return res.status(409).json({error:"A member with this phone, email or National ID already exists"});
     throw error;
   }
 }));
+function resolveLoginAccess(body){
+  const accessType=String(body.accessType||"").toLowerCase()==="department"?"department":"member";
+  const departmentCode=String(body.departmentCode||body.department||"").trim().toLowerCase();
+  if(accessType==="member")return {role:"Member",departmentCode:null};
+  const role=DEPARTMENT_WORKSPACE_ROLES[departmentCode];
+  if(!role)return {error:"Choose a department desk: Credits, Finance, Investment, Welfare, Legal, Audit, Supervisory or Executive"};
+  return {role,departmentCode};
+}
+async function setUserDepartmentAccess(client,{userId,role,departmentCode,positionTitle,assignedBy,revokeSession=false}){
+  await client.query(`UPDATE users SET role=$2${revokeSession?", token_version=token_version+1":""} WHERE id=$1`,[userId,role]);
+  await client.query("UPDATE department_assignments SET active=false WHERE user_id=$1",[userId]);
+  if(!departmentCode)return;
+  const department=(await client.query("SELECT id,name FROM departments WHERE code=$1 AND active=true",[departmentCode])).rows[0];
+  if(!department)throw Object.assign(new Error("That department is not set up"),{status:400});
+  const title=String(positionTitle||role).trim();
+  const existing=(await client.query("SELECT id FROM department_assignments WHERE user_id=$1 AND department_id=$2",[userId,department.id])).rows[0];
+  if(existing){
+    await client.query(`UPDATE department_assignments SET active=true,position_title=$2,authority_level=3,
+      can_view=true,can_create=true,can_edit=true,can_approve=true,is_head=false,assigned_by=$3 WHERE id=$1`,
+      [existing.id,title,assignedBy]);
+    return;
+  }
+  await client.query(`INSERT INTO department_assignments
+    (user_id,department_id,position_title,authority_level,can_view,can_create,can_edit,can_approve,is_head,assigned_by,active)
+    VALUES ($1,$2,$3,3,true,true,true,true,false,$4,true)`,
+    [userId,department.id,title,assignedBy]);
+}
 app.post("/api/users",auth,permit("user:manage"),asyncRoute(async(req,res)=>{
   const b=req.body||{};
-  const fullName=String(b.fullName||"").trim();
-  const email=String(b.email||"").trim().toLowerCase();
-  const phone=String(b.phone||"").trim();
-  const role=String(b.role||"").trim();
-  const branchId=Number(b.branchId||req.user.branch_id);
-  const departmentId=b.departmentId?Number(b.departmentId):null;
-  const positionTitle=String(b.positionTitle||role||"Staff").trim();
+  const linked=b.memberId?await one("SELECT id,full_name,email,phone,branch_id FROM members WHERE id=$1 AND deleted_at IS NULL",[Number(b.memberId)]):null;
+  const fullName=String(b.fullName||linked?.full_name||"").trim();
+  const email=String(b.email||linked?.email||"").trim().toLowerCase();
+  const phone=String(b.phone||linked?.phone||"").trim();
+  const access=resolveLoginAccess(b);
+  if(access.error)return res.status(400).json({error:access.error});
+  const role=ROLES.includes(String(b.role||"").trim())&&String(b.role).trim()==="System Admin"&&req.user.role==="System Admin"
+    ?"System Admin":access.role;
+  const branchId=Number(b.branchId||linked?.branch_id||req.user.branch_id);
   if(!fullName||fullName.length<2)return res.status(400).json({error:"Full name is required"});
   if(!email||!email.includes("@"))return res.status(400).json({error:"A valid email is required"});
   if(!phone)return res.status(400).json({error:"Phone number is required"});
   if(!ROLES.includes(role))return res.status(400).json({error:"Choose a valid system role"});
   if(!branchId)return res.status(400).json({error:"Branch is required"});
+  if(linked&&(await one("SELECT id FROM users WHERE member_id=$1 AND email NOT ILIKE 'deleted.%@removed.local'",[linked.id])))
+    return res.status(409).json({error:"That member already has a login"});
   const temporaryPassword=b.password?String(b.password):generateTemporaryPassword();
   if(!strongPassword(temporaryPassword))return res.status(400).json({error:"Password must include uppercase, lowercase, number and symbol"});
   try{
     const created=await transaction(async client=>{
       const user=(await client.query(`INSERT INTO users
-        (full_name,email,phone,password_hash,role,branch_id,created_by,must_change_password)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,true) RETURNING id,email,role`,
-        [fullName,email,phone,await bcrypt.hash(temporaryPassword,12),role,branchId,req.user.id])).rows[0];
-      if(departmentId){
-        await client.query(`INSERT INTO department_assignments
-          (user_id,department_id,position_title,authority_level,can_view,can_create,can_edit,can_approve,is_head,assigned_by)
-          VALUES ($1,$2,$3,2,true,true,true,false,false,$4)`,
-          [user.id,departmentId,positionTitle,req.user.id]);
-      }
+        (full_name,email,phone,password_hash,role,branch_id,member_id,created_by,must_change_password)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,true) RETURNING id,email,role`,
+        [fullName,email,phone,await bcrypt.hash(temporaryPassword,12),role,branchId,linked?.id||null,req.user.id])).rows[0];
+      await setUserDepartmentAccess(client,{userId:user.id,role,departmentCode:access.departmentCode,
+        positionTitle:b.positionTitle,assignedBy:req.user.id});
       return user;
     });
     await audit({userId:req.user.id,action:"USER_CREATED",entityType:"user",entityId:String(created.id),
       details:`${fullName} - ${role} - ${email}`,...metadata(req)});
     res.status(201).json({id:created.id,email:created.email,role:created.role,temporaryPassword});
   }catch(error){
+    if(error.status===400)return res.status(400).json({error:error.message});
     if(error.code==="23505")return res.status(409).json({error:"An account with this email already exists"});
     throw error;
   }
+}));
+app.patch("/api/users/:id/access",auth,permit("user:manage"),asyncRoute(async(req,res)=>{
+  const userId=Number(req.params.id);
+  if(!Number.isInteger(userId)||userId<1)return res.status(400).json({error:"Choose a valid account"});
+  if(userId===Number(req.user.id))return res.status(400).json({error:"You cannot change your own desk access here"});
+  const target=await one(`SELECT id,full_name,role FROM users WHERE id=$1 AND email NOT ILIKE 'deleted.%@removed.local'`,[userId]);
+  if(!target)return res.status(404).json({error:"User account not found"});
+  const access=resolveLoginAccess(req.body||{});
+  if(access.error)return res.status(400).json({error:access.error});
+  if(["System Admin","Executive Officer"].includes(target.role)&&access.role!==target.role){
+    const remaining=Number((await one(`SELECT COUNT(*)::int AS count FROM users
+      WHERE role IN ('System Admin','Executive Officer') AND active=true AND id<>$1 AND email NOT ILIKE 'deleted.%@removed.local'`,[userId]))?.count||0);
+    if(remaining<1)return res.status(409).json({error:"Keep at least one Executive Officer who can manage accounts"});
+  }
+  await transaction(async client=>{
+    await setUserDepartmentAccess(client,{userId,role:access.role,departmentCode:access.departmentCode,
+      positionTitle:req.body?.positionTitle,assignedBy:req.user.id,revokeSession:true});
+  });
+  await audit({userId:req.user.id,action:"USER_ACCESS_CHANGED",entityType:"user",entityId:String(userId),
+    details:`${target.full_name}: ${target.role} → ${access.role}${access.departmentCode?` (${access.departmentCode})`:" (member only)"}`,...metadata(req)});
+  res.json({ok:true,role:access.role,departmentCode:access.departmentCode});
 }));
 app.patch("/api/users/:id/status",auth,permit("user:manage"),asyncRoute(async(req,res)=>{
   if(Number(req.params.id)===Number(req.user.id)) return res.status(400).json({error:"You cannot deactivate your own account"});

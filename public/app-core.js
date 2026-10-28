@@ -3914,7 +3914,7 @@ function filteredSystemUsers(){
 function userAccountCompleteness(u){
   const missing=[];
   if(!u.phone)missing.push("phone");
-  if(!(u.assignments||[]).length&&!(u.governanceDepartments||[]).length)missing.push("department");
+  if(u.role!=="Member"&&!(u.assignments||[]).length&&!(u.governanceDepartments||[]).length)missing.push("department");
   return {complete:!missing.length,missing};
 }
 function userAccountCard(u){
@@ -3925,7 +3925,7 @@ function userAccountCard(u){
     <div class="bio-dept-tags">${assignments.length?assignments.slice(0,3).map(a=>`<span class="bio-dept-tag" title="${escapeHtml(a.position||"")}">${escapeHtml(a.department)} · L${a.level}</span>`).join(""):`<span class="bio-dept-tag">No department assignment</span>`}${assignments.length>3?`<span class="bio-dept-tag">+${assignments.length-3} more</span>`:""}${completeness.complete?`<span class="bio-dept-tag filled">Filled up</span>`:`<span class="bio-dept-tag need-edit">Needs editing</span>`}</div>
     <dl><div><dt>Role</dt><dd>${escapeHtml(u.role)}</dd></div><div><dt>Phone</dt><dd>${escapeHtml(u.phone||"—")}</dd></div><div><dt>Branch</dt><dd>${escapeHtml(u.branch||"—")}</dd></div><div><dt>Last login</dt><dd>${formatUserLastLogin(u.lastLogin)}</dd></div></dl>
     <div class="bio-login-summary ${u.active?"active":"inactive"}"><span>${icons.lock}</span><div><small>Login security</small><strong>${u.mustChangePassword?"Temporary password pending change":"Password is set"}</strong><em>${u.active?"Active and allowed to sign in":"Account deactivated"}</em></div></div>
-    <footer><button data-user-view="${u.id}">${icons.eye}View details</button><button data-user-reset="${u.id}">${icons.lock}Reset password</button>${u.id!==state.user.id?`<button class="${u.active?"danger-action":""}" data-user-status="${u.id}" data-active="${u.active?0:1}">${u.active?"Deactivate":"Activate"}</button><button class="danger-action" data-user-delete="${u.id}">${icons.trash||icons.x}Delete</button>`:""}</footer>
+    <footer><button data-user-view="${u.id}">${icons.eye}View details</button>${u.id!==state.user.id?`<button data-user-access="${u.id}">Change access</button>`:""}<button data-user-reset="${u.id}">${icons.lock}Reset password</button>${u.id!==state.user.id?`<button class="${u.active?"danger-action":""}" data-user-status="${u.id}" data-active="${u.active?0:1}">${u.active?"Deactivate":"Activate"}</button><button class="danger-action" data-user-delete="${u.id}">${icons.trash||icons.x}Delete</button>`:""}</footer>
   </article>`;
 }
 function openUserAccountDetail(id){
@@ -3936,11 +3936,12 @@ function openUserAccountDetail(id){
       <header><div class="bio-avatar large">${user.hasProfilePhoto?profileImage(user.id,user.fullName,true):initials(user.fullName)}</div><div><small>${escapeHtml(user.memberNumber||"Staff account")} · Created ${formatUserLastLogin(user.createdAt).replace("Never","—")}</small><h2>${escapeHtml(user.fullName)}</h2><p>${escapeHtml(user.role)}${user.branch?` · ${escapeHtml(user.branch)}`:""}</p></div>${status(user.active?"active":"suspended")}</header>
       <section><h3>Login credentials</h3><dl><div><dt>Email</dt><dd>${escapeHtml(user.email)}</dd></div><div><dt>Phone</dt><dd>${escapeHtml(user.phone||"—")}</dd></div><div><dt>Last login</dt><dd>${formatUserLastLogin(user.lastLogin)}</dd></div><div><dt>Password</dt><dd>Protected — cannot be displayed</dd></div><div><dt>Password status</dt><dd>${user.mustChangePassword?"Temporary password must be changed at next sign-in":"Password is set"}</dd></div><div><dt>Account status</dt><dd>${user.active?"Active":"Inactive"}</dd></div></dl></section>
       <section><h3>Department access</h3>${assignments.length?`<dl>${assignments.map(a=>`<div><dt>${escapeHtml(a.department)}</dt><dd>${escapeHtml(a.position||"Assigned")} · Level ${a.level}${a.canApprove?" · Can approve":""}${a.canEdit?" · Can edit":""}${a.canCreate?" · Can create":""}</dd></div>`).join("")}</dl>`:`<p>No active department assignments recorded for this account.</p>`}</section>
-      <div class="form-actions"><button type="button" class="button secondary" data-close-modal>Close</button><button type="button" class="button secondary" data-user-reset="${user.id}">${icons.lock}Reset password</button>${user.id!==state.user.id?`<button type="button" class="button ${user.active?"danger":"primary"}" data-user-status="${user.id}" data-active="${user.active?0:1}">${user.active?"Deactivate account":"Activate account"}</button>`:""}</div>
+      <div class="form-actions"><button type="button" class="button secondary" data-close-modal>Close</button>${user.id!==state.user.id?`<button type="button" class="button secondary" data-user-access="${user.id}">Change access</button>`:""}<button type="button" class="button secondary" data-user-reset="${user.id}">${icons.lock}Reset password</button>${user.id!==state.user.id?`<button type="button" class="button ${user.active?"danger":"primary"}" data-user-status="${user.id}" data-active="${user.active?0:1}">${user.active?"Deactivate account":"Activate account"}</button>`:""}</div>
     </div></div></div>`);
   document.querySelectorAll("#modal-backdrop [data-close-modal]").forEach(el=>el.addEventListener("click",closeModal));
   document.querySelector("#modal-backdrop [data-user-reset]")?.addEventListener("click",()=>{closeModal();resetUserPassword(user.id);});
   document.querySelector("#modal-backdrop [data-user-status]")?.addEventListener("click",el=>changeUserStatus(el.currentTarget));
+  document.querySelector("#modal-backdrop [data-user-access]")?.addEventListener("click",()=>{closeModal();openUserAccessForm(user.id);});
 }
 function usersView() {
   ensureSystemAccountStyles();
@@ -3958,7 +3959,7 @@ function usersView() {
   const deptLabel=deptFilter==="all"?"":deptFilter==="other"?"Other accounts":(roster.find(d=>d.code===deptFilter)||{}).name||deptFilter;
   const statCards=[["all","User accounts",users.length,"users","dark","All secure login accounts"],["filled_up","Filled up",filledUp,"check","green","Phone and department set"],["need_editing","Need editing",needEditing,"bell","orange","Missing phone or department"],["active","Active accounts",active,"shield","blue",`${users.length-active} inactive`],["staff","Department runners",rosterStaff,"users","violet","Official committee accounts"],["recent","Recent logins",recent,"clock","teal","Recorded with IP and device"]];
   return `<div class="bio-page system-accounts-page">
-    <div class="bio-protection">${icons.shield}<div><strong>Executive System accounts</strong><span>Reset passwords, activate, deactivate or delete login accounts here. Legal registers members and can update login email or status, but password resets and system-account edits stay with Executive.</span></div><b>EXEC ACCESS</b></div>
+    <div class="bio-protection">${icons.shield}<div><strong>Executive System accounts</strong><span>Create logins, change department access, strip officer rights back to Member, reset passwords, or deactivate accounts. A person can stay a member with no department desk.</span></div><b>EXEC ACCESS</b></div>
     <div class="bio-stats">${statCards.map(([key,label,value,icon,color,note])=>`<button type="button" class="bio-stat-btn ${color} ${filter.stat===key?"active":""}" data-user-stat-filter="${key}"><span>${icons[icon]}</span><div><small>${label}</small><strong>${value}</strong><em>${note}</em></div></button>`).join("")}</div>
     <form class="bio-search" data-user-search>
       <div>${icons.search}<input name="q" value="${escapeHtml(filter.q||"")}" placeholder="Search name, email, phone, role, member number or department..."></div>
@@ -4262,6 +4263,7 @@ function bind() {
   document.querySelectorAll("[data-user-reset]").forEach(el=>el.addEventListener("click",()=>resetUserPassword(el.dataset.userReset)));
   document.querySelectorAll("[data-user-delete]").forEach(el=>el.addEventListener("click",()=>deleteSystemUser(el.dataset.userDelete)));
   document.querySelectorAll("[data-user-view]").forEach(el=>el.addEventListener("click",()=>openUserAccountDetail(el.dataset.userView)));
+  document.querySelectorAll("[data-user-access]").forEach(el=>el.addEventListener("click",()=>openUserAccessForm(el.dataset.userAccess)));
   document.querySelector("[data-user-search]")?.addEventListener("submit",event=>{
     event.preventDefault();
     const data=Object.fromEntries(new FormData(event.currentTarget));
@@ -4492,8 +4494,8 @@ function confirmDialog(message) {
 }
 function openModal(type) {
   const map = {
-    user: ["Create user account","Assign a secure role and temporary password", userForm],
-    member: ["Register new member","Create a verified organization membership record", memberForm],
+    user: ["Create user account","Give the person a login and the access the system actually has", userForm],
+    member: ["Register new member","Record everything required to be a Kwagalana member", memberForm],
     deposit: ["Record savings deposit","The transaction will be recorded in the audit log", ()=>depositForm("Savings deposit")],
     repayment: ["Record loan repayment","Post a payment against a member loan", ()=>depositForm("Loan repayment")],
     loan: ["New loan application","Savings and existing obligations will be checked", loanForm],
@@ -4502,11 +4504,15 @@ function openModal(type) {
   };
   const [title, sub, buildForm] = map[type] || map.deposit;
   const form = buildForm();
-  document.body.insertAdjacentHTML("beforeend", `<div class="modal-backdrop" id="modal-backdrop"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" tabindex="-1"><div class="modal-head"><div><h2 id="modal-title">${title}</h2><p>${sub}</p></div><button class="modal-close" data-close aria-label="Close dialog">${icons.x}</button></div>${form}</div></div>`);
+  const wide=type==="member"||type==="user"?" exec-register-modal":"";
+  document.body.insertAdjacentHTML("beforeend", `<div class="modal-backdrop" id="modal-backdrop"><div class="modal${wide}" role="dialog" aria-modal="true" aria-labelledby="modal-title" tabindex="-1"><div class="modal-head"><div><h2 id="modal-title">${title}</h2><p>${sub}</p></div><button class="modal-close" data-close aria-label="Close dialog">${icons.x}</button></div>${form}</div></div>`);
   document.querySelector("[data-close]").onclick=closeModal;
   document.getElementById("modal-backdrop").addEventListener("click", e=>{ if(e.target.id==="modal-backdrop") closeModal(); });
   document.querySelector(".modal form")?.addEventListener("submit", submitForm);
   const dialog=document.querySelector(".modal"); dialog?.addEventListener("keydown",event=>{if(event.key==="Escape")closeModal();});
+  bindAccessForm(dialog?.querySelector("form"));
+  bindMemberLoginToggle(dialog?.querySelector("form"));
+  bindUserMemberLink(dialog?.querySelector("form"));
   dialog?.querySelector("input,select,textarea,button")?.focus();
 }
 function closeModal() { document.getElementById("modal-backdrop")?.remove(); }
@@ -4595,8 +4601,125 @@ async function renderSecurePreview(contentHref,title) {
   } catch(error) {if(host.isConnected)host.innerHTML=`<div class="document-preview-unavailable danger">${icons.bell}<h3>Document could not be displayed</h3><p>${escapeHtml(error.message)}</p></div>`;}
 }
 function memberOptions(selected="") { return state.members.map(m=>`<option value="${m.databaseId}" ${String(m.databaseId)===String(selected)?"selected":""}>${m.id} - ${m.name}</option>`).join(""); }
-function userForm() { return `<form class="form" data-form="user"><div class="form-grid"><div class="field full"><label>Full name</label><input name="fullName" required></div><div class="field"><label>Email</label><input name="email" type="email" required></div><div class="field"><label>Phone</label><input name="phone" required></div><div class="field"><label>System role</label><select name="role">${roles.map(r=>`<option>${r}</option>`).join("")}</select></div><div class="field"><label>Branch</label><select name="branchId">${(state.branches||[{id:state.user.branch_id,name:state.user.branch_name}]).map(b=>`<option value="${b.id}">${b.name}</option>`).join("")}</select></div><div class="field"><label>Department dashboard</label><select name="departmentId"><option value="">No staff department</option>${(state.departments||[]).map(d=>`<option value="${d.id}">${d.name}</option>`).join("")}</select></div><div class="field"><label>Department position</label><input name="positionTitle" placeholder="e.g. Welfare Officer"></div><div class="field"><label>Authority level</label><select name="authorityLevel"><option value="1">1 - Member information</option><option value="2">2 - Operational</option><option value="3">3 - Officer</option><option value="4">4 - Department leadership</option><option value="5">5 - Executive / Board</option></select></div><div class="field full"><label>Department rights</label><div class="permission-picker"><label><input type="checkbox" name="canCreate"> Create</label><label><input type="checkbox" name="canEdit"> Edit</label><label><input type="checkbox" name="canApprove"> Approve</label><label><input type="checkbox" name="isHead"> Department head</label></div></div><div class="field full"><label>Link member record (for Member login)</label><select name="memberId"><option value="">Not linked</option>${memberOptions()}</select></div><div class="field full"><label>Temporary password</label><input name="password" type="password" autocomplete="new-password" placeholder="Leave blank to generate securely"><small>Enter a strong password or let the system generate a one-time password.</small></div></div>${formActions("Create secure account")}</form>`; }
-function memberForm() { return `<form class="form" data-form="member"><div class="form-grid"><div class="field full"><label>Full legal name</label><input name="fullName" required></div><div class="field"><label>Phone</label><input name="phone" required></div><div class="field"><label>Email</label><input name="email" type="email"></div><div class="field"><label>National ID</label><input name="nationalId" required></div><div class="field"><label>Opening savings</label><input name="savings" type="number" min="0" value="0"></div><div class="field"><label>Share capital</label><input name="shares" type="number" min="0" value="50000"></div><div class="field"><label>Occupation</label><input name="occupation"></div><div class="field"><label>Employer / Business</label><input name="employer"></div><div class="field full"><label>Address</label><input name="address"></div><div class="field full"><label>Next of kin</label><input name="nextOfKin" required></div></div>${formActions("Register member")}</form>`; }
+const DESK_ROLES={executive:"Executive Officer",finance:"Finance Officer",credits:"Credits Officer",investment:"Investment Officer",welfare:"Welfare Officer",legal:"Legal Officer",audit:"Auditor",supervisory:"Supervisory Officer"};
+function departmentDeskOptions(selected=""){
+  const desks=(state.departments||[]).filter(d=>DESK_ROLES[d.code]);
+  const list=desks.length?desks:Object.entries(DESK_ROLES).map(([code,role])=>({code,name:role.replace(" Officer","")}));
+  return list.map(d=>`<option value="${d.code}" ${d.code===selected?"selected":""}>${escapeHtml(d.name)} — ${escapeHtml(DESK_ROLES[d.code]||d.name)}</option>`).join("");
+}
+function todayInputDate(){return new Date().toISOString().slice(0,10);}
+function accessTypeFields({accessType="member",departmentCode="",positionTitle=""}={}){
+  return `<div class="legal-form-section"><h3>What this login can open</h3>
+    <div class="form-grid">
+      <div class="field full"><label>Access</label>
+        <select name="accessType">
+          <option value="member" ${accessType==="member"?"selected":""}>Member only — no department dashboard</option>
+          <option value="department" ${accessType==="department"?"selected":""}>Department officer — transfer or assign a desk</option>
+        </select>
+        <small>Member-only people sign in to their own savings, loans and statements. Officers also get that department’s dashboard. You can later remove a Credits Officer (or any officer) back to Member, or move them to another desk.</small>
+      </div>
+      <div class="field" data-user-department ${accessType==="department"?"":"hidden"}><label>Department desk</label><select name="departmentCode">${departmentDeskOptions(departmentCode)}</select></div>
+      <div class="field" data-user-department ${accessType==="department"?"":"hidden"}><label>Position title</label><input name="positionTitle" value="${escapeHtml(positionTitle)}" placeholder="e.g. Credits Officer"></div>
+    </div>
+  </div>`;
+}
+function bindAccessForm(form){
+  if(!form?.elements?.accessType)return;
+  const sync=()=>{
+    const officer=form.elements.accessType.value==="department";
+    form.querySelectorAll("[data-user-department]").forEach(el=>{el.hidden=!officer;});
+  };
+  form.elements.accessType.addEventListener("change",sync);
+  sync();
+}
+function bindUserMemberLink(form){
+  if(!form||form.dataset.form!=="user")return;
+  form.elements.memberId?.addEventListener("change",()=>{
+    const m=(state.members||[]).find(x=>String(x.databaseId)===String(form.elements.memberId.value));
+    if(!m)return;
+    if(m.name)form.elements.fullName.value=m.name;
+    if(m.phone)form.elements.phone.value=m.phone;
+    if(m.email)form.elements.email.value=m.email;
+  });
+}
+function bindMemberLoginToggle(form){
+  if(!form||form.dataset.form!=="member")return;
+  const sync=()=>{
+    const on=form.querySelector("[name=createAccount]")?.checked;
+    form.querySelectorAll("[data-member-login]").forEach(el=>{el.hidden=!on;});
+    const email=form.elements.email; if(email)email.required=Boolean(on);
+  };
+  form.querySelector("[name=createAccount]")?.addEventListener("change",sync);
+  sync();
+}
+function currentDeskCode(user){
+  return (user.assignments||[]).find(a=>DESK_ROLES[a.code])?.code || Object.entries(DESK_ROLES).find(([,role])=>role===user.role)?.[0] || "";
+}
+function openUserAccessForm(id){
+  const user=(state.users||[]).find(u=>String(u.id)===String(id)); if(!user)return;
+  closeModal();
+  const desk=currentDeskCode(user);
+  const accessType=user.role==="Member"&&!desk?"member":"department";
+  document.body.insertAdjacentHTML("beforeend",`<div class="modal-backdrop" id="modal-backdrop"><div class="modal exec-register-modal" role="dialog" aria-modal="true"><div class="modal-head"><div><h2>Change account access</h2><p>${escapeHtml(user.fullName)} is currently ${escapeHtml(user.role)}${desk?` · ${desk}`:""}</p></div><button class="modal-close" data-close aria-label="Close dialog">${icons.x}</button></div>
+    <form class="form" data-form="user-access"><input type="hidden" name="userId" value="${user.id}">
+      ${accessTypeFields({accessType,departmentCode:desk||"credits",positionTitle:(user.assignments||[])[0]?.position||user.role})}
+      ${formActions("Save access")}
+    </form></div></div>`);
+  document.querySelector("[data-close]").onclick=closeModal;
+  document.getElementById("modal-backdrop").addEventListener("click",e=>{if(e.target.id==="modal-backdrop")closeModal();});
+  const form=document.querySelector("[data-form=user-access]");
+  form.addEventListener("submit",submitForm);
+  bindAccessForm(form);
+}
+function userForm() {
+  return `<form class="form" data-form="user">
+    <div class="legal-form-section"><h3>Who is signing in</h3><div class="form-grid">
+      <div class="field full"><label>Link registered member</label><select name="memberId"><option value="">Not linked yet — type details below</option>${memberOptions()}</select><small>Prefer linking a registered member so savings and login stay one person.</small></div>
+      <div class="field full"><label>Full name</label><input name="fullName" required></div>
+      <div class="field"><label>Email</label><input name="email" type="email" required></div>
+      <div class="field"><label>Phone</label><input name="phone" required></div>
+      <div class="field"><label>Branch</label><select name="branchId">${(state.branches||[{id:state.user.branch_id,name:state.user.branch_name}]).map(b=>`<option value="${b.id}">${escapeHtml(b.name)}</option>`).join("")}</select></div>
+      <div class="field full"><label>Temporary password</label><input name="password" type="password" autocomplete="new-password" placeholder="Leave blank to generate securely"><small>They must change it at first sign-in.</small></div>
+    </div></div>
+    ${accessTypeFields({accessType:"member"})}
+    ${formActions("Create secure account")}
+  </form>`;
+}
+function memberForm() {
+  return `<form class="form" data-form="member">
+    <div class="legal-form-section"><h3>Identity</h3><div class="form-grid">
+      <div class="field full"><label>Full legal name</label><input name="fullName" required></div>
+      <div class="field"><label>Phone</label><input name="phone" required></div>
+      <div class="field"><label>Email</label><input name="email" type="email" placeholder="Needed if you also create a login"></div>
+      <div class="field"><label>National ID</label><input name="nationalId" required></div>
+      <div class="field"><label>Date of birth</label><input name="dateOfBirth" type="date" required></div>
+      <div class="field"><label>Gender</label><select name="gender" required><option value="">Select</option><option value="female">Female</option><option value="male">Male</option><option value="other">Other</option><option value="prefer_not_to_say">Prefer not to say</option></select></div>
+      <div class="field"><label>Marital status</label><select name="maritalStatus"><option value="">Not recorded</option><option value="single">Single</option><option value="married">Married</option><option value="divorced">Divorced</option><option value="widowed">Widowed</option><option value="separated">Separated</option></select></div>
+      <div class="field"><label>Nationality</label><input name="nationality" value="Ugandan"></div>
+    </div></div>
+    <div class="legal-form-section"><h3>Residence and work</h3><div class="form-grid">
+      <div class="field full"><label>Residence / address</label><input name="address" required placeholder="Village, parish, town or district"></div>
+      <div class="field"><label>Home district</label><input name="homeDistrict"></div>
+      <div class="field"><label>Occupation</label><input name="occupation" required></div>
+      <div class="field"><label>Employer / business</label><input name="employer"></div>
+      <div class="field"><label>Joined date</label><input name="joinedAt" type="date" value="${todayInputDate()}" required></div>
+    </div></div>
+    <div class="legal-form-section"><h3>Next of kin</h3><div class="form-grid">
+      <div class="field"><label>Next of kin name</label><input name="nextOfKin" required></div>
+      <div class="field"><label>Next of kin phone</label><input name="nextOfKinPhone" required></div>
+      <div class="field"><label>Relationship</label><input name="emergencyContactRelationship" placeholder="Spouse, parent, sibling"></div>
+    </div></div>
+    <div class="legal-form-section"><h3>Opening money</h3><div class="form-grid">
+      <div class="field"><label>Opening savings (UGX)</label><input name="savings" type="number" min="0" value="0" required></div>
+      <div class="field"><label>Share capital (UGX)</label><input name="shares" type="number" min="0" value="2000000" required></div>
+    </div></div>
+    <div class="legal-form-section"><h3>Member login (optional)</h3><div class="form-grid">
+      <div class="field full"><label><input type="checkbox" name="createAccount"> Also create a Member login now</label><small>Leaves them as a member with no department desk. Give officer access later from System accounts → Change access.</small></div>
+      <div class="field full" data-member-login hidden><label>Temporary password</label><input name="password" type="password" autocomplete="new-password" placeholder="Leave blank to generate securely"></div>
+    </div></div>
+    ${formActions("Register member")}
+  </form>`;
+}
 function depositForm(type) { return `<form class="form" data-form="deposit"><input type="hidden" name="type" value="${type}"><div class="form-grid"><div class="field full"><label>Member</label><select name="memberId" required><option value="">Select member</option>${memberOptions()}</select></div><div class="field"><label>Amount (UGX)</label><input name="amount" type="number" min="1000" step="1000" required></div><div class="field"><label>Payment method</label><select name="method"><option>Cash</option><option>Mobile Money</option><option>Bank transfer</option><option>Cheque</option></select></div><div class="field full"><label>External reference</label><input name="externalReference"></div></div>${formActions(type==="Loan repayment"?"Record repayment":"Record pending deposit")}</form>`; }
 function loanForm() { return `<form class="form" data-form="loan"><div class="form-grid"><div class="field full"><label>Member</label><select name="memberId" required>${state.role==="Member"?memberOptions(state.members[0].databaseId):`<option value="">Select member</option>${memberOptions()}`}</select></div><div class="field"><label>Loan product</label><select name="productId" data-loan-product>${state.products.map(p=>`<option value="${p.id}" data-product-name="${p.name}">${p.name} - ${p.annualRate}% p.a.</option>`).join("")}</select></div><div class="field full" data-other-loan-fields hidden><label>Specify loan product</label><input name="customProductName" maxlength="120" placeholder="Type the loan product name"></div><div class="field"><label>Amount (UGX)</label><input name="amount" type="number" min="100000" step="50000" required></div><div class="field"><label>Repayment term</label><select name="termMonths"><option value="6">6 months</option><option value="12">12 months</option><option value="18">18 months</option><option value="24">24 months</option></select></div><div class="field full"><label>Choose guarantors (1-3)</label><div class="group-member-picker">${(state.guarantorCandidates||[]).map(g=>`<label class="group-member-option"><input type="checkbox" name="guarantorIds" value="${g.id}"><div class="chat-avatar">${initials(g.fullName)}</div><div><strong>${g.fullName}</strong><span>${g.memberNumber} - Savings ${money(g.savings)}</span></div></label>`).join("")||`<div class="empty-state">No eligible guarantors with login accounts.</div>`}</div><small>Guarantors must accept from their own dashboards before officer review begins.</small></div><div class="field full"><label>Loan purpose</label><textarea name="purpose" required placeholder="Explain how this loan will be used"></textarea></div></div>${formActions("Submit for guarantor consent")}</form>`; }
 function withdrawalForm() { return `<form class="form" data-form="withdrawal"><div class="form-grid"><div class="field full"><label>Member</label><select name="memberId" required>${state.role==="Member"?memberOptions(state.members[0].databaseId):`<option value="">Select member</option>${memberOptions()}`}</select></div><div class="field"><label>Amount (UGX)</label><input name="amount" type="number" min="10000" step="10000" required></div><div class="field"><label>Payment method</label><select name="method"><option>Mobile Money</option><option>Bank transfer</option><option>Cash</option></select></div><div class="field full"><label>Reason</label><textarea name="reason" required></textarea><small>A minimum balance of UGX 100,000 must remain.</small></div></div>${formActions("Submit request")}</form>`; }
@@ -4610,8 +4733,18 @@ async function submitForm(event) {
   const button=form.querySelector("button[type=submit]"); button.disabled=true; button.textContent="Saving?";
   try {
     let result, message, credential;
-    if(form.dataset.form==="user") { result=await api("/api/users",{method:"POST",body:JSON.stringify(data)}); credential=result.temporaryPassword; message="Secure user account created."; state.users=null; }
-    if(form.dataset.form==="member") { result=await api("/api/members",{method:"POST",body:JSON.stringify(data)}); message=`Member registered as ${result.memberNumber}.`; }
+    if(form.dataset.form==="user") { result=await api("/api/users",{method:"POST",body:JSON.stringify(data)}); credential=result.temporaryPassword; message=`Login created as ${result.role}.`; state.users=null; }
+    if(form.dataset.form==="user-access") {
+      result=await api(`/api/users/${data.userId}/access`,{method:"PATCH",body:JSON.stringify(data)});
+      message=result.role==="Member"?"Officer access removed. This person is now a member with no department desk.":`Access moved to ${result.role}.`;
+      state.users=null;
+    }
+    if(form.dataset.form==="member") {
+      data.createAccount=Boolean(form.querySelector("[name=createAccount]")?.checked);
+      result=await api("/api/members",{method:"POST",body:JSON.stringify(data)});
+      message=`Member registered as ${result.memberNumber}.`;
+      credential=result.temporaryPassword;
+    }
     if(form.dataset.form==="deposit") { result=await api("/api/transactions",{method:"POST",body:JSON.stringify(data)}); message=`Transaction ${result.reference} recorded for verification.`; }
     if(form.dataset.form==="loan") { result=await api("/api/loans",{method:"POST",body:JSON.stringify(data)}); message=`Loan application ${result.reference} submitted.`; }
     if(form.dataset.form==="withdrawal") { result=await api("/api/withdrawals",{method:"POST",body:JSON.stringify(data)}); message=`Withdrawal ${result.reference} submitted for approval.`; }
