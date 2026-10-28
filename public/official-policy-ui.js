@@ -146,9 +146,51 @@ function bindLoanSecurityCalculator(form, { borrowerSavings = 0, candidates = []
   applySecurityVisibility();
 }
 
+function loanPolicyAcceptanceHtml() {
+  return `<div class="field full loan-policy-check">
+    <button type="button" class="button secondary" data-view-loan-policy>${icons.file} View Kwagalana loan policy</button>
+    <p class="loan-policy-hint" data-loan-policy-hint>Open and read the policy first. Then you can tick to accept.</p>
+    <label class="check-field"><input name="borrowerDeclaration" type="checkbox" value="accepted" disabled data-loan-policy-accept><span>I have read and understood the Kwagalana loan policy.</span></label>
+  </div>`;
+}
+function bindLoanPolicyAcceptance(form) {
+  if (!form) return;
+  const accept = form.querySelector("[data-loan-policy-accept]");
+  const hint = form.querySelector("[data-loan-policy-hint]");
+  const markRead = () => {
+    if (!accept) return;
+    accept.disabled = false;
+    form.dataset.policyViewed = "1";
+    if (hint) hint.textContent = "You can now tick to accept the policy.";
+  };
+  form.querySelector("[data-view-loan-policy]")?.addEventListener("click", async () => {
+    if (typeof openSecureContentViewer !== "function") return toast("Document viewer is not available.");
+    let title = "Kwagalana loan policy";
+    try {
+      const policy = await api("/api/loans/policy");
+      if (policy?.title) title = policy.title;
+      if (policy && policy.hasFile === false) throw new Error("The loan policy file is not available yet.");
+    } catch (error) {
+      return toast(error.message);
+    }
+    openSecureContentViewer("/api/loans/policy/content", title, {
+      replaceModal: false,
+      downloadHref: "/api/loans/policy/content",
+      onClose: markRead
+    });
+  });
+  accept?.addEventListener("click", (event) => {
+    if (accept.disabled || form.dataset.policyViewed !== "1") {
+      event.preventDefault();
+      toast("Open and read the Kwagalana loan policy first.");
+    }
+  });
+}
+window.loanPolicyAcceptanceHtml = loanPolicyAcceptanceHtml;
+window.bindLoanPolicyAcceptance = bindLoanPolicyAcceptance;
 function officialLoanPolicyFields(memberOptionsHtml) {
   const terms = Array.from({ length: 10 }, (_, index) => index + 1);
-  return `<label class="field full check-field loan-policy-check"><input name="borrowerDeclaration" type="checkbox" value="accepted" required><span>I have read and understood the Kwagalana loan policy.</span></label>
+  return `${loanPolicyAcceptanceHtml()}
     <div class="field full"><label>Member</label><select name="memberId" required data-loan-borrower><option value="">Select member</option>${memberOptionsHtml}</select></div>
     <div class="field"><label>Loan product</label><select name="productId" required>${state.products.map((p) => `<option value="${p.id}">${p.name}</option>`).join("")}</select></div>
     <div class="field"><label>Amount (UGX)</label><input name="amount" type="number" min="100000" max="25000000" step="50000" required data-loan-amount><small data-loan-amount-help>Up to UGX 25,000,000. Savings security uses 75% of the borrower's savings first.</small></div>
@@ -192,6 +234,7 @@ function bindOfficialLoanSecurity(form) {
 }
 
 function validateOfficialLoan(form, payload) {
+  if (form.dataset.policyViewed !== "1") throw new Error("Open and read the Kwagalana loan policy before accepting it.");
   if (payload.get("borrowerDeclaration") !== "accepted") throw new Error("You must read and accept the Kwagalana loan policy.");
   if (payload.get("overdueDeclaration") !== "accepted") throw new Error("Accept the overdue repayment declaration before submitting.");
   const security = payload.get("securityType");
@@ -233,6 +276,7 @@ openCreditsModal = async function (type, context = "") {
   document.querySelector("[data-close]").onclick = closeModal;
   const form = document.querySelector("[data-credits-form]");
   bindOfficialLoanSecurity(form);
+  bindLoanPolicyAcceptance(form);
   form.onsubmit = submitCreditsForm;
 };
 const originalCreditsSubmit = submitCreditsForm;
@@ -269,7 +313,10 @@ openModal = function (type) {
   originalOpenModal(type);
   if (type === "loan") {
     const form = document.querySelector("[data-form=loan]");
-    if (form) bindOfficialLoanSecurity(form);
+    if (form) {
+      bindOfficialLoanSecurity(form);
+      bindLoanPolicyAcceptance(form);
+    }
   }
 };
 const originalGeneralSubmit = submitForm;

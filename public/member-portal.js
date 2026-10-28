@@ -492,7 +492,7 @@
       const candidates=result.candidates||[];
       const borrowerSavings=Number(result.borrower?.savings||C()?.member?.savings||0);
       modal("Apply for a loan",`<form class="form" data-member-loan-form enctype="multipart/form-data" data-borrower-savings="${borrowerSavings}"><div class="form-grid">
-        <label class="field full check-field loan-policy-check"><input type="checkbox" name="borrowerDeclaration" value="accepted" required><span>I have read and understood the Kwagalana loan policy.</span></label>
+        ${typeof loanPolicyAcceptanceHtml==="function"?loanPolicyAcceptanceHtml():`<label class="field full check-field loan-policy-check"><input type="checkbox" name="borrowerDeclaration" value="accepted" required><span>I have read and understood the Kwagalana loan policy.</span></label>`}
         <div class="field"><label>Loan product</label><select name="productId" required data-loan-product>${state.products.map(x=>`<option value="${x.id}" data-product-name="${esc(x.name)}">${esc(x.name)}</option>`).join("")}</select></div>
         <div class="field full" data-other-loan-fields hidden><label>Specify loan product</label><input name="customProductName" maxlength="120" placeholder="Type the loan product name"><small>Required when Other Loan is selected.</small></div>
         <div class="field"><label>Amount (UGX)</label><input name="amount" type="number" min="100000" max="25000000" step="50000" required data-loan-amount><small data-loan-amount-help>Up to UGX 25,000,000. Your first security is 75% of your savings (${money(window.LoanSecurity.capacity(borrowerSavings))} capacity).</small></div>
@@ -522,6 +522,7 @@
       const form=document.querySelector("[data-member-loan-form]");
       if(typeof bindLoanSecurityCalculator==="function")bindLoanSecurityCalculator(form,{borrowerSavings,candidates});
       bindMember();
+      if(typeof bindLoanPolicyAcceptance==="function")bindLoanPolicyAcceptance(form);
     }catch(error){toast(error.message);}
   }
   function withdrawalForm(){modal("Request savings withdrawal",`<form class="form" data-member-withdrawal><div class="field"><label>Amount</label><input name="amount" type="number" min="10000" step="10000" required></div><div class="field"><label>Payment method</label><select name="method"><option>Mobile Money</option><option>Bank transfer</option><option>Cash</option></select></div><div class="field"><label>Reason</label><textarea name="reason" required></textarea></div><div class="form-actions"><button type="button" class="button secondary" data-close-modal>Cancel</button><button class="button primary">Submit request</button></div></form>`);bindMember();}
@@ -733,6 +734,7 @@
       const form=e.currentTarget,data=new FormData(form),message=form.querySelector("[data-loan-message]"),button=form.querySelector("button[type=submit]"),security=data.get("securityType"),guarantors=data.getAll("guarantorIds");
       const productOption=form.elements.productId?.selectedOptions?.[0];
       const isOther=/^other loan$/i.test(productOption?.dataset.productName||productOption?.textContent||"");
+      if(form.dataset.policyViewed!=="1"){message.textContent="Open and read the Kwagalana loan policy before accepting it.";message.className="member-form-message error";return;}
       if(data.get("borrowerDeclaration")!=="accepted"){message.textContent="You must read and accept the Kwagalana loan policy.";message.className="member-form-message error";return;}
       if(data.get("overdueDeclaration")!=="accepted"){message.textContent="Accept the overdue repayment declaration before submitting.";message.className="member-form-message error";return;}
       if(isOther&&!String(data.get("customProductName")||"").trim()){message.textContent="Type the loan product name for Other Loan.";message.className="member-form-message error";return;}

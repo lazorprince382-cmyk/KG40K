@@ -544,6 +544,26 @@ async function maryCollateral85m20261028(client){
   await client.query(`INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value,updated_at=NOW()`,[key,summary]);
   return summary;
 }
+async function publishLoanPolicyForApplicants20261028(client){
+  const key="publishLoanPolicyForApplicants20261028";
+  if((await client.query("SELECT 1 FROM settings WHERE key=$1",[key])).rows[0])return null;
+  const result=await client.query(
+    `UPDATE organization_documents
+     SET visibility_level=1, status=CASE WHEN status IN ('draft','pending_executive') THEN 'published' ELSE status END, updated_at=NOW()
+     WHERE status<>'archived'
+       AND (
+         reference IN ('DOC-LOAN-AGREEMENT','DOC-LOAN-POLICY')
+         OR title ILIKE '%loan policy%'
+         OR title ILIKE '%kwagalana loan agreement%'
+         OR document_type ILIKE 'Loan Agreement'
+         OR document_type ILIKE '%loan policy%'
+       )
+     RETURNING reference, title, visibility_level`
+  );
+  const summary=result.rowCount?`member-visible: ${result.rows.map(r=>r.reference||r.title).join(", ")}`:"no loan policy document found";
+  await client.query(`INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value,updated_at=NOW()`,[key,summary]);
+  return summary;
+}
 async function backfillRepaymentsToCentenary(client){
   const pending=(await client.query(`SELECT t.id FROM transactions t LEFT JOIN loans l ON l.id=t.loan_id
     WHERE t.type='Loan repayment' AND t.status='completed' AND t.finance_entry_id IS NULL
@@ -4953,6 +4973,73 @@ app.post("/api/transactions/:id/verify",auth,asyncRoute(async(req,res,next)=>{
     entityId:String(tx.id),details:`${tx.reference} - ${comment||tx.statusValue}`,...metadata(req)});
   res.json({ok:true,status:tx.statusValue,receiptNumber:tx.receipt});
 }));
+async function findLoanPolicyDocument(){
+  return one(`SELECT doc.id,doc.reference,doc.title,doc.version,doc.status,
+      latest.id AS "versionId"
+    FROM organization_documents doc
+    LEFT JOIN LATERAL (
+      SELECT id FROM organization_document_versions v
+      WHERE v.document_id=doc.id
+      ORDER BY CASE WHEN mime_type='application/pdf' THEN 0 ELSE 1 END, created_at DESC LIMIT 1
+    ) latest ON true
+    WHERE doc.status<>'archived'
+      AND (
+        doc.reference IN ('DOC-LOAN-AGREEMENT','DOC-LOAN-POLICY')
+        OR doc.title ILIKE '%loan policy%'
+        OR doc.title ILIKE '%kwagalana loan agreement%'
+        OR doc.document_type ILIKE 'Loan Agreement'
+        OR doc.document_type ILIKE '%loan policy%'
+      )
+    ORDER BY CASE
+      WHEN doc.reference='DOC-LOAN-AGREEMENT' THEN 0
+      WHEN doc.reference='DOC-LOAN-POLICY' THEN 1
+      WHEN doc.title ILIKE '%loan policy%' THEN 2
+      ELSE 3 END, doc.updated_at DESC
+    LIMIT 1`);
+}
+function loanPolicyFallbackPath(){
+  const candidates=[
+    path.join(__dirname,"..","storage","official-text","kasangati-g40-kwagalana-loan-agreement--2-.txt"),
+    path.join(__dirname,"..","database","seed-documents","loan-agreement.txt")
+  ];
+  return candidates.find(file=>fs.existsSync(file))||null;
+}
+app.get("/api/loans/policy",auth,asyncRoute(async(req,res)=>{
+  const document=await findLoanPolicyDocument();
+  res.json({
+    id:document?.id||null,
+    reference:document?.reference||"LOAN-POLICY",
+    title:document?.title||"Kasangati G40 Kwagalana loan policy",
+    version:document?.version||"1.0",
+    hasFile:Boolean(document?.versionId||loanPolicyFallbackPath()),
+    contentHref:"/api/loans/policy/content"
+  });
+}));
+app.get("/api/loans/policy/content",auth,asyncRoute(async(req,res)=>{
+  const document=await findLoanPolicyDocument();
+  if(document?.id){
+    let version=await one(`SELECT * FROM organization_document_versions WHERE document_id=$1
+      ORDER BY CASE WHEN mime_type='application/pdf' THEN 0 ELSE 1 END, created_at DESC LIMIT 1`,[document.id]);
+    if(version){
+      version=await ensureOrganizationVersionIsPdf(version);
+      const filePath=resolveOrganizationDocumentFile(version);
+      if(filePath){
+        const content=await fs.promises.readFile(filePath);
+        await audit({userId:req.user.id,action:"LOAN_POLICY_VIEWED",entityType:"organization_document",
+          entityId:String(document.id),details:`version=${version.version}`,...metadata(req)});
+        const mime=effectiveDocumentMime(version);
+        res.set("X-Document-Mime-Type",mime);
+        return res.type("application/octet-stream").send(content);
+      }
+    }
+  }
+  const fallback=loanPolicyFallbackPath();
+  if(!fallback)return res.status(404).json({error:"The Kwagalana loan policy file is not available yet. Ask Legal to publish it in Documents."});
+  const content=await fs.promises.readFile(fallback);
+  await audit({userId:req.user.id,action:"LOAN_POLICY_VIEWED",entityType:"loan_policy",entityId:"fallback",details:path.basename(fallback),...metadata(req)});
+  res.set("X-Document-Mime-Type","text/plain; charset=utf-8");
+  res.type("application/octet-stream").send(content);
+}));
 app.post("/api/loans",auth,upload.array("supportingDocument",10),(req,res,next)=>{
   if(req.user.member_id||(permissions[req.user.role]||[]).some(permission=>["loan:create","loan:manage"].includes(permission)))return next();
   return res.status(403).json({error:"A linked member account or Credits loan authority is required"});
@@ -6733,6 +6820,10 @@ async function runScheduledMaintenance() {
     const collateral=await transaction(client=>maryCollateral85m20261028(client));
     if(collateral)console.log(`Mary collateral: ${collateral}`);
   }catch(error){console.error("Mary collateral 85m update failed:",error.message);}
+  try{
+    const policy=await transaction(client=>publishLoanPolicyForApplicants20261028(client));
+    if(policy)console.log(`Loan policy visibility: ${policy}`);
+  }catch(error){console.error("Loan policy visibility update failed:",error.message);}
   const graceDays=0;
   await transaction(async client=>{
     // No grace window: unpaid installments become overdue the day after the due date.

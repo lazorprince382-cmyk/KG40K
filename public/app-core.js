@@ -4638,7 +4638,12 @@ function openModal(type) {
   dialog?.querySelector("input,select,textarea,button")?.focus();
 }
 function closeModal() { document.getElementById("modal-backdrop")?.remove(); }
-function closeDocumentViewer(){ document.querySelector(".document-viewer-backdrop")?.remove(); }
+function closeDocumentViewer(){
+  const onClose=window._onDocumentViewerClose;
+  window._onDocumentViewerClose=null;
+  document.querySelector(".document-viewer-backdrop")?.remove();
+  if(typeof onClose==="function")onClose();
+}
 function toggleDocumentViewerMaximize(){
   const backdrop=document.querySelector(".document-viewer-backdrop");
   const modal=backdrop?.querySelector(".document-viewer-modal");
@@ -4674,10 +4679,11 @@ function openDocumentViewer(link) {
   const documentId=href.match(/\/api\/documents\/(\d+)\/view/)?.[1]||"";
   openSecureContentViewer(href.replace(/\/view$/,"/content"),title,{downloadHref,replaceModal:true,documentId,documentTitle:title});
 }
-function openSecureContentViewer(contentHref,title,{downloadHref=null,replaceModal=false,documentId="",documentTitle=""}={}) {
+function openSecureContentViewer(contentHref,title,{downloadHref=null,replaceModal=false,documentId="",documentTitle="",onClose=null}={}) {
   if(!contentHref)return;
   if(replaceModal)closeModal();
   closeDocumentViewer();
+  window._onDocumentViewerClose=typeof onClose==="function"?onClose:null;
   const safeTitle=escapeHtml(title||"Document");
   const dl=downloadHref?`<a class="button secondary" href="${downloadHref}" download>${icons.download}Download</a>`:`<a class="button secondary" href="${contentHref}" target="_blank" rel="noopener">${icons.download}Open / Download</a>`;
   const del=documentId&&canManageOrganizationDocuments()
