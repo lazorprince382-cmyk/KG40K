@@ -604,6 +604,23 @@ module.exports = function registerMemberAccountApi({
   }));
 
   const memberOversightRoles = new Set(["Executive Officer", "Credits Officer", "Legal Officer", "Auditor", "Supervisory Officer", "System Admin"]);
+  const memberPhotoRoles = new Set([...memberOversightRoles,"Finance Officer","Investment Officer","Welfare Officer"]);
+  app.get("/api/members/:memberId/photo",auth,asyncRoute(async(req,res)=>{
+    const memberId=Number(req.params.memberId);
+    if(!Number.isInteger(memberId)||memberId<1)return res.status(400).json({error:"Choose a valid member"});
+    if(Number(req.user.member_id)!==memberId&&!memberPhotoRoles.has(req.user.role))
+      return res.status(403).json({error:"You cannot view this member photo"});
+    const account=await one(`SELECT profile_photo_stored_name AS stored,profile_photo_mime_type AS mime
+      FROM users WHERE member_id=$1 AND profile_photo_stored_name IS NOT NULL ORDER BY id LIMIT 1`,[memberId]);
+    const bio=account?null:await one(`SELECT passport_photo_stored_name AS stored,passport_photo_mime_type AS mime
+      FROM member_bio_data WHERE member_id=$1 AND passport_photo_stored_name IS NOT NULL`,[memberId]);
+    const photo=account||bio;
+    if(!photo?.stored)return res.status(404).json({error:"No photo uploaded"});
+    const filePath=path.join(uploadsDir,path.basename(photo.stored));
+    if(!fs.existsSync(filePath))return res.status(404).json({error:"No photo uploaded"});
+    res.set("Cache-Control","private, max-age=300");
+    res.type(photo.mime||"image/jpeg").sendFile(filePath);
+  }));
   app.get("/api/members/:memberId/command-center", auth, asyncRoute(async (req, res) => {
     if (!memberOversightRoles.has(req.user.role)) {
       return res.status(403).json({ error: "Member account oversight is limited to leadership and membership officers" });

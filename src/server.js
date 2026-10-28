@@ -1165,8 +1165,18 @@ app.get("/api/bootstrap",auth,asyncRoute(async(req,res)=>{
   const empty={rows:[]};
   const [membersResult,txResult,loansResult,withdrawalsResult,productsResult,settingsResult,announcementsResult,notificationsResult,unreadResult,guarantorRequestsResult,organization,workspaces]=await Promise.all([
     needsMemberDirectory?query(`SELECT m.id AS "databaseId",m.member_number AS id,m.full_name AS name,m.email,NULLIF(TRIM(m.phone),'') AS phone,CASE WHEN m.provisional THEN NULL ELSE m.national_id END AS national_id,m.occupation,m.employer,m.address,m.next_of_kin,
-      m.savings_balance::float AS savings,m.share_capital::float AS shares,m.dividends::float,m.fines::float,m.status,m.joined_at AS joined,b.name AS branch
-      FROM members m LEFT JOIN branches b ON b.id=m.branch_id ${memberFilter} ORDER BY m.id DESC LIMIT 500`,args):Promise.resolve(empty),
+      m.savings_balance::float AS savings,m.share_capital::float AS shares,m.dividends::float,m.fines::float,m.status,m.joined_at AS joined,b.name AS branch,
+      u.id AS "userId",(u.profile_photo_stored_name IS NOT NULL) AS "hasProfilePhoto",
+      (bio.passport_photo_stored_name IS NOT NULL) AS "hasPassportPhoto",
+      COALESCE((SELECT SUM(c.amount) FROM welfare_contributions c
+        WHERE c.member_id=m.id AND c.status IN ('verified','completed','recorded') AND c.amount>0),0)::float AS "welfareSinceJoin"
+      FROM members m LEFT JOIN branches b ON b.id=m.branch_id
+      LEFT JOIN LATERAL (
+        SELECT id,profile_photo_stored_name FROM users WHERE member_id=m.id
+        ORDER BY (profile_photo_stored_name IS NOT NULL) DESC,id LIMIT 1
+      ) u ON true
+      LEFT JOIN member_bio_data bio ON bio.member_id=m.id
+      ${memberFilter} ORDER BY m.id DESC LIMIT 500`,args):Promise.resolve(empty),
     canSeeTransactions?query(`SELECT t.id AS "databaseId",t.reference AS id,t.type,t.method,t.amount::float,t.status,t.external_reference,t.created_at AS date,
       m.id AS "memberId",m.member_number,m.full_name AS member,u.full_name AS "recordedBy"
       FROM transactions t JOIN members m ON m.id=t.member_id JOIN users u ON u.id=t.recorded_by ${memberId?"WHERE m.id=$1":""} ORDER BY t.id DESC LIMIT 250`,args):Promise.resolve(empty),

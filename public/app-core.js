@@ -3409,7 +3409,11 @@ function memberPhoneLabel(phone){
 }
 function isExitedMember(m){return /^(exited|left|withdrawn|inactive)$/i.test(String(m.status||""));}
 function memberDirectoryRow(m){
-  return `<tr><td><div class="member-cell"><div class="avatar green">${m.initials||initials(m.name)}</div><div><div class="cell-main">${escapeHtml(m.name)}</div><div class="cell-sub">${escapeHtml(m.id)}</div></div></div></td><td><div class="cell-main">${escapeHtml(memberPhoneLabel(m.phone))}</div></td><td>${m.joined?new Date(m.joined).toLocaleDateString():"—"}</td><td class="cell-main mono">${money(m.savings)}</td><td class="mono">${money(m.shares)}</td><td>${status(m.status)}</td><td><div class="table-actions"><button class="mini-btn" title="Open member dashboard" data-open-member-dashboard="${m.databaseId||m.memberId||""}">${icons.eye}</button></div></td></tr>`;
+  const hasPhoto=Boolean(m.hasProfilePhoto||m.hasPassportPhoto);
+  const avatar=hasPhoto
+    ?`<button type="button" class="avatar green member-photo-btn" data-member-photo="${m.databaseId||m.memberId||""}" data-member-name="${escapeHtml(m.name)}" title="View photo"><img src="/api/members/${m.databaseId||m.memberId}/photo" alt="${escapeHtml(m.name)}"></button>`
+    :`<div class="avatar green">${m.initials||initials(m.name)}</div>`;
+  return `<tr><td><div class="member-cell">${avatar}<div><div class="cell-main">${escapeHtml(m.name)}</div><div class="cell-sub">${escapeHtml(m.id)}</div></div></div></td><td><div class="cell-main">${escapeHtml(memberPhoneLabel(m.phone))}</div></td><td>${m.joined?new Date(m.joined).toLocaleDateString():"—"}</td><td class="cell-main mono">${money(m.savings)}</td><td class="mono">${money(m.welfareSinceJoin||0)}</td><td class="mono">${money(m.shares)}</td><td>${status(m.status)}</td><td><div class="table-actions"><button class="mini-btn" title="Open member dashboard" data-open-member-dashboard="${m.databaseId||m.memberId||""}">${icons.eye}</button></div></td></tr>`;
 }
 function membersView() {
   const filter=state.memberFilter||"all";
@@ -3418,12 +3422,12 @@ function membersView() {
   const shown=filter==="exited"?exited:filter==="active"?current.filter(m=>String(m.status||"").toLowerCase()==="active"):current;
   const chip=(id,label,count)=>`<button type="button" class="filter-chip${filter===id?" active":""}" data-member-filter="${id}">${label} (${count})</button>`;
   const exitedGroup=filter==="all"&&exited.length
-    ?`<tr class="member-group-row"><td colspan="7"><strong>Exited members (${exited.length})</strong> — former members who have left the group</td></tr>${exited.map(memberDirectoryRow).join("")}`:"";
+    ?`<tr class="member-group-row"><td colspan="8"><strong>Exited members (${exited.length})</strong> — former members who have left the group</td></tr>${exited.map(memberDirectoryRow).join("")}`:"";
   const subtitle=filter==="exited"?`${exited.length} exited member${exited.length===1?"":"s"} - former members kept for loan and welfare history`:`${current.length} current member${current.length===1?"":"s"}${exited.length?` · ${exited.length} exited listed separately`:""} - open any member dashboard with the eye icon`;
   if(!(state.members||[]).length){
     return `<div class="card table-card"><div class="card-head"><div><h2 class="card-title">Member directory</h2><p class="card-subtitle">Loading member records…</p></div></div><div class="executive-loading">Fetching members…</div></div>`;
   }
-  return `<div class="card table-card"><div class="card-head"><div><h2 class="card-title">Member directory</h2><p class="card-subtitle">${subtitle}</p></div></div><div class="table-tools"><div class="filter-set">${chip("all","All members",current.length)}${chip("active","Active",current.filter(m=>String(m.status||"").toLowerCase()==="active").length)}${chip("exited","Exited members",exited.length)}</div></div><div class="table-scroll"><table><thead><tr><th>Member</th><th>Contact</th><th>Joined</th><th>Savings</th><th>Share capital</th><th>Status</th><th></th></tr></thead><tbody>${shown.map(memberDirectoryRow).join("")||`<tr><td colspan="7" class="cell-sub">No members in this list.</td></tr>`}${exitedGroup}</tbody></table></div></div>`;
+  return `<div class="card table-card"><div class="card-head"><div><h2 class="card-title">Member directory</h2><p class="card-subtitle">${subtitle}</p></div></div><div class="table-tools"><div class="filter-set">${chip("all","All members",current.length)}${chip("active","Active",current.filter(m=>String(m.status||"").toLowerCase()==="active").length)}${chip("exited","Exited members",exited.length)}</div></div><div class="table-scroll"><table><thead><tr><th>Member</th><th>Contact</th><th>Joined</th><th>Savings</th><th>Welfare since joining</th><th>Share capital</th><th>Status</th><th></th></tr></thead><tbody>${shown.map(memberDirectoryRow).join("")||`<tr><td colspan="8" class="cell-sub">No members in this list.</td></tr>`}${exitedGroup}</tbody></table></div></div>`;
 }
 
 function savingsView() {
@@ -4075,6 +4079,13 @@ function bind() {
   document.querySelectorAll("[data-executive-workspace]").forEach(el=>el.addEventListener("click",()=>openExecutiveWorkspace(el.dataset.executiveWorkspace)));
   document.querySelectorAll("[data-executive-workspace-exit]").forEach(el=>el.addEventListener("click",exitExecutiveWorkspace));
   document.querySelectorAll("[data-open-member-dashboard]").forEach(el=>el.addEventListener("click",()=>openMemberDashboard(el.dataset.openMemberDashboard)));
+  document.querySelectorAll("[data-member-photo]").forEach(el=>el.addEventListener("click",()=>{
+    const name=el.dataset.memberName||"Member";
+    const src=`/api/members/${el.dataset.memberPhoto}/photo`;
+    document.body.insertAdjacentHTML("beforeend",`<div class="modal-backdrop" id="modal-backdrop"><div class="modal member-photo-modal"><div class="modal-head"><div><h2>${escapeHtml(name)}</h2><p>Profile picture</p></div><button class="modal-close" data-close>${icons.x}</button></div><img class="member-photo-large" src="${src}" alt="${escapeHtml(name)}"></div></div>`);
+    document.querySelector("[data-close]")?.addEventListener("click",closeModal);
+    document.getElementById("modal-backdrop")?.addEventListener("click",event=>{if(event.target.id==="modal-backdrop")closeModal();});
+  }));
   document.querySelectorAll("[data-member-filter]").forEach(el=>el.addEventListener("click",()=>{state.memberFilter=el.dataset.memberFilter;render();}));
   document.querySelectorAll("[data-tx-filter]").forEach(el=>el.addEventListener("click",()=>{state.txFilter=el.dataset.txFilter;render();}));
   document.querySelectorAll("[data-dismiss-alert]").forEach(el=>el.addEventListener("click",()=>{dismissAlert(el.dataset.dismissAlert);render();}));
