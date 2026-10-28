@@ -3582,7 +3582,7 @@ function conversationItem(c,activeId) {
   return `<button class="conversation-item ${String(c.id)===String(activeId)?"active":""} ${c.archived?"archived":""}" data-conversation="${c.id}" data-chat-type="${c.type}" data-unread="${c.unreadCount?1:0}" data-archived="${c.archived?1:0}" data-search-name="${c.otherName.toLowerCase()} ${c.otherRole.toLowerCase()}">
     <span class="chat-avatar ${c.type!=="direct"?"group":""} ${c.type==="direct"?"clickable-profile":""}" ${c.type==="direct"?`data-user-profile="${c.otherUserId}"`:""}>${c.type!=="direct"?(c.type==="channel"?icons.bell:icons.users):profileImage(c.otherUserId,c.otherName,c.otherHasProfilePhoto)}${c.online?`<i></i>`:""}</span>
     <div class="conversation-copy"><div class="conversation-name"><strong>${c.otherName}</strong><time>${messageTime(c.lastMessageDate)}</time></div>
-    <div class="conversation-preview"><span>${c.mutedUntil?"?? ":""}${mine&&c.lastMessage?"You: ":""}${escapeHtml(c.lastMessage||"Conversation started")}</span>${c.unreadCount?`<b>${c.unreadCount}</b>`:""}</div></div>
+    <div class="conversation-preview"><span>${c.mutedUntil?"?? ":""}${mine&&c.lastMessage?"You: ":""}${escapeHtml(c.lastMessage||"Chat cleared")}</span>${c.unreadCount?`<b>${c.unreadCount}</b>`:""}</div></div>
   </button>`;
 }
 function chatView(active) {
@@ -3795,6 +3795,8 @@ function openGroupInfo() {
     <div class="form">${isAdmin?`<div class="form-actions" style="margin:0 0 12px;padding:0 0 12px"><button class="button secondary" data-group-edit>Edit group</button><button class="button primary" data-group-add>${icons.plus}Add member</button></div>`:""}
       <div class="setting-row"><div class="setting-icon">${icons.bell}</div><div class="setting-copy"><strong>${group.mutedUntil?"Unmute":"Mute"} notifications</strong><span>Control alerts for this conversation</span></div><button class="button small secondary" data-chat-preference="mute">${group.mutedUntil?"Unmute":"Mute"}</button></div>
       <div class="setting-row"><div class="setting-icon">${icons.file}</div><div class="setting-copy"><strong>${group.archived?"Unarchive":"Archive"} conversation</strong><span>Manage where it appears in your list</span></div><button class="button small secondary" data-chat-preference="archive">${group.archived?"Unarchive":"Archive"}</button></div>
+      <div class="setting-row"><div class="setting-icon">${icons.refresh}</div><div class="setting-copy"><strong>Clear chat</strong><span>Remove messages from your view. The other person keeps theirs.</span></div><button class="button small secondary" data-chat-clear>Clear</button></div>
+      <div class="setting-row"><div class="setting-icon">${icons.trash}</div><div class="setting-copy"><strong>Delete chat</strong><span>Hide this chat until someone sends a new message.</span></div><button class="button small danger" data-chat-delete>Delete</button></div>
       <div class="card-title" style="margin-bottom:8px">Participants</div>
       ${group.participants.map(p=>`<div class="group-participant"><button class="chat-avatar clickable-profile" data-user-profile="${p.id}">${profileImage(p.id,p.fullName,p.hasProfilePhoto)}</button><div class="group-participant-copy"><strong>${escapeHtml(p.fullName)} ${Number(p.id)===Number(state.user.id)?"(You)":""}</strong><span>${p.role}</span></div>${p.memberRole==="admin"?`<span class="admin-chip">Group admin</span>`:""}${isAdmin&&Number(p.id)!==Number(state.user.id)?`<button class="mini-btn" data-group-promote="${p.id}" data-role="${p.memberRole==="admin"?"member":"admin"}" title="${p.memberRole==="admin"?"Remove admin":"Make admin"}">${icons.shield}</button><button class="mini-btn" data-group-remove="${p.id}" title="Remove">${icons.x}</button>`:""}</div>`).join("")}
       ${isGroup?`<div class="form-actions"><button class="button danger" data-group-leave>Leave group</button></div>`:""}
@@ -3806,6 +3808,8 @@ function openGroupInfo() {
   document.querySelectorAll("[data-group-promote]").forEach(el=>el.onclick=()=>changeGroupRole(el.dataset.groupPromote,el.dataset.role));
   document.querySelectorAll("[data-group-remove]").forEach(el=>el.onclick=()=>removeGroupMember(el.dataset.groupRemove,false));
   document.querySelectorAll("[data-chat-preference]").forEach(el=>el.onclick=()=>updateChatPreference(el.dataset.chatPreference));
+  document.querySelector("[data-chat-clear]")?.addEventListener("click",clearActiveChat);
+  document.querySelector("[data-chat-delete]")?.addEventListener("click",deleteActiveChat);
 }
 async function editGroup() {
   const group=state.messenger.active,title=await promptDialog("Group name:",group.title);if(!title)return;
@@ -3881,10 +3885,24 @@ function openConversationInfo() {
   document.body.insertAdjacentHTML("beforeend",`<div class="modal-backdrop" id="modal-backdrop"><div class="modal" style="max-width:430px"><div class="modal-head"><div><h2>Conversation details</h2><p>Privacy and notification controls</p></div><button class="modal-close" data-close>${icons.x}</button></div><div class="group-info-header"><div class="chat-avatar">${profileImage(chat.other.id,chat.other.fullName,chat.other.hasProfilePhoto)}</div><h3>${escapeHtml(chat.other.fullName)}</h3><p>${escapeHtml(chat.other.role)} - ${escapeHtml(chat.other.email)}</p></div><div class="form">
     <div class="setting-row"><div class="setting-icon">${icons.bell}</div><div class="setting-copy"><strong>${chat.mutedUntil?"Unmute":"Mute"} notifications</strong><span>${chat.mutedUntil?"Resume notifications":"Silence this conversation until unmuted"}</span></div><button class="button small secondary" data-chat-preference="mute">${chat.mutedUntil?"Unmute":"Mute"}</button></div>
     <div class="setting-row"><div class="setting-icon">${icons.file}</div><div class="setting-copy"><strong>${chat.archived?"Unarchive":"Archive"} conversation</strong><span>${chat.archived?"Return it to your active list":"Hide it from your active conversation list"}</span></div><button class="button small secondary" data-chat-preference="archive">${chat.archived?"Unarchive":"Archive"}</button></div>
+    <div class="setting-row"><div class="setting-icon">${icons.refresh}</div><div class="setting-copy"><strong>Clear chat</strong><span>Wipe this history from your screen. ${escapeHtml(chat.other.fullName)} still has the messages.</span></div><button class="button small secondary" data-chat-clear>Clear</button></div>
+    <div class="setting-row"><div class="setting-icon">${icons.trash}</div><div class="setting-copy"><strong>Delete chat</strong><span>Remove it from Chats until someone sends a new message.</span></div><button class="button small danger" data-chat-delete>Delete</button></div>
     <div class="setting-row"><div class="setting-icon">${icons.shield}</div><div class="setting-copy"><strong>Private conversation</strong><span>Only you and ${escapeHtml(chat.other.fullName)} can access these messages</span></div></div>
   </div></div></div>`);
   document.querySelector("[data-close]").onclick=closeModal;
   document.querySelectorAll("[data-chat-preference]").forEach(el=>el.onclick=()=>updateChatPreference(el.dataset.chatPreference));
+  document.querySelector("[data-chat-clear]")?.addEventListener("click",clearActiveChat);
+  document.querySelector("[data-chat-delete]")?.addEventListener("click",deleteActiveChat);
+}
+async function clearActiveChat(){
+  const id=state.messenger?.active?.conversationId;if(!id)return;
+  if(!await confirmDialog("Clear this chat for you? The other person keeps the messages."))return;
+  try{await api(`/api/messages/conversations/${id}/clear`,{method:"POST",body:"{}"});closeModal();await loadMessenger(id);render();toast("Chat cleared.");}catch(error){toast(error.message);}
+}
+async function deleteActiveChat(){
+  const id=state.messenger?.active?.conversationId;if(!id)return;
+  if(!await confirmDialog("Delete this chat from your list? It comes back only if someone sends a new message."))return;
+  try{await api(`/api/messages/conversations/${id}`,{method:"DELETE"});closeModal();state.messenger.active=null;state.messengerClosed=true;await loadMessenger();render();toast("Chat deleted.");}catch(error){toast(error.message);}
 }
 async function updateChatPreference(type) {
   const chat=state.messenger.active,id=chat.conversationId,payload=type==="mute"?{muted:!chat.mutedUntil}:{archived:!chat.archived};

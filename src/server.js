@@ -5980,8 +5980,16 @@ app.get("/api/documents/:id/view",auth,loadDocumentAccess("view"),asyncRoute(asy
   res.setHeader("Content-Disposition",`inline; filename="${path.basename(version.original_name).replaceAll('"',"")}"`);
   res.type(mime).sendFile(path.resolve(filePath));
 }));
+let messengerMemberColumnsReady=false;
+async function ensureMessengerMemberColumns(){
+  if(messengerMemberColumnsReady)return;
+  await query(`ALTER TABLE conversation_members ADD COLUMN IF NOT EXISTS cleared_at TIMESTAMPTZ`);
+  await query(`ALTER TABLE conversation_members ADD COLUMN IF NOT EXISTS hidden BOOLEAN NOT NULL DEFAULT false`);
+  messengerMemberColumnsReady=true;
+}
 async function conversationForUser(conversationId,userId) {
-  return one(`SELECT c.*,cm.member_role,cm.archived,cm.muted_until FROM conversations c
+  await ensureMessengerMemberColumns();
+  return one(`SELECT c.*,cm.member_role,cm.archived,cm.muted_until,cm.cleared_at,cm.hidden FROM conversations c
     JOIN conversation_members cm ON cm.conversation_id=c.id
     WHERE c.id=$1 AND cm.user_id=$2`,[conversationId,userId]);
 }
@@ -6020,8 +6028,10 @@ app.get("/api/messages/users/:id/profile",auth,asyncRoute(async(req,res)=>{
   res.json({user});
 }));
 app.get("/api/messages/conversations",auth,asyncRoute(async(req,res)=>{
+  await ensureMessengerMemberColumns();
   const conversations=(await query(`SELECT c.id,c.type,c.title,c.description,c.only_admins_can_post AS "onlyAdminsCanPost",
     c.last_message_at AS "lastMessageAt",cm.member_role AS "memberRole",cm.archived,cm.muted_until AS "mutedUntil",
+    cm.cleared_at AS "clearedAt",
     other.id AS "otherUserId",(other.profile_photo_stored_name IS NOT NULL) AS "otherHasProfilePhoto",
     CASE WHEN c.type IN ('group','channel') THEN c.title ELSE other.full_name END AS "otherName",
     CASE WHEN c.type='channel' THEN 'Announcement channel'
@@ -6033,11 +6043,16 @@ app.get("/api/messages/conversations",auth,asyncRoute(async(req,res)=>{
     (SELECT COUNT(*)::int FROM conversation_members count_member WHERE count_member.conversation_id=c.id) AS "memberCount"
     FROM conversation_members cm JOIN conversations c ON c.id=cm.conversation_id
     LEFT JOIN users other ON c.type='direct' AND other.id=CASE WHEN c.user_low=$1 THEN c.user_high ELSE c.user_low END
-    LEFT JOIN LATERAL (SELECT body,sender_id,created_at FROM messages WHERE conversation_id=c.id AND deleted_at IS NULL ORDER BY id DESC LIMIT 1) last_msg ON true
+    LEFT JOIN LATERAL (SELECT body,sender_id,created_at FROM messages
+      WHERE conversation_id=c.id AND deleted_at IS NULL
+        AND (cm.cleared_at IS NULL OR created_at>cm.cleared_at)
+      ORDER BY id DESC LIMIT 1) last_msg ON true
     LEFT JOIN messages unread ON unread.conversation_id=c.id AND unread.sender_id<>$1 AND unread.deleted_at IS NULL
+      AND (cm.cleared_at IS NULL OR unread.created_at>cm.cleared_at)
       AND NOT EXISTS (SELECT 1 FROM message_reads mr WHERE mr.message_id=unread.id AND mr.user_id=$1)
-    WHERE cm.user_id=$1
-    GROUP BY c.id,cm.member_role,cm.archived,cm.muted_until,other.id,last_msg.body,last_msg.sender_id,last_msg.created_at
+    WHERE cm.user_id=$1 AND COALESCE(cm.hidden,false)=false
+      AND (last_msg.body IS NOT NULL OR cm.cleared_at IS NOT NULL)
+    GROUP BY c.id,cm.member_role,cm.archived,cm.muted_until,cm.cleared_at,other.id,last_msg.body,last_msg.sender_id,last_msg.created_at
     ORDER BY c.last_message_at DESC`,[req.user.id])).rows;
   res.json({conversations});
 }));
@@ -6099,7 +6114,9 @@ app.get("/api/messages/conversations/:id",auth,asyncRoute(async(req,res)=>{
       FROM message_attachments att WHERE att.message_id=msg.id AND att.quarantined_at IS NULL),'[]') AS attachments
     FROM messages msg JOIN users sender ON sender.id=msg.sender_id
     LEFT JOIN messages reply ON reply.id=msg.reply_to_id
-    WHERE msg.conversation_id=$1 AND msg.deleted_at IS NULL ORDER BY msg.id ASC LIMIT 500`,[conversation.id,req.user.id])).rows;
+    WHERE msg.conversation_id=$1 AND msg.deleted_at IS NULL
+      AND ($3::timestamptz IS NULL OR msg.created_at>$3)
+    ORDER BY msg.id ASC LIMIT 500`,[conversation.id,req.user.id,conversation.cleared_at||null])).rows;
   const typing=[...(typingPresence.get(String(conversation.id))||new Map()).entries()]
     .filter(([userId,expires])=>Number(userId)!==Number(req.user.id)&&expires>Date.now())
     .map(([userId])=>participants.find(user=>Number(user.id)===Number(userId))?.fullName).filter(Boolean);
@@ -6122,6 +6139,7 @@ app.post("/api/messages/conversations/:id/messages",auth,asyncRoute(async(req,re
   const message=await one(`INSERT INTO messages (conversation_id,sender_id,body,reply_to_id)
     VALUES ($1,$2,$3,$4) RETURNING id,created_at AS "createdAt"`,[conversation.id,req.user.id,body,replyTo]);
   await query("UPDATE conversations SET last_message_at=NOW() WHERE id=$1",[conversation.id]);
+  await query("UPDATE conversation_members SET hidden=false WHERE conversation_id=$1",[conversation.id]);
   await recordMentions(message.id,conversation.id,body,req.user.id);
   res.status(201).json({message});
 }));
@@ -6158,6 +6176,7 @@ app.post("/api/messages/conversations/:id/files",auth,upload.array("files",5),as
       (message_id,original_name,stored_name,mime_type,file_size,uploaded_by) VALUES ($1,$2,$3,$4,$5,$6)`,
       [row.id,path.basename(file.originalname),file.filename,file.mimetype,file.size,req.user.id]);
     await client.query("UPDATE conversations SET last_message_at=NOW() WHERE id=$1",[conversation.id]);
+    await client.query("UPDATE conversation_members SET hidden=false WHERE conversation_id=$1",[conversation.id]);
     return row;
   });
   res.status(201).json({messageId:message.id});
@@ -6195,6 +6214,19 @@ app.patch("/api/messages/conversations/:id/preferences",auth,asyncRoute(async(re
     [req.body.muted?new Date(Date.now()+365*24*60*60*1000):null,conversation.id,req.user.id]);
   res.json({ok:true});
 }));
+app.post("/api/messages/conversations/:id/clear",auth,asyncRoute(async(req,res)=>{
+  const conversation=await conversationForUser(req.params.id,req.user.id);
+  if(!conversation) return res.status(404).json({error:"Conversation not found"});
+  await query("UPDATE conversation_members SET cleared_at=NOW() WHERE conversation_id=$1 AND user_id=$2",[conversation.id,req.user.id]);
+  res.json({ok:true});
+}));
+app.delete("/api/messages/conversations/:id",auth,asyncRoute(async(req,res)=>{
+  const conversation=await conversationForUser(req.params.id,req.user.id);
+  if(!conversation) return res.status(404).json({error:"Conversation not found"});
+  await query("UPDATE conversation_members SET hidden=true,cleared_at=NOW(),archived=false WHERE conversation_id=$1 AND user_id=$2",
+    [conversation.id,req.user.id]);
+  res.json({ok:true});
+}));
 app.post("/api/messages/messages/:id/star",auth,asyncRoute(async(req,res)=>{
   const message=await one(`SELECT msg.id FROM messages msg JOIN conversation_members cm ON cm.conversation_id=msg.conversation_id
     WHERE msg.id=$1 AND cm.user_id=$2`,[req.params.id,req.user.id]);
@@ -6213,6 +6245,7 @@ app.post("/api/messages/messages/:id/forward",auth,asyncRoute(async(req,res)=>{
   const forwarded=await one(`INSERT INTO messages (conversation_id,sender_id,body,forwarded_from_id)
     VALUES ($1,$2,$3,$4) RETURNING id`,[target.id,req.user.id,source.body,source.id]);
   await query("UPDATE conversations SET last_message_at=NOW() WHERE id=$1",[target.id]);
+  await query("UPDATE conversation_members SET hidden=false WHERE conversation_id=$1",[target.id]);
   res.status(201).json({messageId:forwarded.id});
 }));
 app.post("/api/messages/conversations/:id/typing",auth,asyncRoute(async(req,res)=>{
