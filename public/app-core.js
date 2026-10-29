@@ -830,7 +830,7 @@ function investmentSidebar() {
     "investment-analytics":"reports","investment-documents":"file","investment-notifications":"bell"};
   const pending=state.investment?.stats?.pendingProposals||0;
   const pages=rolePages[executiveWorkspaceRole()]||rolePages[state.role];
-  const sidebarPages=new Set(["dashboard","investment-projects","investment-revenue","investment-expenses","investment-documents","messages","settings"]);
+  const sidebarPages=new Set(["dashboard","investment-projects","investment-revenue","investment-expenses","investment-reports","investment-documents","messages","settings"]);
   return `<aside class="sidebar executive-sidebar investment-sidebar" id="sidebar">
     <div class="executive-brand"><div class="executive-crest investment-crest">${icons.reports}</div><div><strong>KASANGATI G40<br>KWAGALANA</strong><span>INVESTMENT DEPARTMENT</span></div></div>
     <nav class="nav executive-nav">${[...sidebarPages].filter(page=>pages.includes(page)).map(page=>`<button class="nav-item ${state.page===page?"active":""}" data-page="${page}">${icons[iconMap[page]||page]||icons.dashboard}<span>${labels[page]}</span>${page==="messages"?messagesNavBadge():navAlertDot(page==="investment-proposals"&&pending)}</button>`).join("")}</nav>
@@ -855,7 +855,7 @@ function creditsSidebar() {
   const disburseBadge=canCreditsDisburse()?(c?.stats?.awaitingDisbursement||0):0;
   const approvalBadge=(c?.loans||[]).filter(l=>["committee-review","officer-review"].includes(l.status)).length;
   const pages=rolePages[executiveWorkspaceRole()]||rolePages[state.role];
-  const sidebarPages=new Set(["dashboard","credits-members","credits-savings","credits-applications","credits-approvals","credits-disbursement","credits-active","credits-repayments","credits-receipts","credits-guarantors","credits-recovery","credits-documents","credits-notifications","messages","settings"]);
+  const sidebarPages=new Set(["dashboard","credits-members","credits-savings","credits-applications","credits-approvals","credits-disbursement","credits-active","credits-repayments","credits-receipts","credits-guarantors","credits-recovery","credits-reports","credits-documents","credits-notifications","messages","settings"]);
   if(isExecutiveReadOnly()) sidebarPages.delete("credits-disbursement");
   if(!canCreditsDisburse()) sidebarPages.delete("credits-disbursement");
   const alertFor=page=>page==="credits-applications"&&applicationBadge||page==="credits-approvals"&&approvalBadge||page==="credits-active"&&activeBadge||page==="credits-disbursement"&&disburseBadge||page==="credits-repayments"&&repaymentBadge||page==="credits-guarantors"&&guarantorBadge||page==="credits-recovery"&&(recoveryBadge||dangerBadge);
@@ -878,7 +878,7 @@ function financeSidebar() {
   const entryPending=(state.finance?.pendingEntries||state.finance?.entries||[]).filter(x=>x.status==="pending_finance_review").length+(state.finance?.pendingSavings||[]).length;
   const investmentPending=(state.finance?.investmentAnalyses||[]).length;
   const pages=rolePages[executiveWorkspaceRole()]||rolePages[state.role];
-  const sidebarPages=new Set(["dashboard","finance-approvals","finance-income","finance-expenses","finance-bank","finance-unit-trust","finance-budgets","finance-documents","messages","settings"]);
+  const sidebarPages=new Set(["dashboard","finance-approvals","finance-income","finance-expenses","finance-bank","finance-unit-trust","finance-budgets","finance-reports","finance-documents","messages","settings"]);
   const alertFor=page=>page==="finance-approvals"&&(pending||entryPending||investmentPending);
   return `<aside class="sidebar executive-sidebar finance-sidebar" id="sidebar">
     <div class="executive-brand"><div class="executive-crest finance-crest">${icons.wallet}</div><div><strong>KASANGATI G40<br>KWAGALANA</strong><span>Finance</span></div></div>
@@ -897,7 +897,7 @@ function executiveSidebar() {
     "executive-meetings":"clock","executive-projects":"building","executive-reports":"reports",
     notifications:"bell","executive-documents":"file",users:"lock"};
   const pending=state.executive?.stats?.pendingApprovals||((state.executive?.approvals||[]).length+((state.executive?.documents||[]).filter(d=>d.status==="pending_executive").length));
-  const sidebarPages=new Set(["dashboard","executive-approvals","members","departments","executive-meetings","executive-documents","users","notifications","messages","settings"]);
+  const sidebarPages=new Set(["dashboard","executive-approvals","members","departments","executive-meetings","executive-reports","executive-documents","users","notifications","messages","settings"]);
   const alertFor=page=>page==="executive-approvals"&&pending||page==="notifications"&&(state.notifications||[]).some(n=>!n.readAt);
   return `<aside class="sidebar executive-sidebar" id="sidebar">
     <div class="executive-brand"><div class="executive-crest">${icons.shield}</div><div><strong>KASANGATI G40<br>KWAGALANA</strong><span>Executive Department</span></div></div>
