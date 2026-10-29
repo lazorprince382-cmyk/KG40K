@@ -6510,7 +6510,7 @@ async function canAccessStandingReports(user){
 }
 async function sendStandingReport(req,res){
   const kind=String(req.params.kind||"").toLowerCase().replace(/\.pdf$/,"");
-  if(!["savings","welfare","loans"].includes(kind)) return res.status(400).json({error:"Choose savings, welfare or loans"});
+  if(!["savings","welfare","loans","company","assistance","active-loans"].includes(kind)) return res.status(400).json({error:"Choose a standing report"});
   if(!await canAccessStandingReports(req.user)) return res.status(403).json({error:"Standing report access denied"});
   const asOf=String(req.query.asOf||"").trim();
   const download=req.query.download==="1"||/\.pdf$/i.test(req.path);

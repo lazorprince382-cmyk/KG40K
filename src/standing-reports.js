@@ -2,6 +2,8 @@
 const PDFDocument = require("pdfkit");
 const { query } = require("./db");
 const { loadScheduleSettings, expectedAtEndOf, monthIndex, monthKey } = require("./savings-schedule");
+const { loadWelfareStanding } = require("./welfare-standing");
+const { LOAN_PRINCIPAL_LEFT_SQL } = require("./loan-totals");
 
 const NAVY = "#1F4E79";
 const BLUE = "#2E75B6";
@@ -367,6 +369,293 @@ function drawLoanTable(doc, rows) {
     .text(`Outstanding: UGX ${money(outstanding)}    Active book: UGX ${money(disbursed)}    Facilities: ${rows.length}`, x0, y, { width: tableW });
 }
 
+function formatDay(value) {
+  if (!value) return "-";
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleDateString("en-GB", { timeZone: "Africa/Kampala" });
+}
+
+async function loadCompanyStanding() {
+  const uap = Number((await query(`SELECT balance::float AS balance FROM finance_accounts WHERE account_code='GL-4500' AND active=true LIMIT 1`)).rows[0]?.balance || 0);
+  const bank = Number((await query(`SELECT balance::float AS balance FROM finance_accounts WHERE account_code='GL-4104' AND active=true LIMIT 1`)).rows[0]?.balance || 0);
+  const loans = Number((await query(`SELECT ROUND(COALESCE(SUM(${LOAN_PRINCIPAL_LEFT_SQL}),0),2)::float AS total FROM loans WHERE status IN ('active','overdue')`)).rows[0]?.total || 0);
+  const standing = await loadWelfareStanding();
+  const welfare = Math.max(0, Number(standing.closingBalance || standing.currentFundBalance || 0));
+  const lines = [
+    { label: "Old Mutual Unit Trust (UAP)", amount: uap, fill: "#E8F4FC", text: NAVY },
+    { label: "Centenary Bank", amount: bank, fill: CYAN_CELL, text: NAVY },
+    { label: "Current money in welfare", amount: welfare, fill: GREEN_CELL, text: GREEN_TEXT },
+    { label: "Money in loans (principal remaining)", amount: loans, fill: "#FCE4D6", text: "#C65911" },
+  ];
+  const total = uap + bank + welfare + loans;
+  return { lines, total };
+}
+
+function drawCompanyStanding(doc, standing, label) {
+  const tableW = 520;
+  const x0 = (doc.page.width - tableW) / 2;
+  let y = 52;
+  fillRect(doc, x0, y, tableW, 22, NAVY);
+  cellText(doc, `Company standing as at ${label}`, x0, y, tableW, 22, { align: "center", color: WHITE, bold: true, size: 10 });
+  y += 28;
+  doc.font("Helvetica").fontSize(8).fillColor("#5B6B7C")
+    .text("UAP + Centenary + welfare fund + money still in active loans. Centenary is the bank book; welfare is the current welfare standing after assistance already paid.", x0, y, { width: tableW });
+  y += 28;
+  standing.lines.forEach((line) => {
+    fillRect(doc, x0, y, 300, 28, line.fill);
+    fillRect(doc, x0 + 300, y, 220, 28, WHITE);
+    doc.strokeColor(LINE).lineWidth(0.4).rect(x0, y, tableW, 28).stroke();
+    cellText(doc, line.label, x0, y, 300, 28, { color: line.text, bold: true, size: 10 });
+    cellText(doc, money(line.amount), x0 + 300, y, 210, 28, { align: "right", color: line.text, bold: true, size: 11 });
+    y += 28;
+  });
+  y += 8;
+  fillRect(doc, x0, y, 300, 32, NAVY);
+  fillRect(doc, x0 + 300, y, 220, 32, GREEN_CELL);
+  cellText(doc, "Total company funds", x0, y, 300, 32, { color: WHITE, bold: true, size: 11 });
+  cellText(doc, money(standing.total), x0 + 300, y, 210, 32, { align: "right", color: GREEN_TEXT, bold: true, size: 12 });
+}
+
+async function loadAssistanceRows() {
+  const rows = (
+    await query(
+      `SELECT p.id, p.beneficiary_name AS member, p.amount::float AS amount, p.paid_at AS "paidAt",
+              p.payment_method AS method, COALESCE(r.request_type, 'Welfare assistance') AS category,
+              COALESCE(r.description, '') AS note
+       FROM welfare_payments p
+       LEFT JOIN welfare_requests r ON r.id = p.request_id
+       WHERE p.status IN ('paid','processed')
+       ORDER BY p.paid_at DESC NULLS LAST, p.id DESC`
+    )
+  ).rows;
+  return rows;
+}
+
+function drawAssistanceRegister(doc, rows, label) {
+  const cols = [
+    { w: 28, label: "No." },
+    { w: 78, label: "Date paid" },
+    { w: 110, label: "Type" },
+    { w: 168, label: "Member / family" },
+    { w: 78, label: "Amount" },
+    { w: 70, label: "How paid" },
+  ];
+  const tableW = cols.reduce((s, c) => s + c.w, 0);
+  const x0 = (doc.page.width - tableW) / 2;
+  const rowH = 20;
+  let y = 50;
+  fillRect(doc, x0, y, tableW, 22, NAVY);
+  cellText(doc, "People already given welfare assistance", x0, y, tableW, 22, { align: "center", color: WHITE, bold: true, size: 10 });
+  y += 22;
+  fillRect(doc, x0, y, tableW, 18, SKY);
+  cellText(doc, `Register as at ${label}  ·  Each payout UGX 1,000,000 unless shown otherwise`, x0, y, tableW, 18, { align: "center", color: NAVY, bold: true, size: 8 });
+  y += 22;
+  let x = x0;
+  cols.forEach((col) => {
+    fillRect(doc, x, y, col.w, 18, CYAN);
+    cellText(doc, col.label, x, y, col.w, 18, { align: "center", color: WHITE, bold: true, size: 8 });
+    x += col.w;
+  });
+  y += 18;
+  rows.forEach((row, index) => {
+    y = ensureRowSpace(doc, y, rowH);
+    const values = [index + 1, formatDay(row.paidAt), row.category, row.member, money(row.amount), row.method || "Bank transfer"];
+    x = x0;
+    cols.forEach((col, i) => {
+      const bg = i === 3 ? (index % 2 === 0 ? SKY : WHITE) : i === 4 ? GREEN_CELL : WHITE;
+      fillRect(doc, x, y, col.w, rowH, bg);
+      doc.strokeColor(LINE).lineWidth(0.3).rect(x, y, col.w, rowH).stroke();
+      cellText(doc, values[i], x, y, col.w, rowH, {
+        align: i === 4 || i === 0 ? "right" : "left",
+        size: 7,
+        bold: i === 4,
+        color: i === 4 ? GREEN_TEXT : "#0B1F3B",
+      });
+      x += col.w;
+    });
+    y += rowH;
+    if (row.note) {
+      y = ensureRowSpace(doc, y, 16);
+      fillRect(doc, x0, y, tableW, 16, "#F7FBFE");
+      cellText(doc, row.note, x0 + 8, y, tableW - 16, 16, { size: 7, color: "#5B6B7C" });
+      y += 16;
+    }
+  });
+  y = ensureRowSpace(doc, y, 28);
+  const total = rows.reduce((s, r) => s + Number(r.amount || 0), 0);
+  fillRect(doc, x0, y, 384, 24, NAVY);
+  fillRect(doc, x0 + 384, y, 148, 24, GREEN_CELL);
+  cellText(doc, `Total assistance listed  ·  ${rows.length} payout${rows.length === 1 ? "" : "s"}`, x0, y, 384, 24, { color: WHITE, bold: true, size: 9 });
+  cellText(doc, money(total), x0 + 384, y, 140, 24, { align: "right", color: GREEN_TEXT, bold: true, size: 10 });
+  y += 32;
+  y = ensureRowSpace(doc, y, 48);
+  doc.font("Helvetica").fontSize(7.5).fillColor("#5B6B7C")
+    .text("This register is the Legal / Welfare record of support already paid. Vicent Gumisiriza is not charged a shared deduction on these historical payouts. Joshua Ssewanyana is kept in assistance history only.", x0, y, { width: tableW });
+}
+
+async function loadActiveLoanReports() {
+  const loans = (
+    await query(
+      `SELECT l.id, l.reference, l.amount::float AS amount, l.balance::float AS balance, l.status,
+              l.term_months AS "termMonths", l.created_at AS "requestedAt", l.disbursed_at AS "disbursedAt",
+              l.processing_fee::float AS "processingFee",
+              m.full_name AS member, m.member_number AS "memberNumber",
+              COALESCE(p.name, l.custom_product_name, 'Loan') AS product,
+              COALESCE((SELECT SUM(s.principal) FROM loan_repayment_schedule s WHERE s.loan_id=l.id), l.amount)::float AS "schedulePrincipal",
+              COALESCE((SELECT SUM(s.interest) FROM loan_repayment_schedule s WHERE s.loan_id=l.id),0)::float AS "scheduleInterest",
+              COALESCE((SELECT SUM(s.principal_paid) FROM loan_repayment_schedule s WHERE s.loan_id=l.id),0)::float AS "principalPaid",
+              COALESCE((SELECT SUM(s.interest_paid) FROM loan_repayment_schedule s WHERE s.loan_id=l.id),0)::float AS "interestPaid",
+              COALESCE((SELECT SUM(GREATEST(s.principal-s.principal_paid,0)) FROM loan_repayment_schedule s WHERE s.loan_id=l.id), l.balance)::float AS "principalLeft",
+              COALESCE((SELECT SUM(GREATEST(s.interest-s.interest_paid,0)) FROM loan_repayment_schedule s WHERE s.loan_id=l.id),0)::float AS "interestLeft"
+       FROM loans l
+       JOIN members m ON m.id=l.member_id
+       LEFT JOIN loan_products p ON p.id=l.product_id
+       WHERE l.status IN ('active','overdue') AND m.deleted_at IS NULL
+       ORDER BY m.full_name, l.id`
+    )
+  ).rows;
+  if (!loans.length) return [];
+  const ids = loans.map((l) => l.id);
+  const schedule = (
+    await query(
+      `SELECT loan_id AS "loanId", installment_number AS n, due_date AS "dueDate", paid_at AS "paidAt",
+              principal::float, interest::float, total_due::float AS "totalDue",
+              paid_amount::float AS paid, principal_paid::float AS "principalPaid",
+              interest_paid::float AS "interestPaid", status
+       FROM loan_repayment_schedule
+       WHERE loan_id = ANY($1::bigint[])
+       ORDER BY loan_id, installment_number`,
+      [ids]
+    )
+  ).rows;
+  const payments = (
+    await query(
+      `SELECT loan_id AS "loanId", reference, method, amount::float,
+              COALESCE(verified_at, created_at) AS "paidAt", notes
+       FROM transactions
+       WHERE loan_id = ANY($1::bigint[]) AND type='Loan repayment' AND status IN ('completed','verified','approved')
+       ORDER BY COALESCE(verified_at, created_at), id`,
+      [ids]
+    )
+  ).rows;
+  return loans.map((loan) => ({
+    ...loan,
+    schedule: schedule.filter((row) => Number(row.loanId) === Number(loan.id)),
+    payments: payments.filter((row) => Number(row.loanId) === Number(loan.id)),
+  }));
+}
+
+function drawMiniTable(doc, x0, y, cols, rows, { header = CYAN } = {}) {
+  const rowH = 14;
+  const tableW = cols.reduce((s, c) => s + c.w, 0);
+  y = ensureRowSpace(doc, y, rowH + 4);
+  let x = x0;
+  cols.forEach((col) => {
+    fillRect(doc, x, y, col.w, rowH, header);
+    cellText(doc, col.label, x, y, col.w, rowH, { align: "center", color: WHITE, bold: true, size: 6.5 });
+    x += col.w;
+  });
+  y += rowH;
+  if (!rows.length) {
+    fillRect(doc, x0, y, tableW, rowH, WHITE);
+    cellText(doc, "None recorded", x0, y, tableW, rowH, { size: 7, color: "#5B6B7C" });
+    return y + rowH;
+  }
+  rows.forEach((values, index) => {
+    y = ensureRowSpace(doc, y, rowH);
+    x = x0;
+    cols.forEach((col, i) => {
+      fillRect(doc, x, y, col.w, rowH, index % 2 === 0 ? "#F7FBFE" : WHITE);
+      doc.strokeColor(LINE).lineWidth(0.2).rect(x, y, col.w, rowH).stroke();
+      cellText(doc, values[i], x, y, col.w, rowH, { align: col.align || "left", size: 6.5, bold: Boolean(col.bold) });
+      x += col.w;
+    });
+    y += rowH;
+  });
+  return y;
+}
+
+function drawActiveLoanReports(doc, loans, label) {
+  let y = 50;
+  const pageW = doc.page.width - 36;
+  const x0 = 18;
+  doc.font("Helvetica").fontSize(8).fillColor("#5B6B7C")
+    .text(`Active and overdue loans as at ${label}. Requested date, principal/interest paid and remaining, then every installment and every repayment received.`, x0, y, { width: pageW });
+  y += 22;
+  loans.forEach((loan, index) => {
+    if (index) y = ensureRowSpace(doc, y, 120);
+    const principalPaid = Number(loan.principalPaid || 0);
+    const interestPaid = Number(loan.interestPaid || 0);
+    const principalLeft = Number(loan.principalLeft || 0);
+    const interestLeft = Number(loan.interestLeft || 0);
+    fillRect(doc, x0, y, pageW, 20, index % 2 === 0 ? NAVY : BLUE);
+    cellText(doc, `${loan.member}   ${loan.reference}   ${loan.product}   ${loan.status}`, x0, y, pageW, 20, { color: WHITE, bold: true, size: 9 });
+    y += 20;
+    const facts = [
+      ["Requested", formatDay(loan.requestedAt)],
+      ["Disbursed", formatDay(loan.disbursedAt)],
+      ["Principal lent", money(loan.amount)],
+      ["Term", `${loan.termMonths || "-"} months`],
+    ];
+    const boxW = pageW / 4;
+    facts.forEach((fact, i) => {
+      fillRect(doc, x0 + i * boxW, y, boxW, 28, WHITE);
+      doc.strokeColor(LINE).lineWidth(0.3).rect(x0 + i * boxW, y, boxW, 28).stroke();
+      cellText(doc, fact[0], x0 + i * boxW, y, boxW, 12, { size: 6.5, color: "#5B6B7C" });
+      cellText(doc, fact[1], x0 + i * boxW, y + 11, boxW, 16, { size: 8, bold: true, color: NAVY });
+    });
+    y += 28;
+    const moneyBoxes = [
+      ["Principal paid", money(principalPaid), GREEN_CELL, GREEN_TEXT],
+      ["Principal remaining", money(principalLeft), "#FCE4D6", "#C65911"],
+      ["Interest paid", money(interestPaid), GREEN_CELL, GREEN_TEXT],
+      ["Interest remaining", money(interestLeft), "#FFF2CC", "#7F6000"],
+    ];
+    moneyBoxes.forEach((box, i) => {
+      fillRect(doc, x0 + i * boxW, y, boxW, 28, box[2]);
+      cellText(doc, box[0], x0 + i * boxW, y, boxW, 12, { size: 6.5, color: box[3] });
+      cellText(doc, box[1], x0 + i * boxW, y + 11, boxW, 16, { size: 8, bold: true, color: box[3] });
+    });
+    y += 34;
+    cellText(doc, "How and when installments were paid", x0, y, pageW, 14, { bold: true, size: 8, color: NAVY });
+    y += 14;
+    y = drawMiniTable(doc, x0, y, [
+      { w: 70, label: "Date paid", align: "left" },
+      { w: 90, label: "How paid", align: "left" },
+      { w: 80, label: "Amount", align: "right", bold: true },
+      { w: 90, label: "Receipt", align: "left" },
+      { w: 229, label: "Note", align: "left" },
+    ], loan.payments.map((p) => [formatDay(p.paidAt), p.method || "-", money(p.amount), p.reference || "-", ascii(p.notes).slice(0, 70)]), { header: GREEN_TEXT });
+    y += 8;
+    cellText(doc, "Installment schedule", x0, y, pageW, 14, { bold: true, size: 8, color: NAVY });
+    y += 14;
+    y = drawMiniTable(doc, x0, y, [
+      { w: 28, label: "#", align: "center" },
+      { w: 68, label: "Due", align: "left" },
+      { w: 68, label: "Paid on", align: "left" },
+      { w: 70, label: "Due amount", align: "right" },
+      { w: 62, label: "Paid", align: "right" },
+      { w: 70, label: "Prin. paid", align: "right" },
+      { w: 70, label: "Int. paid", align: "right" },
+      { w: 70, label: "Status", align: "left" },
+    ], loan.schedule.map((s) => [
+      s.n,
+      formatDay(s.dueDate),
+      s.paidAt ? formatDay(s.paidAt) : "-",
+      money(s.totalDue),
+      money(s.paid),
+      money(s.principalPaid),
+      money(s.interestPaid),
+      s.status,
+    ]), { header: NAVY });
+    y += 14;
+  });
+  if (!loans.length) {
+    cellText(doc, "No active loans.", x0, y, pageW, 20, { size: 10, color: "#5B6B7C" });
+  }
+}
+
 async function buildStandingPdf(kind, { asOf } = {}) {
   const parsed = parseAsOf(asOf);
   const label = asOfLabel(parsed);
@@ -409,6 +698,18 @@ async function buildStandingPdf(kind, { asOf } = {}) {
       const rows = await loadLoanRows(parsed.asOfMonth);
       drawHeader(doc, `Loans Analysis Report as at ${label}`, "Facilities, outstanding balances and repayment standing");
       drawLoanTable(doc, rows);
+    } else if (kind === "company") {
+      const standing = await loadCompanyStanding();
+      drawHeader(doc, `Company Standing Report as at ${label}`);
+      drawCompanyStanding(doc, standing, label);
+    } else if (kind === "assistance") {
+      const rows = await loadAssistanceRows();
+      drawHeader(doc, `Welfare Assistance Register as at ${label}`);
+      drawAssistanceRegister(doc, rows, label);
+    } else if (kind === "active-loans") {
+      const loans = await loadActiveLoanReports();
+      drawHeader(doc, `Active Loans Report as at ${label}`);
+      drawActiveLoanReports(doc, loans, label);
     } else {
       throw Object.assign(new Error("Unknown standing report"), { status: 400 });
     }
@@ -421,7 +722,7 @@ async function buildStandingPdf(kind, { asOf } = {}) {
   doc.end();
   return Promise.race([
     done,
-    new Promise((_, reject) => setTimeout(() => reject(new Error("PDF generation timed out")), 20000)),
+    new Promise((_, reject) => setTimeout(() => reject(new Error("PDF generation timed out")), 30000)),
   ]);
 }
 
@@ -429,6 +730,9 @@ const TITLES = {
   savings: "Personal savings standing",
   welfare: "Welfare standings",
   loans: "Loans full analysis",
+  company: "Company standing",
+  assistance: "Welfare assistance register",
+  "active-loans": "Active loans and installments",
 };
 
 module.exports = {

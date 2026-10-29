@@ -27,8 +27,9 @@ const DOCS = [
     department: "welfare",
     documentType: "Welfare Reports",
     title: "Welfare assistance register — people given support",
-    source: path.join(seedDir, "welfare-assistance-register.txt"),
-    fileName: "welfare-assistance-register.txt",
+    generatePdf: true,
+    fileName: "welfare-assistance-register.pdf",
+    version: "2.0",
   },
   {
     reference: "DOC-LOAN-AGREEMENT",
@@ -61,16 +62,27 @@ function resolveSource(doc) {
   return null;
 }
 
+async function loadBuffer(doc) {
+  if (doc.generatePdf) {
+    const { buildStandingPdf } = require("../src/standing-reports");
+    const buffer = await buildStandingPdf("assistance");
+    return { buffer, mime: "application/pdf", ext: ".pdf" };
+  }
+  const source = resolveSource(doc);
+  if (!source || !fs.existsSync(source)) throw new Error(`Missing seed file for ${doc.reference}`);
+  return { buffer: fs.readFileSync(source), mime: "text/plain; charset=utf-8", ext: path.extname(source) || ".txt" };
+}
+
 async function upsertDocument(client, { deptByCode, actorId, hasAudience }, doc) {
   const department = deptByCode[doc.department];
   if (!department) throw new Error(`Missing department: ${doc.department}`);
-  const source = resolveSource(doc);
-  if (!source || !fs.existsSync(source)) throw new Error(`Missing seed file for ${doc.reference}`);
-  const buffer = fs.readFileSync(source);
+  const payload = await loadBuffer(doc);
+  const buffer = payload.buffer;
   const sha256 = crypto.createHash("sha256").update(buffer).digest("hex");
+  const version = doc.version || "1.1";
 
   if (dryRun) {
-    console.log(`Would upsert ${doc.reference} → ${doc.department} (${buffer.length} bytes)`);
+    console.log(`Would upsert ${doc.reference} → ${doc.department} (${buffer.length} bytes, ${payload.mime})`);
     return;
   }
 
@@ -81,11 +93,11 @@ async function upsertDocument(client, { deptByCode, actorId, hasAudience }, doc)
         hasAudience
           ? `INSERT INTO organization_documents
               (reference,department_id,document_type,title,version,status,visibility_level,audience_departments,file_name,created_by)
-             VALUES ($1,$2,$3,$4,'1.1','published',2,NULL,$5,$6) RETURNING id`
+             VALUES ($1,$2,$3,$4,$5,'published',2,NULL,$6,$7) RETURNING id`
           : `INSERT INTO organization_documents
               (reference,department_id,document_type,title,version,status,visibility_level,file_name,created_by)
-             VALUES ($1,$2,$3,$4,'1.1','published',2,$5,$6) RETURNING id`,
-        [doc.reference, department.id, doc.documentType, doc.title, doc.fileName, actorId]
+             VALUES ($1,$2,$3,$4,$5,'published',2,$6,$7) RETURNING id`,
+        [doc.reference, department.id, doc.documentType, doc.title, version, doc.fileName, actorId]
       )
     ).rows[0];
     console.log(`Created ${doc.reference} under ${doc.department} id=${row.id}`);
@@ -93,47 +105,57 @@ async function upsertDocument(client, { deptByCode, actorId, hasAudience }, doc)
     await client.query(
       hasAudience
         ? `UPDATE organization_documents SET
-             department_id=$2, document_type=$3, title=$4, version='1.1', status='published',
-             visibility_level=2, audience_departments=NULL, file_name=$5, updated_at=NOW()
+             department_id=$2, document_type=$3, title=$4, version=$5, status='published',
+             visibility_level=2, audience_departments=NULL, file_name=$6, updated_at=NOW()
            WHERE id=$1`
         : `UPDATE organization_documents SET
-             department_id=$2, document_type=$3, title=$4, version='1.1', status='published',
-             visibility_level=2, file_name=$5, updated_at=NOW()
+             department_id=$2, document_type=$3, title=$4, version=$5, status='published',
+             visibility_level=2, file_name=$6, updated_at=NOW()
            WHERE id=$1`,
-      [row.id, department.id, doc.documentType, doc.title, doc.fileName]
+      [row.id, department.id, doc.documentType, doc.title, version, doc.fileName]
     );
     console.log(`Updated ${doc.reference} → ${doc.department} id=${row.id}`);
   }
 
+  fs.mkdirSync(uploadsDir, { recursive: true });
+  const stored = `${Date.now()}-${crypto.randomBytes(12).toString("hex")}${payload.ext}`;
   const same = (
     await client.query(`SELECT id FROM organization_document_versions WHERE document_id=$1 AND sha256=$2`, [
       row.id,
       sha256,
     ])
   ).rows[0];
-  const versionExists = (
-    await client.query(`SELECT id FROM organization_document_versions WHERE document_id=$1 AND version=$2`, [
+  const versionRow = (
+    await client.query(`SELECT id, stored_name FROM organization_document_versions WHERE document_id=$1 AND version=$2`, [
       row.id,
-      "1.1",
+      version,
     ])
   ).rows[0];
-  if (!same && !versionExists) {
-    fs.mkdirSync(uploadsDir, { recursive: true });
-    const stored = `${Date.now()}-${crypto.randomBytes(12).toString("hex")}.txt`;
-    fs.writeFileSync(path.join(uploadsDir, stored), buffer);
+  if (same && versionRow) {
+    console.log("  File version already present");
+    return;
+  }
+  if (!doc.generatePdf && versionRow) {
+    console.log("  File version already present");
+    return;
+  }
+  fs.writeFileSync(path.join(uploadsDir, stored), buffer);
+  if (versionRow) {
+    await client.query(
+      `UPDATE organization_document_versions
+       SET original_name=$2, stored_name=$3, mime_type=$4, file_size=$5, sha256=$6, uploaded_by=$7
+       WHERE id=$1`,
+      [versionRow.id, doc.fileName, stored, payload.mime, buffer.length, sha256, actorId]
+    );
+    console.log(`  Replaced ${stored}`);
+  } else {
     await client.query(
       `INSERT INTO organization_document_versions
         (document_id,version,original_name,stored_name,mime_type,file_size,sha256,uploaded_by)
-       VALUES ($1,'1.1',$2,$3,'text/plain; charset=utf-8',$4,$5,$6)`,
-      [row.id, doc.fileName, stored, buffer.length, sha256, actorId]
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [row.id, version, doc.fileName, stored, payload.mime, buffer.length, sha256, actorId]
     );
-    await client.query(`UPDATE organization_documents SET file_name=$1, version='1.1', updated_at=NOW() WHERE id=$2`, [
-      doc.fileName,
-      row.id,
-    ]);
     console.log(`  Attached ${stored}`);
-  } else {
-    console.log("  File version already present");
   }
 }
 

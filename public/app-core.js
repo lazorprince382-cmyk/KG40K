@@ -1434,13 +1434,20 @@ function standingReportHref(kind,download=false){
 function standingReportsSection() {
   const month=standingReportMonth();
   const max=(()=>{try{return new Date().toLocaleDateString("en-CA",{timeZone:"Africa/Kampala"}).slice(0,7);}catch(_){return month;}})();
-  const reports=[["savings","Personal savings standing","Available/paid up on the viewing date vs expected at month end"],["welfare","Welfare standings","UGX 25,000 each month from the month they joined through this month"],["loans","Loans full analysis","Current facilities, outstanding balances and repayment standing"]];
-  return `<section class="standing-reports-block"><div class="exec-panel-head"><div><h3>Standing reports (PDF)</h3><p>Personal savings, welfare and loans only. Pick a month: paid-up uses the viewing date, expected uses the last day of that month.</p></div>
+  const reports=[
+    ["savings","Personal savings standing","Available/paid up on the viewing date vs expected at month end"],
+    ["welfare","Welfare standings","UGX 25,000 each month from the month they joined through this month"],
+    ["loans","Loans full analysis","Current facilities, outstanding balances and repayment standing"],
+    ["company","Company standing","UAP, Centenary, current welfare money, money in loans, and the total"],
+    ["assistance","Welfare assistance register","Designed PDF of people already given funeral or marriage support"],
+    ["active-loans","Active loans and installments","When the loan was requested, how/when each installment was paid, principal and interest paid and remaining"]
+  ];
+  return `<section class="standing-reports-block"><div class="exec-panel-head"><div><h3>Standing reports (PDF)</h3><p>Pick a month for savings and welfare. Company standing, assistance and active loans use live books.</p></div>
       <label class="standing-report-month">Report month<input type="month" min="2024-06" max="${max}" value="${month}" data-standing-report-month></label></div>
-    <div class="exec-report-grid">${reports.map(([kind,name,desc],i)=>`<article><span class="${["blue","green","violet"][i]}">${icons.file}</span><div><h3>${name}</h3><p>${desc}</p><small>PDF · ${escapeHtml(month)}</small></div><div class="exec-report-actions"><button type="button" data-standing-report-view="${kind}">${icons.eye}View PDF</button><a class="button secondary" href="${standingReportHref(kind,true)}" download>${icons.download}Download</a></div></article>`).join("")}</div></section>`;
+    <div class="exec-report-grid">${reports.map(([kind,name,desc],i)=>`<article><span class="${["blue","green","violet","orange","teal","blue"][i]}">${icons.file}</span><div><h3>${name}</h3><p>${desc}</p><small>PDF · ${escapeHtml(month)}</small></div><div class="exec-report-actions"><button type="button" data-standing-report-view="${kind}">${icons.eye}View PDF</button><a class="button secondary" href="${standingReportHref(kind,true)}" download>${icons.download}Download</a></div></article>`).join("")}</div></section>`;
 }
 function openStandingReport(kind){
-  const titles={savings:"Personal savings standing",welfare:"Welfare standings",loans:"Loans full analysis"};
+  const titles={savings:"Personal savings standing",welfare:"Welfare standings",loans:"Loans full analysis",company:"Company standing",assistance:"Welfare assistance register","active-loans":"Active loans and installments"};
   const href=standingReportHref(kind,false);
   openSecureContentViewer(href,`${titles[kind]||"Standing report"} · ${standingReportMonth()}`,{downloadHref:standingReportHref(kind,true),replaceModal:false});
 }
