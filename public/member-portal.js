@@ -230,7 +230,7 @@
       items.push({tone:activeLoan.inDangerPeriod||activeLoan.status==="overdue"?"danger":"info",title:`Next loan repayment · ${activeLoan.reference}`,detail:`${money(activeLoan.nextPaymentAmount)} due ${date(activeLoan.nextDueDate)}`,action:"member-loans",label:"Pay loan"});
     }
     const fy=c.financialYearProgress;
-    const scheduleShort=Number(fy?.savingsSchedule?.fyShortBy ?? fy?.fyShortBy ?? 0);
+    const scheduleShort=Number(fy?.savingsSchedule?.shortBy ?? fy?.fyShortBy ?? 0);
     if(fy&&scheduleShort>0.5){
       items.push({tone:"info",title:`${fy.fiscalYear} savings still short`,detail:`${money(scheduleShort)} needed to stay on target`,action:"member-savings",label:""});
     }

@@ -98,7 +98,7 @@ function buildSchedule(settings, { savings, welfareSinceBenchmark, joinMonth }) 
     monthlyTarget,
     savingsBalance: contributed,
     requiredByMonthEnd,
-    shortBy: joinedDuringYear ? fyShortBy : Math.max(0, -variance),
+    shortBy: Math.max(0, -variance),
     surplus: Math.max(0, variance),
     yearEndLabel: monthLabel(yearEndMonth),
     yearEndTarget,

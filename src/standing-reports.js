@@ -7,6 +7,7 @@ const NAVY = "#1F4E79";
 const BLUE = "#2E75B6";
 const CYAN = "#00B0F0";
 const CYAN_CELL = "#B7DEE8";
+const SKY = "#A6E3F5";
 const RED = "#C00000";
 const RED_CELL = "#FF6B6B";
 const GREEN_CELL = "#C6EFCE";
@@ -206,8 +207,8 @@ function cellText(doc, text, x, y, w, h, { align = "left", color = "#0B1F3B", bo
 }
 
 function drawHeader(doc, title) {
-  doc.font("Helvetica-Bold").fontSize(16).fillColor(NAVY).text("KASANGATI G40 KWAGALANA LIMITED", 28, 18, { align: "center" });
-  doc.font("Helvetica-Bold").fontSize(13).fillColor(BLUE).text(title, 28, 38, { align: "center" });
+  doc.font("Helvetica-Bold").fontSize(13).fillColor(NAVY).text("KASANGATI G40 KWAGALANA LIMITED", 18, 16, { align: "center" });
+  doc.font("Helvetica-Bold").fontSize(11).fillColor(BLUE).text(title, 18, 32, { align: "center" });
 }
 
 function ensureRowSpace(doc, y, rowH) {
@@ -225,18 +226,18 @@ function drawSavingsStyleTable(doc, rows, {
   toDate = "",
   unpaidLabel = "UNPAID SAVINGS :",
 } = {}) {
-  const rowH = 16;
-  const headH = 32;
+  const rowH = 18;
+  const headH = 36;
   const cols = [
-    { key: "no", label: "No.", w: 40, align: "center", header: CYAN, body: WHITE, text: "#0B1F3B" },
-    { key: "name", label: "Client Name", w: 248, align: "left", header: CYAN, body: CYAN_CELL, text: "#0B1F3B" },
-    { key: "paid", label: paidLabel, w: 150, align: "right", header: CYAN, body: CYAN_CELL, text: "#0B1F3B" },
-    { key: "expected", label: expectedLabel, w: 150, align: "right", header: NAVY, body: WHITE, text: "#0B1F3B" },
-    { key: "variance", label: "Deficit/Surplus", w: 176, align: "right", header: RED, body: WHITE, text: "#0B1F3B" },
+    { key: "no", label: "No.", w: 32, align: "center", header: CYAN, body: WHITE, text: "#0B1F3B" },
+    { key: "name", label: "Client Name", w: 168, align: "left", header: CYAN, body: SKY, text: "#0B1F3B" },
+    { key: "paid", label: paidLabel, w: 100, align: "right", header: CYAN, body: CYAN_CELL, text: "#0B1F3B" },
+    { key: "expected", label: expectedLabel, w: 100, align: "right", header: NAVY, body: WHITE, text: "#0B1F3B" },
+    { key: "variance", label: "Deficit/Surplus", w: 110, align: "right", header: RED, body: WHITE, text: "#0B1F3B" },
   ];
   const tableW = cols.reduce((sum, c) => sum + c.w, 0);
   const x0 = (doc.page.width - tableW) / 2;
-  let y = 58;
+  let y = 50;
   fillRect(doc, x0, y, tableW, rowH, NAVY);
   cellText(doc, summaryTitle, x0, y, tableW, rowH, { align: "center", color: WHITE, bold: true, size: 10 });
   y += rowH;
@@ -264,6 +265,7 @@ function drawSavingsStyleTable(doc, rows, {
     cols.forEach((col, i) => {
       let bg = col.body;
       let color = col.text;
+      if (col.key === "name") bg = index % 2 === 0 ? SKY : WHITE;
       if (col.key === "variance") {
         bg = deficit ? RED_CELL : surplus ? GREEN_CELL : WHITE;
         color = deficit ? WHITE : surplus ? GREEN_TEXT : "#0B1F3B";
@@ -311,20 +313,20 @@ function drawSavingsStyleTable(doc, rows, {
 }
 
 function drawLoanTable(doc, rows) {
-  const rowH = 15;
+  const rowH = 16;
   const cols = [
-    { w: 28, label: "No." },
-    { w: 150, label: "Member" },
-    { w: 88, label: "Loan" },
-    { w: 110, label: "Product" },
-    { w: 78, label: "Amount" },
-    { w: 78, label: "Outstanding" },
-    { w: 70, label: "Status" },
-    { w: 80, label: "Next due" },
+    { w: 26, label: "No." },
+    { w: 108, label: "Member" },
+    { w: 72, label: "Loan" },
+    { w: 78, label: "Product" },
+    { w: 62, label: "Amount" },
+    { w: 68, label: "Outstanding" },
+    { w: 52, label: "Status" },
+    { w: 62, label: "Next due" },
   ];
   const tableW = cols.reduce((s, c) => s + c.w, 0);
   const x0 = (doc.page.width - tableW) / 2;
-  let y = 86;
+  let y = 50;
   let x = x0;
   cols.forEach((col) => {
     fillRect(doc, x, y, col.w, rowH + 4, NAVY);
@@ -347,7 +349,7 @@ function drawLoanTable(doc, rows) {
     ];
     x = x0;
     cols.forEach((col, i) => {
-      const bg = overdue && i >= 5 ? RED_CELL : i === 1 ? CYAN_CELL : WHITE;
+      const bg = overdue && i >= 5 ? RED_CELL : i === 1 ? (index % 2 === 0 ? SKY : WHITE) : WHITE;
       fillRect(doc, x, y, col.w, rowH, bg);
       doc.strokeColor(LINE).lineWidth(0.3).rect(x, y, col.w, rowH).stroke();
       cellText(doc, values[i], x, y, col.w, rowH, { align: i >= 4 ? "right" : "left", size: 7, bold: i >= 4 });
@@ -366,7 +368,7 @@ function drawLoanTable(doc, rows) {
 async function buildStandingPdf(kind, { asOf } = {}) {
   const parsed = parseAsOf(asOf);
   const label = asOfLabel(parsed);
-  const doc = new PDFDocument({ size: "A4", layout: "landscape", margin: 24, bufferPages: true, info: { Title: `Kasangati G40 ${kind} report` } });
+  const doc = new PDFDocument({ size: "A4", layout: "portrait", margin: 18, bufferPages: true, info: { Title: `Kasangati G40 ${kind} report` } });
   const chunks = [];
   doc.on("data", (chunk) => chunks.push(chunk));
   const done = new Promise((resolve, reject) => {
