@@ -6508,27 +6508,31 @@ async function canAccessStandingReports(user){
   }
   return false;
 }
-app.get("/api/standing-reports/:kind.pdf",auth,asyncRoute(async(req,res)=>{
-  const kind=String(req.params.kind||"").toLowerCase();
+async function sendStandingReport(req,res){
+  const kind=String(req.params.kind||"").toLowerCase().replace(/\.pdf$/,"");
   if(!["savings","welfare","loans"].includes(kind)) return res.status(400).json({error:"Choose savings, welfare or loans"});
   if(!await canAccessStandingReports(req.user)) return res.status(403).json({error:"Standing report access denied"});
-  const pdf=await buildStandingPdf(kind);
-  const filename=`kasangati-g40-${kind}-standing.pdf`;
+  const asOf=String(req.query.asOf||"").trim();
+  const download=req.query.download==="1"||/\.pdf$/i.test(req.path);
+  let pdf;
+  try{
+    pdf=await buildStandingPdf(kind,{asOf});
+  }catch(error){
+    console.error("Standing report failed:",error);
+    return res.status(500).json({error:error.message||"Standing report could not be generated"});
+  }
+  const month=String(asOf||"").replace(/[^\d-]/g,"").slice(0,7);
+  const filename=`kasangati-g40-${kind}${month?`-${month}`:""}.pdf`;
   res.set("X-Document-Mime-Type","application/pdf");
-  res.type("application/pdf");
-  res.set("Content-Disposition",`attachment; filename="${filename}"`);
+  res.set("Cache-Control","no-store");
+  res.set("Content-Disposition",`${download?"attachment":"inline"}; filename="${filename}"`);
+  if(download) res.type("application/pdf");
+  else res.type("application/octet-stream");
   res.send(pdf);
-}));
-app.get("/api/standing-reports/:kind/content",auth,asyncRoute(async(req,res)=>{
-  const kind=String(req.params.kind||"").toLowerCase();
-  if(!["savings","welfare","loans"].includes(kind)) return res.status(400).json({error:"Choose savings, welfare or loans"});
-  if(!await canAccessStandingReports(req.user)) return res.status(403).json({error:"Standing report access denied"});
-  const pdf=await buildStandingPdf(kind);
-  res.set("X-Document-Mime-Type","application/pdf");
-  res.type("application/octet-stream");
-  res.set("Content-Disposition",`inline; filename="kasangati-g40-${kind}-standing.pdf"`);
-  res.send(pdf);
-}));
+}
+app.get("/api/standing-reports/:kind/content",auth,asyncRoute(sendStandingReport));
+app.get("/api/standing-reports/:kind.pdf",auth,asyncRoute(sendStandingReport));
+app.get("/api/standing-reports/:kind",auth,asyncRoute(sendStandingReport));
 
 app.get("/api/department-reports/:scope.:format",auth,asyncRoute(async(req,res)=>{
   const scope=String(req.params.scope).toLowerCase(),format=String(req.params.format).toLowerCase();

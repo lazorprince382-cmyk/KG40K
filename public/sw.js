@@ -1,7 +1,7 @@
-const CACHE="kasangati-v281";
+const CACHE="kasangati-v282";
 const SHELL=[
-  "/","/index.html","/styles.css?v=150","/brand-theme.css?v=64","/brand-no-green.css?v=19","/legal-member-exit.css?v=2","/app.js?v=262",
-  "/app-core.js?v=249","/department-theme.js?v=64","/department-core.js?v=94",
+  "/","/index.html","/styles.css?v=150","/brand-theme.css?v=64","/brand-no-green.css?v=20","/legal-member-exit.css?v=2","/app.js?v=263",
+  "/app-core.js?v=250","/department-theme.js?v=64","/department-core.js?v=94",
   "/audit-dashboard.js?v=82","/audit-modules.js?v=63","/welfare-module.js?v=99",
   "/legal-module.js?v=96","/legal-biodata-module.js?v=71","/legal-family-ui.js?v=2","/legal-member-exit-ui.js?v=2",
   "/legal-registration-module.js?v=64","/supervisory-module.js?v=82","/department-events.js?v=63",

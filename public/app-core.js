@@ -1424,14 +1424,25 @@ async function executiveProjectAction(id,action){
   if(action!=="comment"&&action!=="escalate"&&!await confirmDialog(`${action} this project? This Executive decision will be permanently audited.`))return;
   try{await api(`/api/executive/projects/${id}/actions`,{method:"POST",body:JSON.stringify({action,comment,targetDepartment})});closeModal();state.executive=await api("/api/executive/command-center");render();toast(`Executive project action recorded: ${action}.`);}catch(error){toast(error.message);}
 }
+function standingReportMonth(){
+  if(state.standingReportMonth)return state.standingReportMonth;
+  try{return new Date().toLocaleDateString("en-CA",{timeZone:"Africa/Kampala"}).slice(0,7);}catch(_){return new Date().toISOString().slice(0,7);}
+}
+function standingReportHref(kind,download=false){
+  return `/api/standing-reports/${kind}?asOf=${encodeURIComponent(standingReportMonth())}${download?"&download=1":""}`;
+}
 function standingReportsSection() {
-  const reports=[["savings","Personal savings standing","Excel-style available vs expected, deficit in red and surplus in green"],["welfare","Welfare standings","UGX 25,000 a month since June 2024 — live standing as of today"],["loans","Loans full analysis","Current facilities, outstanding balances and repayment standing"]];
-  return `<section class="standing-reports-block"><div class="exec-panel-head"><div><h3>Current standings (PDF)</h3><p>View in the system as PDF, or download the live figures. Colours match the monthly personal-savings sheet.</p></div></div>
-    <div class="exec-report-grid">${reports.map(([kind,name,desc],i)=>`<article><span class="${["blue","green","violet"][i]}">${icons.file}</span><div><h3>${name}</h3><p>${desc}</p><small>Generated from live records · PDF</small></div><div class="exec-report-actions"><button type="button" data-standing-report-view="${kind}">${icons.eye}View PDF</button><a class="button secondary" href="/api/standing-reports/${kind}.pdf" download>${icons.download}Download</a></div></article>`).join("")}</div></section>`;
+  const month=standingReportMonth();
+  const max=(()=>{try{return new Date().toLocaleDateString("en-CA",{timeZone:"Africa/Kampala"}).slice(0,7);}catch(_){return month;}})();
+  const reports=[["savings","Personal savings standing","Available vs expected at the selected month end"],["welfare","Welfare standings","UGX 25,000 a month since June 2024, as at the selected month"],["loans","Loans full analysis","Facilities and outstanding balances as at the selected month"]];
+  return `<section class="standing-reports-block"><div class="exec-panel-head"><div><h3>Monthly standing reports (PDF)</h3><p>Pick a month to see what each member was supposed to hold at that month end, then view or download the PDF.</p></div>
+      <label class="standing-report-month">Report month<input type="month" min="2024-06" max="${max}" value="${month}" data-standing-report-month></label></div>
+    <div class="exec-report-grid">${reports.map(([kind,name,desc],i)=>`<article><span class="${["blue","green","violet"][i]}">${icons.file}</span><div><h3>${name}</h3><p>${desc}</p><small>PDF · ${escapeHtml(month)}</small></div><div class="exec-report-actions"><button type="button" data-standing-report-view="${kind}">${icons.eye}View PDF</button><a class="button secondary" href="${standingReportHref(kind,true)}" download>${icons.download}Download</a></div></article>`).join("")}</div></section>`;
 }
 function openStandingReport(kind){
   const titles={savings:"Personal savings standing",welfare:"Welfare standings",loans:"Loans full analysis"};
-  openSecureContentViewer(`/api/standing-reports/${kind}/content`,titles[kind]||"Standing report",{downloadHref:`/api/standing-reports/${kind}.pdf`,replaceModal:false});
+  const href=standingReportHref(kind,false);
+  openSecureContentViewer(href,`${titles[kind]||"Standing report"} · ${standingReportMonth()}`,{downloadHref:standingReportHref(kind,true),replaceModal:false});
 }
 function executiveReportsView() {
   const reports=[["Governance Structure Report","Board, EXCO and committee appointments from the Executive Memo"],["FY2026 Historical Financial Statements","Imported draft statements for the year ended 30 June 2026"],["Financial Report","Finance income, expenditure and budget"],["Loan Report","Savings, loans, defaults and recovery"],["Investment Report","Project performance and expected returns"],["Welfare Report","Fund health and support requests"],["Audit Report","Findings, controls and resolution"],["Supervisory Report","Recommendations and departmental follow-up"],["Legal Report","Cases, policies, contracts and alerts"],["Department Performance Report","Performance against organizational targets"],["Executive Report","Complete command-center report"],["Annual Report","Annual organization performance pack"]];
@@ -4319,6 +4330,7 @@ function bind() {
   document.querySelectorAll("[data-finance-account-delete]").forEach(el=>el.addEventListener("click",()=>deactivateFinanceAccount(el.dataset.financeAccountDelete)));
   document.querySelectorAll("[data-finance-budget-delete]").forEach(el=>el.addEventListener("click",()=>deleteFinanceBudget(el.dataset.financeBudgetDelete)));
   document.querySelectorAll("[data-procurement-advance]").forEach(el=>el.addEventListener("click",()=>advanceProcurement(el.dataset.procurementAdvance)));
+  document.querySelectorAll("[data-standing-report-month]").forEach(el=>el.addEventListener("change",()=>{state.standingReportMonth=el.value;render();}));
   document.querySelectorAll("[data-standing-report-view]").forEach(el=>el.addEventListener("click",()=>openStandingReport(el.dataset.standingReportView)));
   document.querySelectorAll("[data-finance-report]").forEach(el=>el.addEventListener("click",()=>downloadFinanceReport(el.dataset.financeReport,el.dataset.format||"excel")));
   document.querySelectorAll("[data-finance-report-preview]").forEach(el=>el.addEventListener("click",()=>openOperationalReportPreview("finance",el.dataset.financeReportPreview)));

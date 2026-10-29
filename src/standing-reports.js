@@ -1,8 +1,7 @@
 "use strict";
 const PDFDocument = require("pdfkit");
-const { query, one } = require("./db");
-const { loadScheduleSettings, expectedAtEndOf, monthIndex, monthLabel } = require("./savings-schedule");
-const { loadWelfareStanding } = require("./welfare-standing");
+const { query } = require("./db");
+const { loadScheduleSettings, expectedAtEndOf, monthIndex, monthLabel, monthKey } = require("./savings-schedule");
 
 const NAVY = "#1F4E79";
 const BLUE = "#2E75B6";
@@ -14,6 +13,8 @@ const GREEN_CELL = "#C6EFCE";
 const GREEN_TEXT = "#006100";
 const WHITE = "#FFFFFF";
 const LINE = "#8EA8C3";
+const WELFARE_START = "2024-06";
+const VICENT_START = "2026-07";
 
 function kampalaNow() {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -26,13 +27,38 @@ function kampalaNow() {
   return { year: Number(pick("year")), month: Number(pick("month")), day: Number(pick("day")) };
 }
 
-function asOfLabel(date = new Date()) {
-  const k = kampalaNow();
-  const d = new Date(Date.UTC(k.year, k.month - 1, k.day));
-  const day = d.getUTCDate();
-  const ord = ["th", "st", "nd", "rd"][day % 100 > 10 && day % 100 < 14 ? 0 : day % 10] || "th";
-  const month = d.toLocaleDateString("en-GB", { month: "long", timeZone: "UTC" });
-  return `${day}${ord} ${month} ${d.getUTCFullYear()}`;
+function parseAsOf(value) {
+  const now = kampalaNow();
+  const match = /^(\d{4})-(\d{2})$/.exec(String(value || "").trim());
+  let year = now.year;
+  let month = now.month;
+  if (match) {
+    year = Number(match[1]);
+    month = Number(match[2]);
+  }
+  if (year < 2024) { year = 2024; month = 6; }
+  const currentIndex = now.year * 12 + (now.month - 1);
+  const index = Math.min(year * 12 + (month - 1), currentIndex);
+  year = Math.floor(index / 12);
+  month = (index % 12) + 1;
+  const isCurrent = index === currentIndex;
+  const day = isCurrent ? now.day : new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const asOfMonth = `${year}-${String(month).padStart(2, "0")}`;
+  const asOfDate = `${asOfMonth}-${String(day).padStart(2, "0")}`;
+  return { year, month, day, index, asOfMonth, asOfDate, isCurrent };
+}
+
+function ordinalDay(day) {
+  const v = day % 100;
+  if (v > 10 && v < 14) return "th";
+  return ["th", "st", "nd", "rd"][day % 10] || "th";
+}
+
+function asOfLabel(asOf) {
+  const parsed = typeof asOf === "string" || !asOf ? parseAsOf(asOf) : asOf;
+  const monthName = new Date(Date.UTC(parsed.year, parsed.month - 1, 1))
+    .toLocaleDateString("en-GB", { month: "long", timeZone: "UTC" });
+  return `${parsed.day}${ordinalDay(parsed.day)} ${monthName} ${parsed.year}`;
 }
 
 function money(value) {
@@ -43,62 +69,92 @@ function isVicent(name) {
   return /vicent|vincent/i.test(name || "") && /gumisiriza/i.test(name || "");
 }
 
-async function loadPersonalSavingsRows() {
+function ascii(value) {
+  return String(value ?? "").replace(/[^\x20-\x7E]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+async function loadPersonalSavingsRows(asOf) {
+  const parsed = parseAsOf(asOf);
   const settings = await loadScheduleSettings();
   const members = (
     await query(
       `SELECT m.id, m.full_name AS name, m.member_number AS "memberNumber",
-         m.savings_balance::float AS savings, to_char(m.joined_at,'YYYY-MM') AS "joinMonth",
+         m.savings_balance::float AS savings,
+         to_char(m.joined_at,'YYYY-MM') AS "joinMonth",
+         COALESCE((SELECT SUM(t.amount) FROM transactions t
+           WHERE t.member_id=m.id AND t.status IN ('completed','verified','approved')
+             AND t.type='Savings deposit'
+             AND COALESCE(t.verified_at,t.created_at)::date > $1::date),0)::float AS "depositsAfter",
+         COALESCE((SELECT SUM(t.amount) FROM transactions t
+           WHERE t.member_id=m.id AND t.status IN ('completed','verified','approved')
+             AND t.type='Withdrawal'
+             AND COALESCE(t.verified_at,t.created_at)::date > $1::date),0)::float AS "withdrawalsAfter",
          COALESCE((SELECT SUM(c.amount) FROM welfare_contributions c
            WHERE c.member_id=m.id AND c.status IN ('verified','completed','recorded') AND c.amount>0
-             AND c.contribution_type NOT ILIKE '%standing%' AND COALESCE(c.reference,'') NOT LIKE 'WEL-STANDING-%'
-             AND c.contribution_date > $1::date),0)::float AS "welfareSinceBenchmark"
+             AND (c.payment_method ILIKE '%savings%' OR COALESCE(c.reference,'') LIKE 'WCON-AUTO-%'
+               OR COALESCE(c.reference,'') LIKE 'WCON-CATCHUP-%')
+             AND c.contribution_date > $1::date),0)::float AS "welfareFromSavingsAfter"
        FROM members m
        WHERE m.deleted_at IS NULL AND m.status='active'
        ORDER BY m.full_name`,
-      [settings.benchmarkDate]
+      [parsed.asOfDate]
     )
   ).rows;
   return members
     .map((m) => {
       const joinMonth = m.joinMonth ? monthIndex(m.joinMonth) : null;
-      const paid = Number(m.savings || 0);
-      const expected = expectedAtEndOf(settings, joinMonth, settings.currentMonth);
+      const current = Number(m.savings || 0);
+      const paid = parsed.isCurrent
+        ? current
+        : current - Number(m.depositsAfter || 0) + Number(m.withdrawalsAfter || 0) + Number(m.welfareFromSavingsAfter || 0);
+      const expected = expectedAtEndOf(settings, joinMonth, parsed.index);
       const variance = paid - expected;
-      return {
-        name: m.name,
-        memberNumber: m.memberNumber,
-        paid,
-        expected,
-        variance,
-      };
+      return { name: m.name, memberNumber: m.memberNumber, paid, expected, variance };
     })
     .sort((a, b) => a.variance - b.variance || a.name.localeCompare(b.name));
 }
 
-async function loadWelfareRows() {
-  const standing = await loadWelfareStanding();
-  return (standing.byMember || [])
-    .filter((row) => !row.excluded)
+async function loadWelfareRows(asOf) {
+  const parsed = parseAsOf(asOf);
+  const monthly = 25000;
+  const members = (
+    await query(
+      `SELECT m.id, m.full_name AS member, m.member_number AS "memberNumber",
+         COALESCE(SUM(c.amount) FILTER (WHERE c.contribution_date <= $1::date),0)::float AS paid
+       FROM members m
+       LEFT JOIN welfare_contributions c
+         ON c.member_id=m.id AND c.status IN ('verified','completed','recorded') AND c.amount>0
+       WHERE m.deleted_at IS NULL AND m.status='active'
+       GROUP BY m.id
+       ORDER BY m.full_name`,
+      [parsed.asOfDate]
+    )
+  ).rows;
+  return members
     .map((row) => {
-      const paid = Number(row.contributedSince || row.standingBalance || 0);
-      const expected = row.isVicent ? standing.vicentTarget || paid : Number(standing.standardGrossTarget || 700000);
+      const vicent = isVicent(row.member);
+      const start = monthIndex(vicent ? VICENT_START : WELFARE_START);
+      const months = Math.max(0, parsed.index - start + 1);
+      const expected = months * monthly;
+      const paid = Number(row.paid || 0);
       return {
         name: row.member,
         memberNumber: row.memberNumber,
         paid,
         expected,
         variance: paid - expected,
-        current: Number(row.currentBalance || 0),
+        isVicent: vicent,
       };
     })
     .sort((a, b) => a.variance - b.variance || a.name.localeCompare(b.name));
 }
 
-async function loadLoanRows() {
+async function loadLoanRows(asOf) {
+  const parsed = parseAsOf(asOf);
   const rows = (
     await query(
-      `SELECT l.reference, m.full_name AS member, m.member_number AS "memberNumber", p.name AS product,
+      `SELECT l.reference, m.full_name AS member, m.member_number AS "memberNumber",
+         COALESCE(p.name,'Loan') AS product,
          l.amount::float, l.balance::float, l.status, l.due_date AS "dueDate",
          l.term_months AS "termMonths",
          COALESCE((SELECT SUM(s.total_due) FROM loan_repayment_schedule s WHERE s.loan_id=l.id), l.amount)::float AS "totalDue",
@@ -106,9 +162,11 @@ async function loadLoanRows() {
          (SELECT MIN(s.due_date) FROM loan_repayment_schedule s WHERE s.loan_id=l.id AND s.status<>'paid') AS "nextDue"
        FROM loans l
        JOIN members m ON m.id=l.member_id
-       JOIN loan_products p ON p.id=l.product_id
+       LEFT JOIN loan_products p ON p.id=l.product_id
        WHERE m.deleted_at IS NULL
-       ORDER BY CASE l.status WHEN 'overdue' THEN 0 WHEN 'active' THEN 1 ELSE 2 END, m.full_name, l.id`
+         AND COALESCE(l.created_at)::date <= $1::date
+       ORDER BY CASE l.status WHEN 'overdue' THEN 0 WHEN 'active' THEN 1 ELSE 2 END, m.full_name, l.id`,
+      [parsed.asOfDate]
     )
   ).rows;
   return rows.map((row) => ({
@@ -118,35 +176,51 @@ async function loadLoanRows() {
 }
 
 function fillRect(doc, x, y, w, h, color) {
-  doc.save().fillColor(color).rect(x, y, w, h).fill().restore();
+  doc.save();
+  doc.fillColor(color);
+  doc.rect(x, y, w, h);
+  doc.fill();
+  doc.restore();
 }
 
 function cellText(doc, text, x, y, w, h, { align = "left", color = "#0B1F3B", bold = false, size = 8 } = {}) {
+  const safe = ascii(text);
   doc.fillColor(color).font(bold ? "Helvetica-Bold" : "Helvetica").fontSize(size);
-  doc.text(String(text ?? ""), x + 4, y + (h - size) / 2 - 1, { width: w - 8, align, lineBreak: false });
+  doc.text(safe, x + 3, y + Math.max(2, (h - size) / 2), {
+    width: Math.max(8, w - 6),
+    align,
+    height: Math.max(size, h - 2),
+    ellipsis: true,
+  });
 }
 
 function drawHeader(doc, title, subtitle) {
   doc.font("Helvetica-Bold").fontSize(16).fillColor(NAVY).text("KASANGATI G40 KWAGALANA LIMITED", 28, 22, { align: "center" });
   doc.font("Helvetica-Bold").fontSize(13).fillColor(BLUE).text(title, 28, 42, { align: "center" });
-  doc.font("Helvetica-Bold").fontSize(11).fillColor(NAVY).text(subtitle, 28, 60, { align: "center" });
+  doc.font("Helvetica-Bold").fontSize(10).fillColor(NAVY).text(subtitle, 28, 60, { align: "center" });
+}
+
+function ensureRowSpace(doc, y, rowH) {
+  if (y + rowH <= doc.page.height - 36) return y;
+  doc.addPage();
+  return 36;
 }
 
 function drawSavingsStyleTable(doc, rows, paidLabel, expectedLabel, summaryTitle = "Client Savings Summary", unpaidLabel = "UNPAID SAVINGS :") {
-  const startY = 86;
   const rowH = 16;
   const cols = [
     { key: "no", label: "No.", w: 36, align: "center" },
-    { key: "name", label: "Client Name", w: 250, align: "left", fill: CYAN_CELL },
+    { key: "name", label: "Client Name", w: 250, align: "left" },
     { key: "paid", label: paidLabel, w: 150, align: "right", header: CYAN },
     { key: "expected", label: expectedLabel, w: 150, align: "right", header: NAVY },
     { key: "variance", label: "Deficit/Surplus", w: 178, align: "right", header: RED },
   ];
   const tableW = cols.reduce((sum, c) => sum + c.w, 0);
   const x0 = (doc.page.width - tableW) / 2;
-  fillRect(doc, x0, startY, tableW, rowH, NAVY);
-  cellText(doc, summaryTitle, x0, startY, tableW, rowH, { align: "center", color: WHITE, bold: true, size: 10 });
-  let y = startY + rowH;
+  let y = 86;
+  fillRect(doc, x0, y, tableW, rowH, NAVY);
+  cellText(doc, summaryTitle, x0, y, tableW, rowH, { align: "center", color: WHITE, bold: true, size: 10 });
+  y += rowH;
   let x = x0;
   cols.forEach((col) => {
     fillRect(doc, x, y, col.w, rowH + 4, col.header || CYAN);
@@ -155,16 +229,11 @@ function drawSavingsStyleTable(doc, rows, paidLabel, expectedLabel, summaryTitle
   });
   y += rowH + 4;
   rows.forEach((row, index) => {
+    y = ensureRowSpace(doc, y, rowH);
     const deficit = Number(row.variance) < -0.5;
     const surplus = Number(row.variance) > 0.5;
+    const values = [index + 1, row.name, money(row.paid), money(row.expected), money(row.variance)];
     x = x0;
-    const values = [
-      index + 1,
-      row.name,
-      money(row.paid),
-      money(row.expected),
-      money(row.variance),
-    ];
     cols.forEach((col, i) => {
       let bg = WHITE;
       let color = "#0B1F3B";
@@ -180,6 +249,7 @@ function drawSavingsStyleTable(doc, rows, paidLabel, expectedLabel, summaryTitle
     });
     y += rowH;
   });
+  y = ensureRowSpace(doc, y, rowH * 2 + 8);
   const totalPaid = rows.reduce((s, r) => s + Number(r.paid || 0), 0);
   const totalExpected = rows.reduce((s, r) => s + Number(r.expected || 0), 0);
   const totalVar = totalPaid - totalExpected;
@@ -204,7 +274,6 @@ function drawSavingsStyleTable(doc, rows, paidLabel, expectedLabel, summaryTitle
 }
 
 function drawLoanTable(doc, rows) {
-  const startY = 86;
   const rowH = 15;
   const cols = [
     { w: 28, label: "No." },
@@ -218,7 +287,7 @@ function drawLoanTable(doc, rows) {
   ];
   const tableW = cols.reduce((s, c) => s + c.w, 0);
   const x0 = (doc.page.width - tableW) / 2;
-  let y = startY;
+  let y = 86;
   let x = x0;
   cols.forEach((col) => {
     fillRect(doc, x, y, col.w, rowH + 4, NAVY);
@@ -227,11 +296,8 @@ function drawLoanTable(doc, rows) {
   });
   y += rowH + 4;
   rows.forEach((row, index) => {
-    if (y > doc.page.height - 40) {
-      doc.addPage();
-      y = 36;
-    }
-    const overdue = String(row.status) === "overdue" || Number(row.outstanding) > 0 && row.nextDue && new Date(row.nextDue) < new Date();
+    y = ensureRowSpace(doc, y, rowH);
+    const overdue = String(row.status) === "overdue" || (Number(row.outstanding) > 0 && row.nextDue && new Date(row.nextDue) < new Date());
     const values = [
       index + 1,
       row.member,
@@ -240,7 +306,7 @@ function drawLoanTable(doc, rows) {
       money(row.amount),
       money(row.outstanding ?? row.balance),
       row.status,
-      row.nextDue ? new Date(row.nextDue).toLocaleDateString("en-GB") : "—",
+      row.nextDue ? new Date(row.nextDue).toLocaleDateString("en-GB") : "-",
     ];
     x = x0;
     cols.forEach((col, i) => {
@@ -252,41 +318,53 @@ function drawLoanTable(doc, rows) {
     });
     y += rowH;
   });
+  y = ensureRowSpace(doc, y, 24);
   const outstanding = rows.reduce((s, r) => s + Number(r.outstanding ?? r.balance ?? 0), 0);
   const disbursed = rows.filter((r) => ["active", "overdue"].includes(r.status)).reduce((s, r) => s + Number(r.amount || 0), 0);
   y += 10;
   doc.font("Helvetica-Bold").fontSize(9).fillColor(NAVY)
-    .text(`Active / overdue principal outstanding: UGX ${money(outstanding)}    Disbursed on active book: UGX ${money(disbursed)}    Facilities: ${rows.length}`, x0, y);
+    .text(`Outstanding: UGX ${money(outstanding)}    Active book: UGX ${money(disbursed)}    Facilities: ${rows.length}`, x0, y, { width: tableW });
 }
 
-async function buildStandingPdf(kind) {
-  const asOf = asOfLabel();
-  const doc = new PDFDocument({ size: "A4", layout: "landscape", margin: 24, info: { Title: `Kasangati G40 ${kind} report` } });
+async function buildStandingPdf(kind, { asOf } = {}) {
+  const parsed = parseAsOf(asOf);
+  const label = asOfLabel(parsed);
+  const expectedMonth = monthLabel(parsed.index);
+  const doc = new PDFDocument({ size: "A4", layout: "landscape", margin: 24, bufferPages: true, info: { Title: `Kasangati G40 ${kind} report` } });
   const chunks = [];
   doc.on("data", (chunk) => chunks.push(chunk));
   const done = new Promise((resolve, reject) => {
-    doc.on("end", resolve);
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
     doc.on("error", reject);
   });
-  if (kind === "savings") {
-    const rows = await loadPersonalSavingsRows();
-    drawHeader(doc, `Personal Savings Report as at ${asOf}`, "Client Savings Summary");
-    drawSavingsStyleTable(doc, rows, `Available / Paid up`, `Expected ${monthLabel(kampalaNow().year * 12 + kampalaNow().month - 1)}`);
-  } else if (kind === "welfare") {
-    const rows = await loadWelfareRows();
-    const standing = await loadWelfareStanding();
-    drawHeader(doc, `Welfare Standing Report as at ${asOf}`, `Expected UGX ${money(standing.standardGrossTarget)} since ${standing.sinceLabel}`);
-    drawSavingsStyleTable(doc, rows, "Contributed", "Expected", "Client Welfare Summary", "UNPAID WELFARE :");
-  } else {
-    const rows = await loadLoanRows();
-    drawHeader(doc, `Loans Analysis Report as at ${asOf}`, "Current facilities, outstanding balances and repayment standing");
-    drawLoanTable(doc, rows);
+  try {
+    if (kind === "savings") {
+      const rows = await loadPersonalSavingsRows(parsed.asOfMonth);
+      drawHeader(doc, `Personal Savings Report as at ${label}`, `Expected standing at the end of ${expectedMonth}`);
+      drawSavingsStyleTable(doc, rows, "Available / Paid up", `Expected ${expectedMonth}`);
+    } else if (kind === "welfare") {
+      const rows = await loadWelfareRows(parsed.asOfMonth);
+      const standard = rows.find((row) => !row.isVicent)?.expected || 0;
+      drawHeader(doc, `Welfare Standing Report as at ${label}`, `Expected UGX ${money(standard)} since June 2024`);
+      drawSavingsStyleTable(doc, rows, "Contributed", "Expected", "Client Welfare Summary", "UNPAID WELFARE :");
+    } else if (kind === "loans") {
+      const rows = await loadLoanRows(parsed.asOfMonth);
+      drawHeader(doc, `Loans Analysis Report as at ${label}`, "Facilities, outstanding balances and repayment standing");
+      drawLoanTable(doc, rows);
+    } else {
+      throw Object.assign(new Error("Unknown standing report"), { status: 400 });
+    }
+    doc.font("Helvetica").fontSize(8).fillColor("#607084")
+      .text(`Generated from Kasangati G40 Kwagalana records for ${label}.`, 28, doc.page.height - 24, { width: 700 });
+  } catch (error) {
+    try { doc.end(); } catch (_) { /* ignore */ }
+    throw error;
   }
-  doc.font("Helvetica").fontSize(8).fillColor("#607084")
-    .text("Generated from live Kasangati G40 Kwagalana records. View in-app as PDF.", 28, doc.page.height - 28, { align: "left" });
   doc.end();
-  await done;
-  return Buffer.concat(chunks);
+  return Promise.race([
+    done,
+    new Promise((_, reject) => setTimeout(() => reject(new Error("PDF generation timed out")), 20000)),
+  ]);
 }
 
 const TITLES = {
@@ -300,7 +378,9 @@ module.exports = {
   loadPersonalSavingsRows,
   loadWelfareRows,
   loadLoanRows,
+  parseAsOf,
   TITLES,
   asOfLabel,
   isVicent,
+  monthKey,
 };

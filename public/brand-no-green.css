@@ -172,5 +172,7 @@ a,.link-button,.dept-link{color:#16558f!important}
 .member-panel .table-actions{display:flex!important;flex-wrap:nowrap!important;align-items:center;gap:8px!important;min-width:158px}.member-panel .table-actions .button{flex:0 0 auto!important;min-width:74px!important;width:auto!important;padding:9px 13px!important;white-space:nowrap!important;word-break:normal!important;overflow-wrap:normal!important;line-height:1.15!important}.member-panel table th:last-child,.member-panel table td:last-child{min-width:178px!important}
 
 .standing-reports-block{margin:0 0 22px}
-.standing-reports-block .exec-panel-head{margin-bottom:12px}
+.standing-reports-block .exec-panel-head{margin-bottom:12px;display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;justify-content:space-between}
 .standing-reports-block .exec-report-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.standing-report-month{display:flex;flex-direction:column;gap:4px;font-size:12px;font-weight:700;color:#0b3b70}
+.standing-report-month input{min-width:170px;padding:8px 10px;border:1px solid #c5d4e4;border-radius:8px;background:#fff}
