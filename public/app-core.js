@@ -4732,11 +4732,26 @@ async function renderSecurePreview(contentHref,title) {
       pdfjs.GlobalWorkerOptions.workerSrc="/vendor/pdfjs/pdf.worker.min.mjs?v=28";
       const pdf=await pdfjs.getDocument({data:new Uint8Array(await response.arrayBuffer()),isEvalSupported:false}).promise;
       if(!host.isConnected)return;host.innerHTML=`<div class="pdf-preview-toolbar"><strong>${escapeHtml(title)}</strong><span>${pdf.numPages} page${pdf.numPages===1?"":"s"}</span></div><div class="pdf-preview-pages"></div>`;
-      const pages=host.querySelector(".pdf-preview-pages"),pixelRatio=Math.min(window.devicePixelRatio||1,2);
+      const pages=host.querySelector(".pdf-preview-pages");
+      const displayWidth=Math.max(280,(host.clientWidth||360)-24);
+      const dpr=Math.min(Math.max(window.devicePixelRatio||1,2),3);
+      const zoomHeadroom=displayWidth<720?4:2.6;
       for(let number=1;number<=pdf.numPages;number++) {
-        if(!host.isConnected)return;const page=await pdf.getPage(number),base=page.getViewport({scale:1}),available=Math.max(280,Math.min(host.classList.contains("report-preview-frame")?980:1400,host.clientWidth-42)),scale=Math.min(2.1,available/base.width),viewport=page.getViewport({scale});
-        const sheet=document.createElement("article"),label=document.createElement("span"),canvas=document.createElement("canvas"),context=canvas.getContext("2d",{alpha:false});label.textContent=`Page ${number} of ${pdf.numPages}`;sheet.className="pdf-preview-page";canvas.width=Math.floor(viewport.width*pixelRatio);canvas.height=Math.floor(viewport.height*pixelRatio);canvas.style.width=`${Math.floor(viewport.width)}px`;canvas.style.height=`${Math.floor(viewport.height)}px`;sheet.append(label,canvas);pages.appendChild(sheet);
-        await page.render({canvasContext:context,viewport,transform:pixelRatio===1?null:[pixelRatio,0,0,pixelRatio,0,0]}).promise;
+        if(!host.isConnected)return;
+        const page=await pdf.getPage(number),base=page.getViewport({scale:1});
+        const scale=(displayWidth/base.width)*zoomHeadroom,viewport=page.getViewport({scale});
+        const sheet=document.createElement("article"),label=document.createElement("span"),canvas=document.createElement("canvas");
+        const context=canvas.getContext("2d",{alpha:false});
+        label.textContent=`Page ${number} of ${pdf.numPages}`;
+        sheet.className="pdf-preview-page";
+        canvas.width=Math.floor(viewport.width*dpr);
+        canvas.height=Math.floor(viewport.height*dpr);
+        canvas.style.width=`${Math.floor(displayWidth)}px`;
+        canvas.style.height=`${Math.round(displayWidth*(base.height/base.width))}px`;
+        context.imageSmoothingEnabled=true;
+        context.imageSmoothingQuality="high";
+        sheet.append(label,canvas);pages.appendChild(sheet);
+        await page.render({canvasContext:context,viewport,transform:[dpr,0,0,dpr,0,0]}).promise;
       }
       return;
     }

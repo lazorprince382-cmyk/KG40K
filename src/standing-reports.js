@@ -232,7 +232,7 @@ function drawSavingsStyleTable(doc, rows, {
     { key: "no", label: "No.", w: 32, align: "center", header: CYAN, body: WHITE, text: "#0B1F3B" },
     { key: "name", label: "Client Name", w: 168, align: "left", header: CYAN, body: SKY, text: "#0B1F3B" },
     { key: "paid", label: paidLabel, w: 100, align: "right", header: CYAN, body: CYAN_CELL, text: "#0B1F3B" },
-    { key: "expected", label: expectedLabel, w: 100, align: "right", header: NAVY, body: WHITE, text: "#0B1F3B" },
+    { key: "expected", label: expectedLabel, w: 100, align: "right", header: GREEN_TEXT, body: GREEN_CELL, text: GREEN_TEXT },
     { key: "variance", label: "Deficit/Surplus", w: 110, align: "right", header: RED, body: WHITE, text: "#0B1F3B" },
   ];
   const tableW = cols.reduce((sum, c) => sum + c.w, 0);
