@@ -300,16 +300,18 @@ function drawSavingsStyleTable(doc, rows, {
     });
     x += col.w;
   });
-  y += rowH + 6;
-  fillRect(doc, x0 + cols[0].w + cols[1].w, y, cols[2].w, rowH, RED);
-  cellText(doc, unpaidLabel, x0 + cols[0].w + cols[1].w, y, cols[2].w, rowH, { align: "center", color: WHITE, bold: true, size: 8 });
-  fillRect(doc, x0 + cols[0].w + cols[1].w + cols[2].w, y, cols[3].w + cols[4].w, rowH, RED_CELL);
-  cellText(doc, money(-unpaid), x0 + cols[0].w + cols[1].w + cols[2].w, y, cols[3].w + cols[4].w, rowH, {
-    align: "right",
-    color: WHITE,
-    bold: true,
-    size: 9,
-  });
+  if (unpaidLabel) {
+    y += rowH + 6;
+    fillRect(doc, x0 + cols[0].w + cols[1].w, y, cols[2].w, rowH, RED);
+    cellText(doc, unpaidLabel, x0 + cols[0].w + cols[1].w, y, cols[2].w, rowH, { align: "center", color: WHITE, bold: true, size: 8 });
+    fillRect(doc, x0 + cols[0].w + cols[1].w + cols[2].w, y, cols[3].w + cols[4].w, rowH, RED_CELL);
+    cellText(doc, money(-unpaid), x0 + cols[0].w + cols[1].w + cols[2].w, y, cols[3].w + cols[4].w, rowH, {
+      align: "right",
+      color: WHITE,
+      bold: true,
+      size: 9,
+    });
+  }
 }
 
 function drawLoanTable(doc, rows) {
@@ -389,7 +391,7 @@ async function buildStandingPdf(kind, { asOf } = {}) {
         rangeLabel: "Personal Savings",
         fromDate: "2024-01-01",
         toDate,
-        unpaidLabel: "UNPAID SAVINGS :",
+        unpaidLabel: "",
       });
     } else if (kind === "welfare") {
       const rows = await loadWelfareRows(parsed.asOfMonth);

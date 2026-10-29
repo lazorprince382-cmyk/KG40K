@@ -19,6 +19,7 @@
     "db:sync-sep2026-dan": "node scripts/sync-sep2026-dan-425k-welfare.js",
     "db:sync-receipt-dates": "node scripts/sync-sep2026-receipt-dates.js",
     "db:sync-dan-savings": "node scripts/sync-dan-savings-8900000.js",
+    "db:sync-justine-savings": "node scripts/sync-justine-sep30-savings.js",
     "test:dan-savings": "node scripts/test-dan-savings-8900000.js",
     "db:sync-uap-flow": "node scripts/sync-uap-centenary-flow.js",
     "db:clarify-uap-flow": "node scripts/clarify-centenary-uap-flow.js",
