@@ -434,7 +434,7 @@ module.exports = function registerMemberAccountApi({
       monthlySavingsOnly: savingsMonthlyTarget,
       monthlyWelfareIncluded: Math.max(0, monthlyTarget - savingsMonthlyTarget),
       annualSavingsTarget,
-      expectedSavingsToDate: monthlyTarget * Number(financialYear.monthsDue),
+      expectedSavingsToDate: Number(savingsSchedule?.fyExpectedToDate ?? (monthlyTarget * Number(financialYear.monthsDue))),
       savingsPaid: savingsPaidThisYear,
       welfarePaidTowardTarget: welfarePaidThisYear,
       savingsTowardTarget,
@@ -496,6 +496,18 @@ module.exports = function registerMemberAccountApi({
         });
         month+=1;if(month===12){month=0;year+=1;}
       }
+    }
+    const standingPoolStart=Number((await one(`SELECT COALESCE(SUM(amount),0)::float AS paid FROM welfare_contributions
+      WHERE member_id=$1 AND status IN ('verified','completed','recorded') AND amount>0
+        AND (contribution_type ILIKE '%standing%' OR COALESCE(reference,'') LIKE 'WEL-STANDING-%')`,[memberId]))?.paid||0);
+    let standingPool=standingPoolStart;
+    for(const row of welfareMonths){
+      if(standingPool<1)break;
+      const gap=Math.max(0,Number(row.expected)-Number(row.paid));
+      if(gap<1)continue;
+      const fill=Math.min(gap,standingPool);
+      row.paid+=fill;
+      standingPool-=fill;
     }
     const welfareFromJoin={
       joinLabel,

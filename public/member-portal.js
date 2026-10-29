@@ -230,9 +230,9 @@
       items.push({tone:activeLoan.inDangerPeriod||activeLoan.status==="overdue"?"danger":"info",title:`Next loan repayment · ${activeLoan.reference}`,detail:`${money(activeLoan.nextPaymentAmount)} due ${date(activeLoan.nextDueDate)}`,action:"member-loans",label:"Pay loan"});
     }
     const fy=c.financialYearProgress;
-    if(fy&&Number(fy.expectedSavingsToDate)>0&&Number(fy.savingsTowardTarget??fy.savingsPaid)<Number(fy.expectedSavingsToDate)){
-      const short=Number(fy.expectedSavingsToDate)-Number(fy.savingsTowardTarget??fy.savingsPaid);
-      items.push({tone:"info",title:`${fy.fiscalYear} savings still short`,detail:`${money(short)} needed to stay on target`,action:"member-savings",label:""});
+    const scheduleShort=Number(fy?.savingsSchedule?.fyShortBy ?? fy?.fyShortBy ?? 0);
+    if(fy&&scheduleShort>0.5){
+      items.push({tone:"info",title:`${fy.fiscalYear} savings still short`,detail:`${money(scheduleShort)} needed to stay on target`,action:"member-savings",label:""});
     }
     if(!items.length)return "";
     return `<section class="member-next-up"><div class="member-next-up-head"><h3>Next for you</h3><p>Only what needs attention now</p></div><div class="member-next-up-list">${items.slice(0,2).map(item=>`<button type="button" class="member-next-up-item ${item.tone}" data-member-page="${item.action}"><div><strong>${esc(item.title)}</strong><span>${esc(item.detail)}</span></div>${item.label?`<em>${esc(item.label)}</em>`:""}</button>`).join("")}</div></section>`;

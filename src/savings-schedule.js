@@ -68,17 +68,27 @@ const WELFARE_SINCE_BENCHMARK_SQL = `COALESCE((SELECT SUM(c.amount) FROM welfare
 
 function buildSchedule(settings, { savings, welfareSinceBenchmark, joinMonth }) {
   const { currentMonth, yearStartMonth, yearEndMonth, benchmarkMonth, monthlyTarget, benchmarkAmount } = settings;
-  const joinedThisYear = joinMonth !== null && joinMonth > benchmarkMonth;
+  const joinedThisYear = joinMonth !== null && (joinMonth > benchmarkMonth || joinMonth >= yearStartMonth);
   const contributed = Number(savings || 0) + Number(welfareSinceBenchmark || 0);
   const requiredByMonthEnd = expectedAtEndOf(settings, joinMonth, currentMonth);
   const variance = contributed - requiredByMonthEnd;
-  const yearStartBenchmark = expectedAtEndOf(settings, joinMonth, yearStartMonth - 1);
-  const yearEndTarget = expectedAtEndOf(settings, joinMonth, yearEndMonth);
+  const joinedDuringYear = joinMonth !== null && joinMonth >= yearStartMonth;
+  const yearStartBenchmark = joinedDuringYear ? 0 : expectedAtEndOf(settings, joinMonth, yearStartMonth - 1);
+  const fyAnchor = joinedDuringYear ? joinMonth : yearStartMonth;
+  const yearEndTarget = joinedDuringYear
+    ? monthlyTarget * Math.max(0, yearEndMonth - fyAnchor + 1)
+    : expectedAtEndOf(settings, joinMonth, yearEndMonth);
   const monthsCoveredAhead = variance > 0 && monthlyTarget > 0 ? Math.floor((variance + 0.5) / monthlyTarget) : 0;
   const nextPaymentMonth = variance < -0.5 ? currentMonth : currentMonth + monthsCoveredAhead + 1;
   const nextPaymentAmount = variance < -0.5
     ? -variance
     : Math.max(0, monthlyTarget - (variance - monthsCoveredAhead * monthlyTarget));
+  const fyMonthsDue = Math.max(0, currentMonth - fyAnchor + 1);
+  const fyExpectedToDate = joinedDuringYear
+    ? monthlyTarget * fyMonthsDue
+    : Math.max(0, requiredByMonthEnd - yearStartBenchmark);
+  const fyPaid = Math.max(0, contributed - yearStartBenchmark);
+  const fyShortBy = Math.max(0, fyExpectedToDate - fyPaid);
   return {
     benchmarkAmount,
     benchmarkLabel: `end of ${monthLabel(benchmarkMonth)}`,
@@ -88,13 +98,16 @@ function buildSchedule(settings, { savings, welfareSinceBenchmark, joinMonth }) 
     monthlyTarget,
     savingsBalance: contributed,
     requiredByMonthEnd,
-    shortBy: Math.max(0, -variance),
+    shortBy: joinedDuringYear ? fyShortBy : Math.max(0, -variance),
     surplus: Math.max(0, variance),
     yearEndLabel: monthLabel(yearEndMonth),
     yearEndTarget,
     remainingToYearEnd: Math.max(0, yearEndTarget - contributed),
     monthsLeftInYear: Math.max(0, yearEndMonth - currentMonth + 1),
-    savingsPaidTowardYear: Math.max(0, contributed - yearStartBenchmark),
+    savingsPaidTowardYear: fyPaid,
+    fyExpectedToDate,
+    fyShortBy,
+    fyMonthsDue,
     monthsCoveredAhead,
     coveredThroughLabel: monthsCoveredAhead > 0 ? monthLabel(currentMonth + monthsCoveredAhead) : null,
     nextPaymentLabel: monthLabel(nextPaymentMonth),
@@ -119,9 +132,12 @@ async function loadMemberSchedule(memberId, runner = { query }) {
  * When a member's savings already cover the whole current month, take that month's
  * welfare from their savings so they are not skipped for making no new deposit.
  */
+function isVicentName(name) {
+  return /vicent|vincent/i.test(name || "") && /gumisiriza/i.test(name || "");
+}
+
 async function chargeWelfareFromCoveredSavings(client) {
   const settings = await loadScheduleSettings(client);
-  if (settings.currentMonth <= settings.benchmarkMonth) return [];
   const period = monthKey(settings.currentMonth);
   const recorder = (await client.query(`SELECT id FROM users WHERE active=true
     ORDER BY CASE role WHEN 'Finance Officer' THEN 1 WHEN 'System Admin' THEN 2 WHEN 'Welfare Officer' THEN 3 ELSE 4 END, id LIMIT 1`)).rows[0];
@@ -137,10 +153,8 @@ async function chargeWelfareFromCoveredSavings(client) {
     FOR UPDATE OF m`, [settings.benchmarkDate, period])).rows;
   const charged = [];
   for (const member of candidates) {
-    const joinMonth = member.joinMonth ? monthIndex(member.joinMonth) : null;
-    const contributed = Number(member.savings) + Number(member.welfareSinceBenchmark);
-    const required = expectedAtEndOf(settings, joinMonth, settings.currentMonth);
-    if (contributed < required || Number(member.savings) < settings.welfareAmount) continue;
+    if (isVicentName(member.name)) continue;
+    if (Number(member.savings) < settings.welfareAmount) continue;
     const reference = `WCON-AUTO-${period}-${member.id}`;
     await client.query("SAVEPOINT auto_welfare");
     try {
@@ -150,7 +164,7 @@ async function chargeWelfareFromCoveredSavings(client) {
         VALUES ($1,$2,'Monthly Welfare Contribution',$3,$4,$4,'Savings surplus',$5,'verified',
           (CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date,$6,$6,NOW(),$7)`,
         [reference, member.id, period, settings.welfareAmount, `WRCPT-AUTO-${period}-${member.id}`, recorder.id,
-          `Taken automatically from savings surplus: savings already cover ${monthLabel(settings.currentMonth)}`]);
+          `Taken automatically from savings at the start of ${monthLabel(settings.currentMonth)} so a later 425,000 deposit stays in savings`]);
       await client.query("UPDATE members SET savings_balance=savings_balance-$1 WHERE id=$2", [settings.welfareAmount, member.id]);
       await client.query(`INSERT INTO settings (key,value) VALUES ('welfareFundBalance',$1)
         ON CONFLICT (key) DO UPDATE SET value=(COALESCE(NULLIF(settings.value,''),'0')::numeric+$2)::text, updated_at=NOW()`,
@@ -165,12 +179,80 @@ async function chargeWelfareFromCoveredSavings(client) {
   return charged;
 }
 
+function previousMonthKey(currentYYYYMM) {
+  const i = monthIndex(currentYYYYMM) - 1;
+  return monthKey(i);
+}
+
+async function catchUpWelfareFromSavings(client) {
+  const settings = await loadScheduleSettings(client);
+  const kampala = (await client.query(`SELECT to_char((CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date,'YYYY-MM') AS current`)).rows[0];
+  const through = previousMonthKey(kampala.current);
+  const throughIndex = monthIndex(through);
+  const recorder = (await client.query(`SELECT id FROM users WHERE active=true
+    ORDER BY CASE role WHEN 'Finance Officer' THEN 1 WHEN 'System Admin' THEN 2 WHEN 'Welfare Officer' THEN 3 ELSE 4 END, id LIMIT 1`)).rows[0];
+  if (!recorder) return [];
+  const members = (await client.query(`SELECT m.id, m.full_name AS name, m.savings_balance::float AS savings,
+      to_char(GREATEST(m.joined_at,'2024-06-01'::date),'YYYY-MM') AS "startMonth"
+    FROM members m
+    WHERE m.deleted_at IS NULL AND m.status='active'
+    FOR UPDATE OF m`)).rows;
+  const posted = [];
+  for (const member of members) {
+    if (isVicentName(member.name)) continue;
+    const start = monthIndex(member.startMonth || "2024-06");
+    const standingCover = Number((await client.query(`SELECT COALESCE(SUM(amount),0)::float AS paid FROM welfare_contributions
+      WHERE member_id=$1 AND status IN ('verified','completed','recorded') AND amount>0
+        AND (contribution_type ILIKE '%standing%' OR COALESCE(reference,'') LIKE 'WEL-STANDING-%')`,
+      [member.id])).rows[0]?.paid || 0);
+    const standingMonths = Math.floor((standingCover + 0.5) / settings.welfareAmount);
+    for (let i = start; i <= throughIndex; i++) {
+      const period = monthKey(i);
+      if ((i - start) < standingMonths) continue;
+      const monthPaid = Number((await client.query(`SELECT COALESCE(SUM(amount),0)::float AS paid FROM welfare_contributions
+        WHERE member_id=$1 AND status IN ('verified','completed','recorded') AND amount>0
+          AND contribution_type NOT ILIKE '%standing%' AND COALESCE(reference,'') NOT LIKE 'WEL-STANDING-%'
+          AND (period=$2 OR to_char(contribution_date,'YYYY-MM')=$2)`, [member.id, period])).rows[0]?.paid || 0);
+      if (monthPaid + 0.5 >= settings.welfareAmount) continue;
+      const due = settings.welfareAmount - monthPaid;
+      const take = Math.min(due, Number(member.savings || 0));
+      if (take < 1) continue;
+      const reference = `WCON-CATCHUP-${period}-${member.id}`;
+      await client.query("SAVEPOINT welfare_catchup");
+      try {
+        await client.query(`INSERT INTO welfare_contributions
+          (reference,member_id,contribution_type,period,expected_amount,amount,payment_method,receipt_number,status,
+           contribution_date,recorded_by,verified_by,verified_at,verification_comment)
+          VALUES ($1,$2,'Monthly Welfare Contribution',$3,$4,$5,'Savings catch-up',$6,'verified',
+            (date_trunc('month',$7::date)+INTERVAL '1 month - 1 day')::date,$8,$8,NOW(),$9)`,
+          [reference, member.id, period, settings.welfareAmount, take, `WRCPT-CATCHUP-${period}-${member.id}`,
+            `${period}-01`, recorder.id,
+            `Catch-up from savings so welfare standing is current through ${monthLabel(throughIndex)}`]);
+        await client.query("UPDATE members SET savings_balance=savings_balance-$1 WHERE id=$2", [take, member.id]);
+        member.savings = Number(member.savings) - take;
+        await client.query(`INSERT INTO settings (key,value) VALUES ('welfareFundBalance',$1)
+          ON CONFLICT (key) DO UPDATE SET value=(COALESCE(NULLIF(settings.value,''),'0')::numeric+$2)::text, updated_at=NOW()`,
+          [String(take), take]);
+        await client.query("RELEASE SAVEPOINT welfare_catchup");
+        posted.push({ memberId: member.id, name: member.name, period, amount: take });
+      } catch (error) {
+        await client.query("ROLLBACK TO SAVEPOINT welfare_catchup");
+        if (error.code !== "23505") throw error;
+      }
+    }
+  }
+  return posted;
+}
+
 module.exports = {
   monthIndex,
   monthLabel,
+  monthKey,
   loadScheduleSettings,
   expectedAtEndOf,
   buildSchedule,
   loadMemberSchedule,
   chargeWelfareFromCoveredSavings,
+  catchUpWelfareFromSavings,
+  isVicentName,
 };

@@ -170,3 +170,7 @@ a,.link-button,.dept-link{color:#16558f!important}
 
 /* Keep member guarantor decision controls readable and aligned. */
 .member-panel .table-actions{display:flex!important;flex-wrap:nowrap!important;align-items:center;gap:8px!important;min-width:158px}.member-panel .table-actions .button{flex:0 0 auto!important;min-width:74px!important;width:auto!important;padding:9px 13px!important;white-space:nowrap!important;word-break:normal!important;overflow-wrap:normal!important;line-height:1.15!important}.member-panel table th:last-child,.member-panel table td:last-child{min-width:178px!important}
+
+.standing-reports-block{margin:0 0 22px}
+.standing-reports-block .exec-panel-head{margin-bottom:12px}
+.standing-reports-block .exec-report-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}

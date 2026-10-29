@@ -6,6 +6,7 @@
  * Members are tracked as "new" for their first year of membership.
  */
 const { query, one } = require("./db");
+const { monthIndex } = require("./savings-schedule");
 
 const DEFAULT_SINCE = "2024-06-01";
 const VICENT_SINCE = "2026-07-01";
@@ -42,6 +43,12 @@ async function loadWelfareStanding() {
     )?.total || 0
   );
 
+  const kampalaMonth = (await one(`SELECT to_char((CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date,'YYYY-MM') AS current`))?.current;
+  const throughIndex = monthIndex(kampalaMonth || "2026-10") - 1;
+  const monthsThroughPrevious = Math.max(0, throughIndex - monthIndex(sinceDate) + 1);
+  const vicentMonths = Math.max(0, throughIndex - monthIndex(VICENT_SINCE) + 1);
+  const standardGrossTarget = monthsThroughPrevious * monthlyShare;
+  const vicentTarget = vicentMonths * monthlyShare;
   const sinceLabel = "June 2024";
 
   const byMember = (
@@ -91,7 +98,6 @@ async function loadWelfareStanding() {
   const collectedAllTime = collectedSince;
   const newMembers = byMember.filter((row) => row.isVicent || (row.isNewMember && !isOketcho(row.member)));
   const closingBalance = Math.max(0, collectedSince);
-  const standardGrossTarget = 650000;
   const historicalAssistancePaid = Math.max(0, Number(assistancePaid) || 0);
   const shareBase = byMember.filter((row) => !row.excluded && !row.isVicent && Number(row.standingBalance) > 0);
   const historicalSharePerMember =
@@ -144,6 +150,7 @@ async function loadWelfareStanding() {
     currentFundBalance: currentStandingAfterAssistance,
     standardMemberTarget: standardGrossTarget,
     standardGrossTarget,
+    vicentTarget,
     historicalSharePerMember,
     note: "Welfare standing since June 2024. Joshua Ssewanyana appears only in assistance history.",
     byMember: enrichedMembers,

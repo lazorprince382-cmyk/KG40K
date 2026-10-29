@@ -23,7 +23,8 @@ const {
 } = require("./loan-security");
 const { getRunningLoan, getSavingsTargetStatus, getGuarantorEligibility } = require("./loan-eligibility");
 const { loadWelfareStanding, loadWelfareMonth, enforceOneMonthlyWelfareCharge } = require("./welfare-standing");
-const { chargeWelfareFromCoveredSavings, loadMemberSchedule } = require("./savings-schedule");
+const { chargeWelfareFromCoveredSavings, catchUpWelfareFromSavings, loadMemberSchedule } = require("./savings-schedule");
+const { buildStandingPdf } = require("./standing-reports");
 const { isWordUpload, convertWordUploadToPdf, convertPlainTextToPdf } = require("./services/office-pdf");
 
 function mimeFromFilename(name="",fallback="application/octet-stream"){
@@ -6500,6 +6501,35 @@ app.delete("/api/messages/messages/:id",auth,asyncRoute(async(req,res)=>{
   res.json({ok:true});
 }));
 
+async function canAccessStandingReports(user){
+  if(["System Admin","Executive Officer"].includes(user.role)) return true;
+  for(const code of ["finance","credits","welfare","executive"]){
+    if(await departmentPermission(user,code,"view")) return true;
+  }
+  return false;
+}
+app.get("/api/standing-reports/:kind.pdf",auth,asyncRoute(async(req,res)=>{
+  const kind=String(req.params.kind||"").toLowerCase();
+  if(!["savings","welfare","loans"].includes(kind)) return res.status(400).json({error:"Choose savings, welfare or loans"});
+  if(!await canAccessStandingReports(req.user)) return res.status(403).json({error:"Standing report access denied"});
+  const pdf=await buildStandingPdf(kind);
+  const filename=`kasangati-g40-${kind}-standing.pdf`;
+  res.set("X-Document-Mime-Type","application/pdf");
+  res.type("application/pdf");
+  res.set("Content-Disposition",`attachment; filename="${filename}"`);
+  res.send(pdf);
+}));
+app.get("/api/standing-reports/:kind/content",auth,asyncRoute(async(req,res)=>{
+  const kind=String(req.params.kind||"").toLowerCase();
+  if(!["savings","welfare","loans"].includes(kind)) return res.status(400).json({error:"Choose savings, welfare or loans"});
+  if(!await canAccessStandingReports(req.user)) return res.status(403).json({error:"Standing report access denied"});
+  const pdf=await buildStandingPdf(kind);
+  res.set("X-Document-Mime-Type","application/pdf");
+  res.type("application/octet-stream");
+  res.set("Content-Disposition",`inline; filename="kasangati-g40-${kind}-standing.pdf"`);
+  res.send(pdf);
+}));
+
 app.get("/api/department-reports/:scope.:format",auth,asyncRoute(async(req,res)=>{
   const scope=String(req.params.scope).toLowerCase(),format=String(req.params.format).toLowerCase();
   if(!["pdf","xml","excel","preview"].includes(format))return res.status(400).json({error:"Choose PDF or Excel format"});
@@ -6819,6 +6849,8 @@ async function runScheduledMaintenance() {
   await transaction(async client=>{await accrueUnitTrustInterest(client);});
   await transaction(async client=>{
     await enforceOneMonthlyWelfareCharge(client);
+    const caught=await catchUpWelfareFromSavings(client);
+    if(caught.length)console.log(`Welfare catch-up from savings: ${caught.map(x=>`${x.name} ${x.period} ${x.amount}`).join(", ")}`);
     const charged=await chargeWelfareFromCoveredSavings(client);
     if(charged.length)console.log(`Monthly welfare taken from covered savings: ${charged.map(x=>`${x.name} (${x.period})`).join(", ")}`);
   });
