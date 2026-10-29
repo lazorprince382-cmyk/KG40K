@@ -101,6 +101,10 @@ if (!skipSync) {
     "scripts/sync-justine-sep30-savings.js",
     ...dry,
   ]);
+  run("Jude October savings up to date (Centenary unchanged)", "node", [
+    "scripts/sync-jude-savings-9900000.js",
+    ...dry,
+  ]);
   run("Correct receipt dates (Dan 31/08; Sep as DD/MM)", "node", [
     "scripts/sync-sep2026-receipt-dates.js",
     ...dry,
@@ -127,6 +131,7 @@ console.log("\nIndividual refresh commands:");
 console.log("  npm run db:sync-sep2026-dan");
   console.log("  npm run db:sync-dan-savings");
   console.log("  npm run db:sync-justine-savings");
+  console.log("  npm run db:sync-jude-savings");
 console.log("  npm run db:sync-uap-flow");
 console.log("  npm run db:clarify-uap-flow");
 console.log("  npm run db:sync-sep2026-live");
