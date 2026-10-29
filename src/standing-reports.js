@@ -1,7 +1,7 @@
 "use strict";
 const PDFDocument = require("pdfkit");
 const { query } = require("./db");
-const { loadScheduleSettings, expectedAtEndOf, monthIndex, monthLabel, monthKey } = require("./savings-schedule");
+const { loadScheduleSettings, expectedAtEndOf, monthIndex, monthKey } = require("./savings-schedule");
 
 const NAVY = "#1F4E79";
 const BLUE = "#2E75B6";
@@ -42,10 +42,19 @@ function parseAsOf(value) {
   year = Math.floor(index / 12);
   month = (index % 12) + 1;
   const isCurrent = index === currentIndex;
-  const day = isCurrent ? now.day : new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const day = isCurrent ? now.day : lastDay;
   const asOfMonth = `${year}-${String(month).padStart(2, "0")}`;
   const asOfDate = `${asOfMonth}-${String(day).padStart(2, "0")}`;
-  return { year, month, day, index, asOfMonth, asOfDate, isCurrent };
+  return { year, month, day, lastDay, index, asOfMonth, asOfDate, isCurrent };
+}
+
+function shortDate(day, month, year) {
+  return `${Number(day)}.${Number(month)}.${String(year).slice(-2)}`;
+}
+
+function slashDate(day, month, year) {
+  return `${String(day).padStart(2, "0")}/${String(month).padStart(2, "0")}/${year}`;
 }
 
 function ordinalDay(day) {
@@ -120,6 +129,7 @@ async function loadWelfareRows(asOf) {
   const members = (
     await query(
       `SELECT m.id, m.full_name AS member, m.member_number AS "memberNumber",
+         to_char(m.joined_at,'YYYY-MM') AS "joinMonth",
          COALESCE(SUM(c.amount) FILTER (WHERE c.contribution_date <= $1::date),0)::float AS paid
        FROM members m
        LEFT JOIN welfare_contributions c
@@ -133,7 +143,8 @@ async function loadWelfareRows(asOf) {
   return members
     .map((row) => {
       const vicent = isVicent(row.member);
-      const start = monthIndex(vicent ? VICENT_START : WELFARE_START);
+      const joinIdx = row.joinMonth ? monthIndex(row.joinMonth) : monthIndex(WELFARE_START);
+      const start = vicent ? monthIndex(VICENT_START) : Math.max(monthIndex(WELFARE_START), joinIdx);
       const months = Math.max(0, parsed.index - start + 1);
       const expected = months * monthly;
       const paid = Number(row.paid || 0);
@@ -194,10 +205,9 @@ function cellText(doc, text, x, y, w, h, { align = "left", color = "#0B1F3B", bo
   });
 }
 
-function drawHeader(doc, title, subtitle) {
-  doc.font("Helvetica-Bold").fontSize(16).fillColor(NAVY).text("KASANGATI G40 KWAGALANA LIMITED", 28, 22, { align: "center" });
-  doc.font("Helvetica-Bold").fontSize(13).fillColor(BLUE).text(title, 28, 42, { align: "center" });
-  doc.font("Helvetica-Bold").fontSize(10).fillColor(NAVY).text(subtitle, 28, 60, { align: "center" });
+function drawHeader(doc, title) {
+  doc.font("Helvetica-Bold").fontSize(16).fillColor(NAVY).text("KASANGATI G40 KWAGALANA LIMITED", 28, 18, { align: "center" });
+  doc.font("Helvetica-Bold").fontSize(13).fillColor(BLUE).text(title, 28, 38, { align: "center" });
 }
 
 function ensureRowSpace(doc, y, rowH) {
@@ -206,28 +216,45 @@ function ensureRowSpace(doc, y, rowH) {
   return 36;
 }
 
-function drawSavingsStyleTable(doc, rows, paidLabel, expectedLabel, summaryTitle = "Client Savings Summary", unpaidLabel = "UNPAID SAVINGS :") {
+function drawSavingsStyleTable(doc, rows, {
+  paidLabel,
+  expectedLabel,
+  summaryTitle = "Client Savings Summary",
+  rangeLabel = "Personal Savings",
+  fromDate = "2024-01-01",
+  toDate = "",
+  unpaidLabel = "UNPAID SAVINGS :",
+} = {}) {
   const rowH = 16;
+  const headH = 32;
   const cols = [
-    { key: "no", label: "No.", w: 36, align: "center" },
-    { key: "name", label: "Client Name", w: 250, align: "left" },
-    { key: "paid", label: paidLabel, w: 150, align: "right", header: CYAN },
-    { key: "expected", label: expectedLabel, w: 150, align: "right", header: NAVY },
-    { key: "variance", label: "Deficit/Surplus", w: 178, align: "right", header: RED },
+    { key: "no", label: "No.", w: 40, align: "center", header: CYAN, body: WHITE, text: "#0B1F3B" },
+    { key: "name", label: "Client Name", w: 248, align: "left", header: CYAN, body: CYAN_CELL, text: "#0B1F3B" },
+    { key: "paid", label: paidLabel, w: 150, align: "right", header: CYAN, body: CYAN_CELL, text: "#0B1F3B" },
+    { key: "expected", label: expectedLabel, w: 150, align: "right", header: NAVY, body: WHITE, text: "#0B1F3B" },
+    { key: "variance", label: "Deficit/Surplus", w: 176, align: "right", header: RED, body: WHITE, text: "#0B1F3B" },
   ];
   const tableW = cols.reduce((sum, c) => sum + c.w, 0);
   const x0 = (doc.page.width - tableW) / 2;
-  let y = 86;
+  let y = 58;
   fillRect(doc, x0, y, tableW, rowH, NAVY);
   cellText(doc, summaryTitle, x0, y, tableW, rowH, { align: "center", color: WHITE, bold: true, size: 10 });
   y += rowH;
+  fillRect(doc, x0, y, cols[0].w + cols[1].w, rowH, WHITE);
+  cellText(doc, rangeLabel, x0, y, cols[0].w + cols[1].w, rowH, { align: "left", color: NAVY, bold: true, size: 8 });
+  fillRect(doc, x0 + cols[0].w + cols[1].w, y, cols[2].w, rowH, WHITE);
+  cellText(doc, `From  ${fromDate}`, x0 + cols[0].w + cols[1].w, y, cols[2].w, rowH, { align: "center", color: NAVY, bold: true, size: 8 });
+  fillRect(doc, x0 + cols[0].w + cols[1].w + cols[2].w, y, cols[3].w + cols[4].w, rowH, WHITE);
+  cellText(doc, `To  ${toDate}`, x0 + cols[0].w + cols[1].w + cols[2].w, y, cols[3].w + cols[4].w, rowH, { align: "center", color: NAVY, bold: true, size: 8 });
+  y += rowH;
   let x = x0;
   cols.forEach((col) => {
-    fillRect(doc, x, y, col.w, rowH + 4, col.header || CYAN);
-    cellText(doc, col.label, x, y, col.w, rowH + 4, { align: "center", color: WHITE, bold: true, size: 8 });
+    fillRect(doc, x, y, col.w, headH, col.header);
+    doc.fillColor(WHITE).font("Helvetica-Bold").fontSize(8);
+    doc.text(ascii(col.label), x + 3, y + 4, { width: col.w - 6, align: "center", height: headH - 6 });
     x += col.w;
   });
-  y += rowH + 4;
+  y += headH;
   rows.forEach((row, index) => {
     y = ensureRowSpace(doc, y, rowH);
     const deficit = Number(row.variance) < -0.5;
@@ -235,16 +262,20 @@ function drawSavingsStyleTable(doc, rows, paidLabel, expectedLabel, summaryTitle
     const values = [index + 1, row.name, money(row.paid), money(row.expected), money(row.variance)];
     x = x0;
     cols.forEach((col, i) => {
-      let bg = WHITE;
-      let color = "#0B1F3B";
-      if (col.key === "name" || col.key === "paid") bg = CYAN_CELL;
+      let bg = col.body;
+      let color = col.text;
       if (col.key === "variance") {
         bg = deficit ? RED_CELL : surplus ? GREEN_CELL : WHITE;
         color = deficit ? WHITE : surplus ? GREEN_TEXT : "#0B1F3B";
       }
       fillRect(doc, x, y, col.w, rowH, bg);
       doc.strokeColor(LINE).lineWidth(0.3).rect(x, y, col.w, rowH).stroke();
-      cellText(doc, values[i], x, y, col.w, rowH, { align: col.align, color, bold: col.key !== "name", size: 8 });
+      cellText(doc, values[i], x, y, col.w, rowH, {
+        align: col.align,
+        color,
+        bold: col.key !== "name",
+        size: 8,
+      });
       x += col.w;
     });
     y += rowH;
@@ -257,8 +288,14 @@ function drawSavingsStyleTable(doc, rows, paidLabel, expectedLabel, summaryTitle
   const totals = ["", "Total :", money(totalPaid), money(totalExpected), money(totalVar)];
   x = x0;
   cols.forEach((col, i) => {
-    fillRect(doc, x, y, col.w, rowH, i >= 2 ? (Number(totalVar) < 0 ? RED_CELL : GREEN_CELL) : "#F2F2F2");
-    cellText(doc, totals[i], x, y, col.w, rowH, { align: col.align, bold: true, size: 8, color: i === 4 && totalVar < 0 ? WHITE : "#0B1F3B" });
+    const bg = i >= 2 ? (Number(totalVar) < 0 ? RED_CELL : GREEN_CELL) : "#F2F2F2";
+    fillRect(doc, x, y, col.w, rowH, bg);
+    cellText(doc, totals[i], x, y, col.w, rowH, {
+      align: col.align,
+      bold: true,
+      size: 8,
+      color: i >= 2 && totalVar < 0 ? WHITE : "#0B1F3B",
+    });
     x += col.w;
   });
   y += rowH + 6;
@@ -329,7 +366,6 @@ function drawLoanTable(doc, rows) {
 async function buildStandingPdf(kind, { asOf } = {}) {
   const parsed = parseAsOf(asOf);
   const label = asOfLabel(parsed);
-  const expectedMonth = monthLabel(parsed.index);
   const doc = new PDFDocument({ size: "A4", layout: "landscape", margin: 24, bufferPages: true, info: { Title: `Kasangati G40 ${kind} report` } });
   const chunks = [];
   doc.on("data", (chunk) => chunks.push(chunk));
@@ -338,15 +374,33 @@ async function buildStandingPdf(kind, { asOf } = {}) {
     doc.on("error", reject);
   });
   try {
+    const viewDate = shortDate(parsed.day, parsed.month, parsed.year);
+    const monthEndDate = shortDate(parsed.lastDay, parsed.month, parsed.year);
+    const toDate = slashDate(parsed.day, parsed.month, parsed.year);
     if (kind === "savings") {
       const rows = await loadPersonalSavingsRows(parsed.asOfMonth);
-      drawHeader(doc, `Personal Savings Report as at ${label}`, `Expected standing at the end of ${expectedMonth}`);
-      drawSavingsStyleTable(doc, rows, "Available / Paid up", `Expected ${expectedMonth}`);
+      drawHeader(doc, `Personal Savings Report as at ${label}`);
+      drawSavingsStyleTable(doc, rows, {
+        paidLabel: `Available\n/Paid up\n${viewDate}`,
+        expectedLabel: `Expected\n${monthEndDate}`,
+        summaryTitle: "Client Savings Summary",
+        rangeLabel: "Personal Savings",
+        fromDate: "2024-01-01",
+        toDate,
+        unpaidLabel: "UNPAID SAVINGS :",
+      });
     } else if (kind === "welfare") {
       const rows = await loadWelfareRows(parsed.asOfMonth);
-      const standard = rows.find((row) => !row.isVicent)?.expected || 0;
-      drawHeader(doc, `Welfare Standing Report as at ${label}`, `Expected UGX ${money(standard)} since June 2024`);
-      drawSavingsStyleTable(doc, rows, "Contributed", "Expected", "Client Welfare Summary", "UNPAID WELFARE :");
+      drawHeader(doc, `Welfare Standing Report as at ${label}`);
+      drawSavingsStyleTable(doc, rows, {
+        paidLabel: `Contributed\n${viewDate}`,
+        expectedLabel: `Expected\n${monthEndDate}`,
+        summaryTitle: "Client Welfare Summary",
+        rangeLabel: "Welfare since join",
+        fromDate: "2024-06-01",
+        toDate,
+        unpaidLabel: "UNPAID WELFARE :",
+      });
     } else if (kind === "loans") {
       const rows = await loadLoanRows(parsed.asOfMonth);
       drawHeader(doc, `Loans Analysis Report as at ${label}`, "Facilities, outstanding balances and repayment standing");

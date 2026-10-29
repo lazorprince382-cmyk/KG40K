@@ -920,7 +920,7 @@ function headActions() {
     if(state.page==="investment-expenses") return `<div class="head-actions"><button class="button primary" data-investment-modal="expense">${icons.plus}Record expense</button></div>`;
     if(state.page==="investment-assets") return `<div class="head-actions"><button class="button primary" data-investment-modal="asset">${icons.plus}Register asset</button></div>`;
     if(state.page==="investment-contracts") return `<div class="head-actions"><button class="button primary" data-investment-modal="contract">${icons.plus}Add contract</button></div>`;
-    if(state.page==="investment-reports") return `<div class="head-actions"><button class="button primary" data-investment-report="Annual Investment Report" data-format="pdf">${icons.download}Annual report</button></div>`;
+    if(state.page==="investment-reports") return "";
   }
   if(state.role==="Credits Officer") {
     if(state.page==="credits-savings") return `<div class="head-actions"><button class="button secondary" data-credits-modal="withdrawal">${icons.withdraw}Request withdrawal</button><button class="button primary" data-credits-modal="deposit">${icons.plus}Record deposit</button></div>`;
@@ -928,7 +928,7 @@ function headActions() {
     if(state.page==="credits-repayments") return `<div class="head-actions"><button class="button primary" data-credits-modal="repayment">${icons.plus}Record repayment</button></div>`;
     if(state.page==="credits-recovery") return `<div class="head-actions"><button class="button primary" data-credits-modal="recovery">${icons.plus}Recovery action</button></div>`;
     if(state.page==="credits-charges") return `<div class="head-actions"><button class="button primary" data-credits-modal="charge">${icons.plus}Assess charge</button></div>`;
-    if(state.page==="credits-reports") return `<div class="head-actions"><button class="button primary" data-credits-report="Annual Credit Report" data-format="pdf">${icons.download}Annual credit report</button></div>`;
+    if(state.page==="credits-reports") return "";
   }
   if(state.role==="Finance Officer") {
     if(state.page==="finance-income") return `<div class="head-actions"><button class="button primary" data-finance-modal="income">${icons.plus}Record income</button></div>`;
@@ -939,11 +939,11 @@ function headActions() {
     if(state.page==="finance-unit-trust") return `<div class="head-actions"><button class="button primary" data-finance-modal="transfer-uap">${icons.arrowUp||icons.plus}Transfer to UAP</button><button class="button secondary" data-finance-modal="withdraw-uap">${icons.withdraw}Withdraw from UAP</button></div>`;
     if(state.page==="finance-assets") return `<div class="head-actions"><button class="button primary" data-finance-modal="asset">${icons.plus}Register asset</button></div>`;
     if(state.page==="finance-procurement") return `<div class="head-actions"><button class="button primary" data-finance-modal="procurement">${icons.plus}Procurement request</button></div>`;
-    if(state.page==="finance-reports") return `<div class="head-actions"><button class="button primary" data-finance-report="Financial Statement">${icons.download}Financial statement</button></div>`;
+    if(state.page==="finance-reports") return "";
   }
   if(state.role==="Executive Officer") {
     if(state.page==="executive-approvals") return `<div class="head-actions"><button class="button secondary" data-action="executive-refresh">${icons.refresh}Refresh</button></div>`;
-    if(state.page==="executive-reports") return `<div class="head-actions"><button class="button primary" data-executive-report="Executive Report">${icons.download}Executive report</button></div>`;
+    if(state.page==="executive-reports") return "";
     if(state.page==="executive-meetings") return `<div class="head-actions"><button class="button primary" data-action="schedule-meeting">${icons.plus}Schedule meeting</button></div>`;
   }
   if (state.page === "departments" && state.departmentData?.access?.canCreate) {
@@ -1434,8 +1434,8 @@ function standingReportHref(kind,download=false){
 function standingReportsSection() {
   const month=standingReportMonth();
   const max=(()=>{try{return new Date().toLocaleDateString("en-CA",{timeZone:"Africa/Kampala"}).slice(0,7);}catch(_){return month;}})();
-  const reports=[["savings","Personal savings standing","Available vs expected at the selected month end"],["welfare","Welfare standings","UGX 25,000 a month since June 2024, as at the selected month"],["loans","Loans full analysis","Facilities and outstanding balances as at the selected month"]];
-  return `<section class="standing-reports-block"><div class="exec-panel-head"><div><h3>Monthly standing reports (PDF)</h3><p>Pick a month to see what each member was supposed to hold at that month end, then view or download the PDF.</p></div>
+  const reports=[["savings","Personal savings standing","Available/paid up on the viewing date vs expected at month end"],["welfare","Welfare standings","UGX 25,000 each month from the month they joined through this month"],["loans","Loans full analysis","Current facilities, outstanding balances and repayment standing"]];
+  return `<section class="standing-reports-block"><div class="exec-panel-head"><div><h3>Standing reports (PDF)</h3><p>Personal savings, welfare and loans only. Pick a month: paid-up uses the viewing date, expected uses the last day of that month.</p></div>
       <label class="standing-report-month">Report month<input type="month" min="2024-06" max="${max}" value="${month}" data-standing-report-month></label></div>
     <div class="exec-report-grid">${reports.map(([kind,name,desc],i)=>`<article><span class="${["blue","green","violet"][i]}">${icons.file}</span><div><h3>${name}</h3><p>${desc}</p><small>PDF · ${escapeHtml(month)}</small></div><div class="exec-report-actions"><button type="button" data-standing-report-view="${kind}">${icons.eye}View PDF</button><a class="button secondary" href="${standingReportHref(kind,true)}" download>${icons.download}Download</a></div></article>`).join("")}</div></section>`;
 }
@@ -1445,8 +1445,7 @@ function openStandingReport(kind){
   openSecureContentViewer(href,`${titles[kind]||"Standing report"} · ${standingReportMonth()}`,{downloadHref:standingReportHref(kind,true),replaceModal:false});
 }
 function executiveReportsView() {
-  const reports=[["Governance Structure Report","Board, EXCO and committee appointments from the Executive Memo"],["FY2026 Historical Financial Statements","Imported draft statements for the year ended 30 June 2026"],["Financial Report","Finance income, expenditure and budget"],["Loan Report","Savings, loans, defaults and recovery"],["Investment Report","Project performance and expected returns"],["Welfare Report","Fund health and support requests"],["Audit Report","Findings, controls and resolution"],["Supervisory Report","Recommendations and departmental follow-up"],["Legal Report","Cases, policies, contracts and alerts"],["Department Performance Report","Performance against organizational targets"],["Executive Report","Complete command-center report"],["Annual Report","Annual organization performance pack"]];
-  return `${standingReportsSection()}<div class="exec-report-grid">${reports.map(([name,desc],i)=>`<article><span class="${["blue","green","violet","orange","teal"][i%5]}">${icons.file}</span><div><h3>${name}</h3><p>${desc}</p><small>PDF and Excel - Current verified data</small></div><div class="exec-report-actions"><button type="button" data-executive-report-preview="${name}">${icons.eye}Preview</button><button type="button" data-executive-report="${name}">${icons.download}Download</button></div></article>`).join("")}</div>`;
+  return standingReportsSection();
 }
 function executiveAnalyticsView() {
   const e=state.executive,series=[["Membership Growth","savings","green"],["Monthly Revenue","income","blue"],["Monthly Expenses","expenses","red"],["Loan Growth","loans","orange"],["Savings Growth","savings","violet"],["Investment Growth","investment","teal"]];
@@ -1995,8 +1994,7 @@ function financeProcurementView() {
   return `<div class="finance-procurement-flow">${stages.map((stage,index)=>`<span><b>${index+1}</b>${stage.replaceAll("_"," ")}</span>`).join("<i>&gt;</i>")}</div><div class="finance-procurement-list">${state.finance.procurements.map(p=>`<article><div><span>${p.reference} - ${p.department}</span><h3>${p.itemDescription}</h3><p>${p.supplier||"Supplier not selected"} - Requested by ${p.requestedBy}</p></div><strong>${money(p.estimatedAmount)}</strong>${status(p.stage)}<button data-procurement-advance="${p.id}">Advance stage &gt;</button></article>`).join("")}</div>`;
 }
 function financeReportsView() {
-  const reports=[["FY2026 Historical Financial Statements","Imported draft statements for the year ended 30 June 2026"],["Income Report","Organization revenue by source"],["Expense Report","Spending by category"],["Cash Flow Report","Cash inflows and outflows"],["Trial Balance","Organization ledger balances"],["Budget Performance Report","Department allocation and utilization"],["Bank Reconciliation","Account reconciliation status"],["Asset Register","Organization property and current values"],["Procurement Report","Requests through payment"],["Department Spending Report","Spending comparison and alerts"],["Financial Statement","Income, expenditure, assets and liabilities"],["Annual Financial Report","Complete annual finance pack"]];
-  return `${standingReportsSection()}<div class="exec-report-grid">${reports.map(([name,desc],index)=>`<article><span class="${["blue","green","violet","orange","teal"][index%5]}">${icons.file}</span><div><h3>${name}</h3><p>${desc}</p><small>Current verified Finance data</small></div><div class="finance-report-actions"><button data-finance-report-preview="${name}">${icons.eye}Preview</button><button data-finance-report="${name}" data-format="excel">${icons.download}Excel</button><button data-finance-report="${name}" data-format="pdf">${icons.file}PDF</button></div></article>`).join("")}</div>`;
+  return standingReportsSection();
 }
 function financeAnalyticsView() {
   const f=state.finance;
@@ -2598,8 +2596,7 @@ function investmentContractsView() {
   return financeDataTable("Investment contracts",["Reference","Agreement","Type","Project","Counterparty","Value","Start","End","Status","Document"],state.investment.contracts.map(c=>[c.reference,c.title,c.contractType,c.project||"Portfolio-wide",c.counterparty,money(c.contractValue),c.startsOn?new Date(c.startsOn).toLocaleDateString():"?",c.endsOn?new Date(c.endsOn).toLocaleDateString():"?",status(c.status),c.documentReference||"?"]));
 }
 function investmentReportsView() {
-  const reports=[["Historical Unit Trust Ledger","Imported asset movements through 30 June 2026"],["Investment Portfolio Report","Capital, value, growth and allocation"],["Project Performance Report","Progress, profitability and status"],["Profit & Loss Report","Revenue, expenses and net position"],["Revenue Report","Project income by source"],["Expense Report","Costs by project and category"],["ROI Report","Return comparison across investments"],["Budget Utilization Report","Budget versus actual project spending"],["Investor Report","Funding, ownership and return obligations"],["Annual Investment Report","Complete annual investment pack"]];
-  return `<div class="exec-report-grid">${reports.map(([name,desc],index)=>`<article><span class="${["blue","green","violet","orange","teal"][index%5]}">${icons.file}</span><div><h3>${name}</h3><p>${desc}</p><small>Generated from verified portfolio data</small></div><div class="finance-report-actions"><button data-investment-report-preview="${name}">${icons.eye}Preview</button><button data-investment-report="${name}" data-format="excel">${icons.download}Excel</button><button data-investment-report="${name}" data-format="pdf">${icons.file}PDF</button></div></article>`).join("")}</div>`;
+  return standingReportsSection();
 }
 function investmentAnalyticsView() {
   const i=state.investment;
@@ -3128,8 +3125,7 @@ function creditsChargesView() {
     ${financeDataTable("Interest, fees and penalties",["Loan","Member","Charge","Reason","Assessed","Amount","Status","Action"],c.charges.map(x=>[x.loanReference,x.member,x.chargeType,x.reason||"?",new Date(x.assessedAt).toLocaleDateString(),money(x.amount),status(x.status),x.status==="outstanding"&&c.access.canApprove?`<button class="button small secondary" data-credits-waive="${x.id}">Waive</button>`:"?"]))}`;
 }
 function creditsReportsView() {
-  const reports=[["FY2026 Opening Savings Balances","Imported member balances awaiting Legal identity linkage"],["Savings Report","Member balances, deposits and withdrawals"],["Loan Portfolio Report","Active, completed, pending and rejected loans"],["Loan Recovery Report","Defaulters and follow-up actions"],["Interest Income Report","Interest and charge performance"],["Defaulters Report","Overdue loans and days in arrears"],["Member Statements","Individual SACCO account histories"],["Guarantor Report","Guarantees and available capacity"],["Daily Transactions","Daily deposits and repayments"],["Monthly Performance Report","Savings, disbursement and recovery KPIs"],["Annual Credit Report","Complete annual SACCO credit pack"]];
-  return `${standingReportsSection()}<div class="exec-report-grid">${reports.map(([name,desc],i)=>`<article><span class="${["blue","green","violet","orange","teal"][i%5]}">${icons.file}</span><div><h3>${name}</h3><p>${desc}</p><small>Generated from verified Credits data</small></div><div class="finance-report-actions"><button data-credits-report-preview="${name}">${icons.eye}Preview</button><button data-credits-report="${name}" data-format="excel">${icons.download}Excel</button><button data-credits-report="${name}" data-format="pdf">${icons.file}PDF</button></div></article>`).join("")}</div>`;
+  return standingReportsSection();
 }
 function creditsAnalyticsView() {
   const c=state.credits;

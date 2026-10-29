@@ -44,7 +44,7 @@ async function loadWelfareStanding() {
   );
 
   const kampalaMonth = (await one(`SELECT to_char((CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date,'YYYY-MM') AS current`))?.current;
-  const throughIndex = monthIndex(kampalaMonth || "2026-10") - 1;
+  const throughIndex = monthIndex(kampalaMonth || "2026-10");
   const monthsThroughPrevious = Math.max(0, throughIndex - monthIndex(sinceDate) + 1);
   const vicentMonths = Math.max(0, throughIndex - monthIndex(VICENT_SINCE) + 1);
   const standardGrossTarget = monthsThroughPrevious * monthlyShare;
