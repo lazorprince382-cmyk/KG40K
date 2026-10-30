@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 "use strict";
 /**
- * Bring Jude Tadieus Kyobe's member savings up to the October 2026 benchmark
- * (UGX 9,900,000). Centenary / finance_accounts current balances are not changed.
+ * Pin Jude Tadieus Kyobe's member savings so October 2026 shows a surplus of
+ * UGX 883,010 (expected 9,900,000 → savings 10,783,010).
+ * Centenary / finance_accounts current balances are not changed.
  *
  * Usage:
  *   DATABASE_URL=... node scripts/sync-jude-savings-9900000.js
@@ -16,12 +17,14 @@ const projectRoot = path.resolve(__dirname, "..");
 const dryRun = process.argv.includes("--dry-run");
 const databaseUrl = requireDatabaseUrl(projectRoot);
 
-const MARKER = "sync-jude-savings-9900000";
+const MARKER = "sync-jude-savings-surplus-883010";
 const MEMBER_NAME = "Jude Tadieus Kyobe";
-const TARGET_SAVINGS = 9900000;
+const OCTOBER_EXPECTED = 9900000;
+const SURPLUS = 883010;
+const TARGET_SAVINGS = OCTOBER_EXPECTED + SURPLUS;
 const WELFARE = 25000;
-const DEPOSIT_REF = "DEP-JUDE-OCT-UPTODATE-20261029";
-const DEPOSIT_AT = "2026-10-29T20:00:00+03:00";
+const DEPOSIT_REF = "DEP-JUDE-SURPLUS-883010-20261030";
+const DEPOSIT_AT = "2026-10-30T10:00:00+03:00";
 
 const pool = new Pool({
   connectionString: databaseUrl,
@@ -98,7 +101,7 @@ async function ensureWelfare(client, { reference, memberId, period, at, method, 
 }
 
 async function main() {
-  console.log(dryRun ? "DRY RUN\n" : `Syncing Jude savings to UGX ${TARGET_SAVINGS.toLocaleString()} (Centenary unchanged)\n`);
+  console.log(dryRun ? "DRY RUN\n" : `Syncing Jude savings to UGX ${TARGET_SAVINGS.toLocaleString()} (surplus ${SURPLUS.toLocaleString()}; Centenary unchanged)\n`);
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -120,7 +123,8 @@ async function main() {
 
     console.log(`Member: ${member.full_name} (${member.member_number})`);
     console.log(`  Current savings: UGX ${previous.toLocaleString()}`);
-    console.log(`  Target savings:  UGX ${TARGET_SAVINGS.toLocaleString()} (October up-to-date)`);
+    console.log(`  October expected: UGX ${OCTOBER_EXPECTED.toLocaleString()}`);
+    console.log(`  Target savings:   UGX ${TARGET_SAVINGS.toLocaleString()} (surplus ${SURPLUS.toLocaleString()})`);
     console.log(`  Member-book top-up: UGX ${topUp.toLocaleString()} (not posted to Centenary)`);
     console.log(`  Finance accounts snapshot: ${accountsBefore.length} account(s) — current balances will not change`);
 
@@ -137,7 +141,7 @@ async function main() {
             member.id,
             topUp,
             MARKER,
-            `${MARKER}: October up-to-date pin. Member savings UGX ${previous} → ${TARGET_SAVINGS}. Not posted to Centenary.`,
+            `${MARKER}: October surplus pin. Member savings UGX ${previous} → ${TARGET_SAVINGS} (surplus ${SURPLUS}). Not posted to Centenary.`,
             actor,
             DEPOSIT_AT,
           ]
@@ -154,7 +158,7 @@ async function main() {
           at: period === "2026-10" ? DEPOSIT_AT : `${period}-28T12:00:00+03:00`,
           method: "Savings pin",
           receipt: `WRCPT-JUDE-${period}-${member.id}`,
-          comment: `${MARKER}: Monthly welfare already covered so auto catch-up does not reduce the October 9,900,000 savings pin.`,
+          comment: `${MARKER}: Monthly welfare already covered so auto catch-up does not reduce the October surplus pin.`,
           actor,
         });
       }
@@ -163,9 +167,9 @@ async function main() {
         `INSERT INTO audit_logs(action, entity_type, entity_id, details)
          VALUES ($1,'member',$2,$3)`,
         [
-          "JUDE_SAVINGS_UP_TO_DATE",
+          "JUDE_SAVINGS_SURPLUS",
           String(member.id),
-          `${MARKER}: ${member.full_name} savings UGX ${previous} → ${TARGET_SAVINGS}; finance_accounts unchanged`,
+          `${MARKER}: ${member.full_name} savings UGX ${previous} → ${TARGET_SAVINGS} (surplus ${SURPLUS}); finance_accounts unchanged`,
         ]
       );
       console.log(`  Savings set to UGX ${TARGET_SAVINGS.toLocaleString()}`);

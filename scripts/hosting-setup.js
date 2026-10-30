@@ -101,7 +101,7 @@ if (!skipSync) {
     "scripts/sync-justine-sep30-savings.js",
     ...dry,
   ]);
-  run("Jude October savings up to date (Centenary unchanged)", "node", [
+  run("Jude October savings surplus 883,010 (Centenary unchanged)", "node", [
     "scripts/sync-jude-savings-9900000.js",
     ...dry,
   ]);
