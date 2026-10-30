@@ -14,14 +14,14 @@
   "supervisory-module.js?v=83",
   "department-events.js?v=63",
   "official-policy-ui.js?v=12",
-  "member-portal.js?v=149",
+  "member-portal.js?v=150",
   "loan-calculator.js?v=7",
   "department-bootstrap.js?v=64"
 ].forEach((source) => document.write(`<script src="${source}"><\/script>`));
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", async () => {
     try {
-      const registration = await navigator.serviceWorker.register("/sw.js?v=239", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("/sw.js?v=240", { updateViaCache: "none" });
       await registration.update();
     } catch (error) {
       console.warn("Service worker registration failed", error);

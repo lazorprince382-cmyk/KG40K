@@ -1981,10 +1981,6 @@ html:has(.messages-content),body:has(.messages-content),body:has(.messages-conte
 .welfare-month-row.is-paid{border-color:#cfe8d8}
 .welfare-month-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
 .welfare-month-head strong{font-size:15px;color:#173654}
-.welfare-month-figures{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px;margin-top:10px}
-.welfare-month-figures span{display:flex;flex-direction:column;gap:2px;min-width:0;padding:8px 10px;border-radius:10px;background:#f4f7f8}
-.welfare-month-figures small{color:#748396;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.04em}
-.welfare-month-figures b{font-size:15px;color:#173654;overflow-wrap:anywhere}
 .member-passport img,.account-photo img{width:100%;height:100%;object-fit:cover;display:block}
 .member-passport.is-photo,.account-photo.is-photo{padding:0;border:0;cursor:pointer}
 .member-passport.is-photo:hover,.account-photo.is-photo:hover{outline:3px solid rgba(11,59,112,.28);outline-offset:2px}

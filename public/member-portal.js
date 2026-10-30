@@ -383,7 +383,7 @@
     const since=s.welfareSinceLabel||fromJoin.joinLabel||"June 2024";
     const monthList=(fromJoin.months||[]).map(x=>{
       const ok=Number(x.paid)>=Number(x.expected)-0.5;
-      return `<article class="welfare-month-row ${ok?"is-paid":"is-due"}"><div class="welfare-month-head"><strong>${esc(x.label)}</strong>${status(ok?"paid":"pending")}</div><div class="welfare-month-figures"><span><small>Expected</small><b>${money(x.expected)}</b></span><span><small>Paid</small><b>${money(x.paid)}</b></span></div></article>`;
+      return `<article class="welfare-month-row ${ok?"is-paid":"is-due"}"><div class="welfare-month-head"><strong>${esc(x.label)}</strong>${status(ok?"paid":"pending")}</div></article>`;
     }).join("");
     const contributions=(w.contributions||[]).map(x=>`<tr><td><strong>${esc(x.receiptNumber||x.reference)}</strong><small>${x.receiptNumber?"Official receipt":esc(x.paymentReference||"Awaiting verification")}</small></td><td>${esc(x.type)}</td><td>${esc(x.period||"—")}</td><td>${money(x.expected)}</td><td>${money(x.amount)}</td><td>${date(x.contributionDate)}</td><td>${status(x.status)}</td><td>${x.hasEvidence?`<a class="button small secondary" href="/api/welfare/contributions/${x.id}/evidence" target="_blank">${icons.eye}Proof</a>`:"—"}</td></tr>`).join("");
     const requests=(w.requests||[]).map(x=>`<tr><td><strong>${esc(x.reference)}</strong></td><td>${esc(x.category)}</td><td>${money(x.amount)}</td><td>${status(x.urgency)}</td><td>${status(x.status)}</td><td>${status(x.paymentStatus)}</td><td>${x.hasEvidence?`<a class="button small secondary" href="/api/welfare/requests/${x.id}/evidence" target="_blank">${icons.eye}Document</a>`:"—"}</td></tr>`).join("");
