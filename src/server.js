@@ -4543,38 +4543,43 @@ app.get("/api/audit/command-center",auth,requireAudit("view"),asyncRoute(async(r
   ].sort((a,b)=>new Date(a.date)-new Date(b.date));
   const riskDistribution={low:0,medium:0,high:0,critical:0};for(const x of risks.rows)riskDistribution[x.riskLevel]=(riskDistribution[x.riskLevel]||0)+1;
   const findingDepartments={};for(const x of findings.rows)findingDepartments[x.department||"Organization"]=(findingDepartments[x.department||"Organization"]||0)+1;
-  const settings=await loadScheduleSettings();
-  const members=(await query(`SELECT m.id,m.full_name AS name,m.savings_balance::float AS savings,to_char(m.joined_at,'YYYY-MM') AS "joinMonth",
-      COALESCE((SELECT SUM(c.amount) FROM welfare_contributions c WHERE c.member_id=m.id AND c.status IN ('verified','completed','recorded')
-        AND c.amount>0 AND c.contribution_type NOT ILIKE '%standing%' AND COALESCE(c.reference,'') NOT LIKE 'WEL-STANDING-%'
-        AND c.contribution_date>$1::date),0)::float AS "welfareSinceBenchmark"
-    FROM members m WHERE m.deleted_at IS NULL AND m.status='active' ORDER BY m.full_name`,[settings.benchmarkDate])).rows;
-  const memberSchedule=members.map(m=>({name:m.name,...buildSchedule(settings,{
-    savings:m.savings,welfareSinceBenchmark:m.welfareSinceBenchmark,joinMonth:m.joinMonth?monthIndex(m.joinMonth):null})}));
-  const behind=memberSchedule.filter(s=>s.shortBy>0.5).sort((a,b)=>b.shortBy-a.shortBy);
-  const loanCounts=await one(`SELECT COUNT(*) FILTER (WHERE status IN ('active','overdue'))::int AS active,
-    COUNT(*) FILTER (WHERE status='overdue')::int AS overdue FROM loans`);
-  const accounts=(await query(`SELECT account_code AS code,balance::float AS balance FROM finance_accounts WHERE account_code IN ('GL-4104','GL-4500') AND active=true`)).rows;
-  const gl=code=>Number(accounts.find(a=>a.code===code)?.balance||0);
-  const welfare=await loadWelfareStanding();
-  const overdueLoans=(await query(`SELECT l.reference,m.full_name AS member,ROUND((${LOAN_MONEY_IN_LOANS_SQL})::numeric,2)::float AS remaining,
-      (SELECT MIN(s.due_date) FROM loan_repayment_schedule s WHERE s.loan_id=l.id AND s.status='overdue') AS "dueSince"
-    FROM loans l JOIN members m ON m.id=l.member_id WHERE l.status='overdue' ORDER BY remaining DESC LIMIT 12`)).rows;
-  const inspection={
-    monthLabel:memberSchedule[0]?.monthLabel||null,
-    requiredThisMonth:memberSchedule[0]?.requiredByMonthEnd||0,
-    activeMembers:members.length,
-    upToDate:members.length-behind.length,
-    behind:behind.map(s=>({name:s.name,shortBy:Math.round(s.shortBy)})),
-    totalSavings:members.reduce((sum,m)=>sum+Number(m.savings||0),0),
-    activeLoans:Number(loanCounts?.active||0),
-    overdueLoans:Number(loanCounts?.overdue||0),
-    moneyInLoans:await loansOutstandingTotal(one),
-    overdueLoanList:overdueLoans,
-    centenary:gl("GL-4104"),
-    uap:gl("GL-4500"),
-    welfareBalance:Math.max(0,Number(welfare?.closingBalance||0))
-  };
+  let inspection={monthLabel:null,requiredThisMonth:0,activeMembers:0,upToDate:0,behind:[],totalSavings:0,activeLoans:0,overdueLoans:0,moneyInLoans:0,overdueLoanList:[],centenary:0,uap:0,welfareBalance:0};
+  try{
+    const settings=await loadScheduleSettings();
+    const members=(await query(`SELECT m.id,m.full_name AS name,m.savings_balance::float AS savings,to_char(m.joined_at,'YYYY-MM') AS "joinMonth",
+        COALESCE((SELECT SUM(c.amount) FROM welfare_contributions c WHERE c.member_id=m.id AND c.status IN ('verified','completed','recorded')
+          AND c.amount>0 AND c.contribution_type NOT ILIKE '%standing%' AND COALESCE(c.reference,'') NOT LIKE 'WEL-STANDING-%'
+          AND c.contribution_date>$1::date),0)::float AS "welfareSinceBenchmark"
+      FROM members m WHERE m.deleted_at IS NULL AND m.status='active' ORDER BY m.full_name`,[settings.benchmarkDate])).rows;
+    const memberSchedule=members.map(m=>({name:m.name,...buildSchedule(settings,{
+      savings:m.savings,welfareSinceBenchmark:m.welfareSinceBenchmark,joinMonth:m.joinMonth?monthIndex(m.joinMonth):null})}));
+    const behind=memberSchedule.filter(s=>s.shortBy>0.5).sort((a,b)=>b.shortBy-a.shortBy);
+    const loanCounts=await one(`SELECT COUNT(*) FILTER (WHERE status IN ('active','overdue'))::int AS active,
+      COUNT(*) FILTER (WHERE status='overdue')::int AS overdue FROM loans`);
+    const accounts=(await query(`SELECT account_code AS code,balance::float AS balance FROM finance_accounts WHERE account_code IN ('GL-4104','GL-4500') AND active=true`)).rows;
+    const gl=code=>Number(accounts.find(a=>a.code===code)?.balance||0);
+    const welfare=await loadWelfareStanding();
+    const overdueLoans=(await query(`SELECT loans.reference,m.full_name AS member,ROUND((${LOAN_MONEY_IN_LOANS_SQL})::numeric,2)::float AS remaining,
+        (SELECT MIN(s.due_date) FROM loan_repayment_schedule s WHERE s.loan_id=loans.id AND s.status='overdue') AS "dueSince"
+      FROM loans JOIN members m ON m.id=loans.member_id WHERE loans.status='overdue' ORDER BY remaining DESC LIMIT 12`)).rows;
+    inspection={
+      monthLabel:memberSchedule[0]?.monthLabel||null,
+      requiredThisMonth:memberSchedule[0]?.requiredByMonthEnd||0,
+      activeMembers:members.length,
+      upToDate:members.length-behind.length,
+      behind:behind.map(s=>({name:s.name,shortBy:Math.round(s.shortBy)})),
+      totalSavings:members.reduce((sum,m)=>sum+Number(m.savings||0),0),
+      activeLoans:Number(loanCounts?.active||0),
+      overdueLoans:Number(loanCounts?.overdue||0),
+      moneyInLoans:await loansOutstandingTotal(one),
+      overdueLoanList:overdueLoans,
+      centenary:gl("GL-4104"),
+      uap:gl("GL-4500"),
+      welfareBalance:Math.max(0,Number(welfare?.closingBalance||0))
+    };
+  }catch(inspectError){
+    console.error("Audit live-book inspection failed",inspectError);
+  }
   res.json({
     inspection,
     stats:{totalAuditsConducted:completed.length,auditsInProgress:inProgress.length,pendingAudits:pending.length,
