@@ -142,12 +142,16 @@ module.exports = function registerMemberAccountApi({
         EXTRACT(MONTH FROM age(date_trunc('month',LEAST(CURRENT_DATE,ends_on+INTERVAL '1 day')),date_trunc('month',starts_on))))::int)) AS "monthsDue"
       FROM member_financial_year_policies WHERE status='active' AND CURRENT_DATE BETWEEN starts_on AND ends_on ORDER BY starts_on DESC LIMIT 1`);
     const previousPeriod=await one("SELECT fiscal_year AS year FROM financial_reporting_periods ORDER BY period_end DESC LIMIT 1");
-    const targetFiscalYear=Number(req.body.fiscalYear||currentPolicy?.year||new Date().getUTCFullYear());
     const lastClosedPolicy=await one(`SELECT EXTRACT(YEAR FROM ends_on)::int AS year FROM member_financial_year_policies WHERE ends_on<CURRENT_DATE ORDER BY ends_on DESC LIMIT 1`);
+    let targetFiscalYear=Number(req.body.fiscalYear||currentPolicy?.year||new Date().getUTCFullYear());
+    if((transactionType==="Share purchase"||transactionType==="Annual subscription fee")&&Number.isFinite(Number(currentPolicy?.year))){
+      targetFiscalYear=Number(currentPolicy.year);
+    }
     const allowedYears=[Number(currentPolicy?.year),Number(previousPeriod?.year),Number(lastClosedPolicy?.year),new Date().getUTCFullYear()].filter(Number.isFinite);
     if(!allowedYears.includes(targetFiscalYear)){removeStoredFile(req.file?.filename);return res.status(400).json({error:"Choose a valid current or previous financial year"});}
-    if(targetFiscalYear===Number(lastClosedPolicy?.year)&&targetFiscalYear!==Number(currentPolicy?.year)&&transactionType!=="Savings deposit"){removeStoredFile(req.file?.filename);return res.status(400).json({error:"Previous-year allocation is available only for clearing savings arrears"});}
-    if(targetFiscalYear===Number(previousPeriod?.year)&&transactionType!=="Savings deposit"){removeStoredFile(req.file?.filename);return res.status(400).json({error:"Previous-year allocation is available only for clearing savings arrears"});}
+    const activeYear=Number(currentPolicy?.year);
+    const isPreviousYear=Number.isFinite(activeYear)?targetFiscalYear!==activeYear:false;
+    if(isPreviousYear&&transactionType!=="Savings deposit"){removeStoredFile(req.file?.filename);return res.status(400).json({error:"Previous-year allocation is available only for clearing savings arrears"});}
     if(!req.file)return res.status(400).json({error:"Upload a receipt photo or PDF showing the payment"});
     if(!receiptTypes.has(req.file.mimetype)){
       removeStoredFile(req.file.filename);
@@ -355,6 +359,7 @@ module.exports = function registerMemberAccountApi({
     if (!member) return null;
     await ensureFinancialYears();
     const financialYear = await one(`SELECT id,fiscal_year_label AS "fiscalYear",starts_on AS "startsOn",ends_on AS "endsOn",
+      EXTRACT(YEAR FROM ends_on)::int AS "endYear",
       monthly_savings_target::float AS "monthlySavingsTarget",annual_share_target::float AS "annualShareTarget",
       annual_subscription_fee::float AS "annualSubscriptionFee",
       COALESCE(opening_share_credit,0)::float AS "openingShareCredit",
@@ -681,10 +686,16 @@ module.exports = function registerMemberAccountApi({
         EXTRACT(MONTH FROM age(date_trunc('month',LEAST(CURRENT_DATE,ends_on+INTERVAL '1 day')),date_trunc('month',starts_on))))::int)) AS "monthsDue"
       FROM member_financial_year_policies WHERE status='active' AND CURRENT_DATE BETWEEN starts_on AND ends_on ORDER BY starts_on DESC LIMIT 1`);
     const previousPeriod=await one("SELECT fiscal_year AS year FROM financial_reporting_periods ORDER BY period_end DESC LIMIT 1");
-    const targetFiscalYear=Number(req.body.fiscalYear||currentPolicy?.year||new Date().getUTCFullYear());
     const lastClosedPolicy=await one(`SELECT EXTRACT(YEAR FROM ends_on)::int AS year FROM member_financial_year_policies WHERE ends_on<CURRENT_DATE ORDER BY ends_on DESC LIMIT 1`);
+    let targetFiscalYear=Number(req.body.fiscalYear||currentPolicy?.year||new Date().getUTCFullYear());
+    if((transactionType==="Share purchase"||transactionType==="Annual subscription fee")&&Number.isFinite(Number(currentPolicy?.year))){
+      targetFiscalYear=Number(currentPolicy.year);
+    }
     const allowedYears=[Number(currentPolicy?.year),Number(previousPeriod?.year),Number(lastClosedPolicy?.year),new Date().getUTCFullYear()].filter(Number.isFinite);
     if(!allowedYears.includes(targetFiscalYear)){removeStoredFile(req.file?.filename);return res.status(400).json({error:"Choose a valid current or previous financial year"});}
+    const activeYear=Number(currentPolicy?.year);
+    const isPreviousYear=Number.isFinite(activeYear)?targetFiscalYear!==activeYear:false;
+    if(isPreviousYear&&transactionType!=="Savings deposit"){removeStoredFile(req.file?.filename);return res.status(400).json({error:"Previous-year allocation is available only for clearing savings arrears"});}
     if(!req.file)return res.status(400).json({error:"Upload a receipt photo or PDF showing the payment"});
     if(!receiptTypes.has(req.file.mimetype)){removeStoredFile(req.file.filename);return res.status(400).json({error:"Deposit evidence must be a JPG, PNG, WebP or PDF file"});}
     if(!Number.isFinite(amount)||amount<1000||!["Mobile Money","Bank transfer","Cheque","Cash"].includes(method)||externalReference.length<3){

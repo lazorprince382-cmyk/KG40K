@@ -47,7 +47,10 @@ function effectiveDocumentMime(version){
 }
 
 function isMemberSavingsFinanceCategory(category="") {
-  return /member\s*savings|^savings$|savings\s*deposit/i.test(String(category || "").trim());
+    return /member\s*savings|^savings$|savings\s*deposit/i.test(String(category || "").trim());
+}
+function isShareContributionCategory(category="") {
+    return /annual\s*share|share\s*contribution|share\s*purchase|share\s*capital/i.test(String(category || "").trim());
 }
 async function monthlyWelfareAmount(client=null){
   const runner=client||{query:(sql,params)=>query(sql,params).then(r=>({rows:r.rows}))};
@@ -644,7 +647,24 @@ async function deleteMemberRequest(client,id){
     return {locked,reversed:true,effects,message};
   }
   if(locked.type==="Share purchase"){
-    await client.query("UPDATE members SET share_capital=GREATEST(0,share_capital-$1) WHERE id=$2",[locked.amount,locked.member_id]);
+    let effects={accountName:null,accountDeducted:0,sharesReversed:0};
+    if(locked.finance_entry_id){
+      const entry=(await client.query("SELECT * FROM organization_finance_entries WHERE id=$1 FOR UPDATE",[locked.finance_entry_id])).rows[0];
+      if(entry&&entry.status!=="voided"){
+        effects=await reverseIncomeReceipt(client,entry);
+        await client.query("DELETE FROM organization_finance_entries WHERE id=$1",[entry.id]);
+      }
+    }
+    const stillThere=(await client.query("SELECT id,amount FROM transactions WHERE id=$1",[locked.id])).rows[0];
+    if(stillThere){
+      await client.query("UPDATE members SET share_capital=GREATEST(0,share_capital-$1) WHERE id=$2",[stillThere.amount,locked.member_id]);
+      effects.sharesReversed=(Number(effects.sharesReversed)||0)+Number(stillThere.amount);
+      await removeTransactionRow(client,locked.id);
+    }
+    let message=`${locked.reference} deleted.`;
+    if(effects.accountDeducted>0)message+=` UGX ${Number(effects.accountDeducted).toLocaleString()} deducted from ${effects.accountName||"the receiving account"}.`;
+    if(effects.sharesReversed>0)message+=` Share capital reduced by UGX ${Number(effects.sharesReversed).toLocaleString()}.`;
+    return {locked,reversed:true,effects,message};
   }
   await removeTransactionRow(client,locked.id);
   return {locked,reversed:true,message:`${locked.reference} deleted from requests.`};
@@ -734,6 +754,21 @@ async function reverseIncomeReceipt(client,entry){
       await client.query("ROLLBACK TO SAVEPOINT reverse_welfare");
       if(error.code!=="23503")throw error;
       await client.query("UPDATE welfare_contributions SET status='voided',amount=0,finance_entry_id=NULL,verification_comment=TRIM(BOTH FROM COALESCE(verification_comment,'')||' | Voided when finance receipt was deleted') WHERE id=$1",[row.id]);
+    }
+  }
+  const shareRows=(await client.query(`SELECT id,member_id,amount FROM transactions WHERE finance_entry_id=$1 AND type='Share purchase' FOR UPDATE`,[entry.id])).rows;
+  effects.sharesReversed=0;
+  for(const tx of shareRows){
+    await client.query("UPDATE members SET share_capital=GREATEST(0,share_capital-$1) WHERE id=$2",[tx.amount,tx.member_id]);
+    effects.sharesReversed+=Number(tx.amount||0);
+    await client.query("SAVEPOINT reverse_share_tx");
+    try{
+      await client.query("DELETE FROM transactions WHERE id=$1",[tx.id]);
+      await client.query("RELEASE SAVEPOINT reverse_share_tx");
+    }catch(error){
+      await client.query("ROLLBACK TO SAVEPOINT reverse_share_tx");
+      if(error.code!=="23503")throw error;
+      await client.query("UPDATE transactions SET status='voided',finance_entry_id=NULL,notes=TRIM(BOTH FROM COALESCE(notes,'')||' | Voided when finance receipt was deleted') WHERE id=$1",[tx.id]);
     }
   }
   const hostingRows=(await client.query(`SELECT id,amount,transaction_id FROM hosting_fee_payments WHERE finance_entry_id=$1 FOR UPDATE`,[entry.id])).rows;
@@ -2239,25 +2274,28 @@ app.post("/api/finance/income",auth,asyncRoute(async(req,res,next)=>{
   const category=String(b.category||"").trim();
   const savings=isMemberSavingsFinanceCategory(category);
   const hosting=isHostingFeeCategory(category);
+  const shares=isShareContributionCategory(category);
+  const memberIncome=savings||hosting||shares;
   const memberId=Number(b.memberId);
   if(!category||!b.paymentMethod||!b.description||!Number.isFinite(amount)||amount<=0)
     return res.status(400).json({error:"Category, method, description and a positive amount are required"});
   if(savings&&!Number.isInteger(memberId))return res.status(400).json({error:"Select the member whose savings you are recording"});
   if(hosting&&!Number.isInteger(memberId))return res.status(400).json({error:"Select the member who paid the hosting fee"});
-  if(!savings&&!hosting&&!String(b.counterparty||"").trim())return res.status(400).json({error:"Enter who paid this income"});
+  if(shares&&!Number.isInteger(memberId))return res.status(400).json({error:"Select the member who paid the annual share contribution"});
+  if(!memberIncome&&!String(b.counterparty||"").trim())return res.status(400).json({error:"Enter who paid this income"});
   const paymentMethod=String(b.paymentMethod).trim();
   const compatibleTypes={"Bank transfer":["bank"],Cheque:["bank"],Cash:["cash","petty_cash"],"Mobile Money":["mobile_money"]}[paymentMethod]||[];
   const row=await transaction(async client=>{
     const department=(await client.query("SELECT id FROM departments WHERE code='finance'")).rows[0];
-    const member=(savings||hosting)?(await client.query("SELECT id,full_name,member_number FROM members WHERE id=$1 AND deleted_at IS NULL AND status='active'",[memberId])).rows[0]:null;
-    if((savings||hosting)&&!member){const error=new Error("Choose an active member");error.status=400;throw error;}
-    const accountId=(savings||hosting)
+    const member=memberIncome?(await client.query("SELECT id,full_name,member_number FROM members WHERE id=$1 AND deleted_at IS NULL AND status='active'",[memberId])).rows[0]:null;
+    if(memberIncome&&!member){const error=new Error("Choose an active member");error.status=400;throw error;}
+    const accountId=memberIncome
       ?(await client.query("SELECT id FROM finance_accounts WHERE active=true AND account_code='GL-4104' ORDER BY id LIMIT 1")).rows[0]?.id
       :Number(b.accountId);
     const account=(await client.query("SELECT * FROM finance_accounts WHERE id=$1 AND active=true FOR UPDATE",[accountId])).rows[0];
-    if(!account){const error=new Error((savings||hosting)?"Centenary bank account is not set up":"Choose the account that received this income");error.status=400;throw error;}
-    if(!savings&&!hosting&&!compatibleTypes.includes(account.account_type)){const error=new Error(`${paymentMethod} income must be posted to a compatible registered account`);error.status=400;throw error;}
-    const payer=(savings||hosting)?member.full_name:String(b.counterparty).trim();
+    if(!account){const error=new Error(memberIncome?"Centenary bank account is not set up":"Choose the account that received this income");error.status=400;throw error;}
+    if(!memberIncome&&!compatibleTypes.includes(account.account_type)){const error=new Error(`${paymentMethod} income must be posted to a compatible registered account`);error.status=400;throw error;}
+    const payer=memberIncome?member.full_name:String(b.counterparty).trim();
     const paidOn=b.date||new Date();
     let split=null;
     if(savings){
@@ -2283,8 +2321,10 @@ app.post("/api/finance/income",auth,asyncRoute(async(req,res,next)=>{
       ?`${String(b.description).trim()} | Received UGX ${amount.toLocaleString()} on Centenary. ${split.welfareAmount?`UGX ${split.welfareAmount.toLocaleString()} welfare (once this month). `:split.welfareAlreadyPaid?"Welfare already taken this month. ":""}UGX ${(split?.savingsAmount||0).toLocaleString()} savings.`
       :hosting
         ?`${String(b.description).trim()} | Hosting fee UGX ${amount.toLocaleString()} from ${member.full_name} posted to Centenary.`
-        :String(b.description).trim();
-    const ledgerCategory=savings?"Member savings":hosting?"Hosting fee":category;
+        :shares
+          ?`${String(b.description).trim()} | Annual share contribution UGX ${amount.toLocaleString()} from ${member.full_name} posted to Centenary.`
+          :String(b.description).trim();
+    const ledgerCategory=savings?"Member savings":hosting?"Hosting fee":shares?"Annual share contribution":category;
     const inserted=(await client.query(`INSERT INTO organization_finance_entries
       (department_id,reference,entry_type,category,description,counterparty,payment_method,amount,status,receipt_number,
         supporting_document,transaction_date,recorded_by,approved_by,approved_at,finance_account_id)
@@ -2310,7 +2350,20 @@ app.post("/api/finance/income",auth,asyncRoute(async(req,res,next)=>{
       await notifyQuietly(client,"INSERT INTO notifications (member_id,title,message) VALUES ($1,'Hosting fee recorded',$2)",
         [member.id,`UGX ${amount.toLocaleString()} hosting fee posted to Centenary. Receipt ${receipt}.`]);
     }
-    return {...inserted,accountName:account.account_name,savings:Boolean(savings),hosting:Boolean(hosting),split};
+    if(shares){
+      const yearRow=(await client.query(`SELECT EXTRACT(YEAR FROM ends_on)::int AS year
+        FROM member_financial_year_policies WHERE status='active' AND $1::date BETWEEN starts_on AND ends_on
+        ORDER BY starts_on DESC LIMIT 1`,[paidOn])).rows[0];
+      await client.query(`INSERT INTO transactions
+        (reference,member_id,type,method,amount,status,external_reference,notes,recorded_by,verified_by,verified_at,created_at,receipt_number,target_fiscal_year,submission_source,finance_entry_id)
+        VALUES ($1,$2,'Share purchase',$3,$4,'completed',$5,$6,$7,$7,NOW(),COALESCE($8::timestamptz,NOW()),$9,$10,'finance',$11)`,
+        [reference("TRX"),member.id,paymentMethod,amount,String(b.supportingDocument||"").trim()||null,
+          `Annual share contribution posted to Centenary. received=${amount.toFixed(2)}.`,req.user.id,paidOn,receipt,yearRow?.year||null,inserted.id]);
+      await client.query("UPDATE members SET share_capital=share_capital+$1 WHERE id=$2",[amount,member.id]);
+      await notifyQuietly(client,"INSERT INTO notifications (member_id,title,message) VALUES ($1,'Share contribution recorded',$2)",
+        [member.id,`UGX ${amount.toLocaleString()} annual share contribution posted to Centenary. Receipt ${receipt}.`]);
+    }
+    return {...inserted,accountName:account.account_name,savings:Boolean(savings),hosting:Boolean(hosting),shares:Boolean(shares),split};
   });
   await audit({userId:req.user.id,action:"FINANCE_INCOME_RECORDED",entityType:"organization_finance",entityId:String(row.id),
     details:`${row.receiptNumber} - ${category} - ${row.accountName} - UGX ${amount}`,...metadata(req)});
@@ -2341,6 +2394,7 @@ app.delete("/api/finance/income/:id",auth,asyncRoute(async(req,res,next)=>{
   if(result.effects.welfareReversed>0)message+=` Welfare reduced by UGX ${result.effects.welfareReversed.toLocaleString()}.`;
   if(result.effects.loanReversed>0)message+=` Loan repayment of UGX ${result.effects.loanReversed.toLocaleString()} removed from ${result.effects.loanReference||"the loan"}.`;
   if(result.effects.hostingReversed>0)message+=` Hosting fee of UGX ${result.effects.hostingReversed.toLocaleString()} removed from the member record.`;
+  if(result.effects.sharesReversed>0)message+=` Share capital reduced by UGX ${result.effects.sharesReversed.toLocaleString()}.`;
   if(isMemberSavingsFinanceCategory(result.entry.category)&&!result.effects.savingsMatched)message+=" No matching savings record was found, so the member savings balance was left unchanged.";
   await audit({userId:req.user.id,action:"FINANCE_INCOME_DELETED",entityType:"organization_finance",entityId:String(result.entry.id),
     details:`${result.entry.receipt_number||result.entry.reference} - UGX ${amount} reversed from ${account}`,...metadata(req)});
@@ -5099,7 +5153,18 @@ app.post("/api/transactions/:id/verify",auth,asyncRoute(async(req,res,next)=>{
         }
       }
     }
-    if(decision==="approve"&&locked.type==="Share purchase") await client.query("UPDATE members SET share_capital=share_capital+$1 WHERE id=$2",[locked.amount,locked.member_id]);
+    if(decision==="approve"&&locked.type==="Share purchase"){
+      await client.query("UPDATE members SET share_capital=share_capital+$1 WHERE id=$2",[locked.amount,locked.member_id]);
+      const member=(await client.query("SELECT id,full_name FROM members WHERE id=$1",[locked.member_id])).rows[0];
+      if(member&&!locked.finance_entry_id){
+        const posted=await postReceiptToCentenary(client,{
+          grossAmount:Number(locked.amount),memberName:member.full_name,method:locked.method,
+          description:`${locked.reference} | Annual share contribution UGX ${Number(locked.amount).toLocaleString()} from ${member.full_name} posted to Centenary.`,
+          onDate:locked.created_at||new Date(),userId:req.user.id,category:"Annual share contribution"
+        });
+        if(posted?.id)await client.query("UPDATE transactions SET finance_entry_id=$1 WHERE id=$2",[posted.id,locked.id]);
+      }
+    }
     if(needsFinance){
       const creditsDepartment=(await client.query("SELECT id FROM departments WHERE code='credits'")).rows[0];
       const member=(await client.query("SELECT full_name FROM members WHERE id=$1",[locked.member_id])).rows[0];

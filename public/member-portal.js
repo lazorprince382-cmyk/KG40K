@@ -606,7 +606,7 @@
     }
   }
   function depositForm(){
-    const f=C()?.financialYearProgress,past=C()?.pastYearProgress,currentYear=f?new Date(f.endsOn).getUTCFullYear():new Date().getUTCFullYear(),pastYear=past?new Date(past.periodEnd).getUTCFullYear():currentYear-1;
+    const f=C()?.financialYearProgress,past=C()?.pastYearProgress,currentYear=Number(f?.endYear||(f?.endsOn&&String(f.endsOn).slice(0,4))||new Date().getUTCFullYear()),pastYear=Number(past?.endYear||(past?.periodEnd&&String(past.periodEnd).slice(0,4))||currentYear-1);
     const balances=[];
     const lastClosed=(C()?.closedYears||[])[0];
     const labels={[currentYear]:f?.fiscalYear||`FY ending ${currentYear}`,[pastYear]:past?.fiscalYear||`FY ending ${pastYear}`};
@@ -624,7 +624,7 @@
     const years=[...new Set(balances.map(x=>x.year))],yearLabel=year=>labels[year]||`FY ending ${year}`;
     const yearOptions=years.map(year=>`<option value="${year}">${esc(yearLabel(year))}${year===currentYear?" - current year":" - arrears"}</option>`).join("");
     const typeOptions=balances.map(x=>`<option value="${x.type}" data-year="${x.year}" data-balance="${x.balance}" data-paid="${x.paid?1:0}">${esc(x.label)} - ${x.paid?"fully paid":x.balance>0?`balance ${money(x.balance)}`:"open for advance / surplus"}</option>`).join("");
-    modal("Submit member contribution",`<form class="form" data-member-deposit enctype="multipart/form-data" novalidate><div class="form-grid">
+    modal("Submit member contribution",`<form class="form" data-member-deposit enctype="multipart/form-data" novalidate data-current-year="${currentYear}"><div class="form-grid">
       <div class="field full"><label>Financial year to pay</label><select name="fiscalYear" required data-deposit-year>${yearOptions}</select><small>Choose the year this payment should clear or advance.</small></div>
       <div class="field full"><label>Contribution type</label><select name="contributionType" required data-deposit-type>${typeOptions}</select><small data-deposit-balance>Savings can be paid even after the target is met.</small></div>
       <div class="field"><label>Amount (UGX)</label><input name="amount" type="number" min="1000" step="1000" required><small>Minimum payment: UGX 1,000. Savings above target become a surplus.</small></div>
@@ -636,7 +636,7 @@
     bindMember();
     const year=document.querySelector("[data-deposit-year]"),type=document.querySelector("[data-deposit-type]"),amount=document.querySelector("[data-member-deposit] [name=amount]"),hint=document.querySelector("[data-deposit-balance]");
     const sync=()=>{if(!year||!type)return;let first=null;[...type.options].forEach(option=>{const show=option.dataset.year===year.value;option.hidden=!show;option.disabled=!show||option.dataset.paid==="1";if(show&&!option.disabled&&!first)first=option;});if(first){type.value=first.value;first.selected=true;}syncAmount();};
-    const syncAmount=()=>{const option=type?.selectedOptions?.[0];if(!option)return;const balance=Number(option.dataset.balance||0);amount.placeholder=balance>0?`Balance due: ${money(balance)}`:"Enter amount to deposit";if(option.value==="shares"||option.value==="subscription")amount.max=String(Math.max(balance,1000));else amount.removeAttribute("max");if(hint)hint.textContent=balance>0?`Selected balance: ${money(balance)}. Credits will allocate the verified payment to ${yearLabel(Number(option.dataset.year))}.`:`No target balance due — this savings payment will be treated as advance or surplus for ${yearLabel(Number(option.dataset.year))}.`;};
+    const syncAmount=()=>{const option=type?.selectedOptions?.[0];if(!option)return;if(option.dataset.year&&year)year.value=option.dataset.year;const balance=Number(option.dataset.balance||0);amount.placeholder=balance>0?`Balance due: ${money(balance)}`:"Enter amount to deposit";if(option.value==="shares"||option.value==="subscription"){amount.max=String(Math.max(balance,1000));if(year)year.value=String(currentYear);}else amount.removeAttribute("max");if(hint)hint.textContent=balance>0?`Selected balance: ${money(balance)}. Credits will allocate the verified payment to ${yearLabel(Number(option.dataset.year))}.`:`No target balance due — this savings payment will be treated as advance or surplus for ${yearLabel(Number(option.dataset.year))}.`;};
     year?.addEventListener("change",sync);type?.addEventListener("change",syncAmount);sync();
   }
   function investmentForm(projectId){const project=S().opportunities.find(x=>String(x.id)===String(projectId));if(!project)return;modal("Invest in project",`<form class="form" data-member-investment enctype="multipart/form-data"><input type="hidden" name="projectId" value="${project.id}"><div class="form-grid"><div class="field full"><label>Project</label><input value="${esc(project.name)}" disabled><small>Minimum ${money(project.minimumInvestment)} - expected return ${Number(project.expectedReturnRate||0)}%</small></div><div class="field"><label>Amount (UGX)</label><input name="amount" type="number" min="${Number(project.minimumInvestment||1)}" step="1000" required></div><div class="field"><label>Payment method</label><select name="paymentMethod"><option>Mobile Money</option><option>Bank transfer</option><option>Cheque</option></select></div><div class="field full"><label>Transaction reference</label><input name="paymentReference" minlength="3" required></div><div class="field full"><label>Notes</label><textarea name="notes" placeholder="Optional instructions for Investment Department"></textarea></div><div class="field full record-file-field"><label>Payment receipt photo or PDF</label><input name="evidence" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" required><small>Investment reviews the application first; Finance then verifies the payment.</small></div></div>${memberSubmitActions("Send investment request")}</form>`);bindMember();}
@@ -802,6 +802,11 @@
     if(!reference.value.trim()||reference.value.trim().length<3)return fail("Enter the payment transaction reference from your message or deposit slip.",reference);
     if(!file)return fail("Choose a receipt photo or PDF before sending.",form.elements.receipt);
     if(file.size>100*1024*1024)return fail("The receipt is larger than 100 MB. Choose a smaller photo or PDF.",form.elements.receipt);
+    const typeOpt=form.elements.contributionType?.selectedOptions?.[0];
+    if(typeOpt?.dataset.year&&form.elements.fiscalYear)form.elements.fiscalYear.value=typeOpt.dataset.year;
+    if((typeOpt?.value==="shares"||typeOpt?.value==="subscription")&&form.elements.fiscalYear){
+      form.elements.fiscalYear.value=form.dataset.currentYear||typeOpt.dataset.year||form.elements.fiscalYear.value;
+    }
     message.className="member-form-message sending";message.textContent="Uploading receipt and creating the pending deposit...";button.disabled=true;button.textContent="Sending...";
     try{
       const url=state.memberOversight&&C()?.member?.id?`/api/members/${C().member.id}/deposits`:"/api/member/deposits";
