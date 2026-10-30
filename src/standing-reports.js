@@ -355,7 +355,7 @@ function drawSavingsStyleTable(doc, rows, {
 }
 
 function drawLoanTable(doc, rows) {
-  const rowH = 16;
+  const rowH = 20;
   const cols = [
     { w: 26, label: "No." },
     { w: 108, label: "Member" },
@@ -394,7 +394,7 @@ function drawLoanTable(doc, rows) {
       const bg = overdue && i >= 5 ? RED_CELL : i === 1 ? (index % 2 === 0 ? SKY : WHITE) : WHITE;
       fillRect(doc, x, y, col.w, rowH, bg);
       doc.strokeColor(LINE).lineWidth(0.3).rect(x, y, col.w, rowH).stroke();
-      cellText(doc, values[i], x, y, col.w, rowH, { align: i >= 4 ? "right" : "left", size: 7, bold: i >= 4 });
+      cellText(doc, values[i], x, y, col.w, rowH, { align: i >= 4 ? "right" : "left", size: 9, bold: i >= 4 });
       x += col.w;
     });
     y += rowH;
@@ -506,7 +506,7 @@ function drawAssistanceRegister(doc, rows, label) {
       doc.strokeColor(LINE).lineWidth(0.3).rect(x, y, col.w, rowH).stroke();
       cellText(doc, values[i], x, y, col.w, rowH, {
         align: i === 4 || i === 0 ? "right" : "left",
-        size: 7,
+        size: 9,
         bold: i === 4,
         color: i === 4 ? GREEN_TEXT : "#0B1F3B",
       });
@@ -516,7 +516,7 @@ function drawAssistanceRegister(doc, rows, label) {
     if (row.note) {
       y = ensureRowSpace(doc, y, 16);
       fillRect(doc, x0, y, tableW, 16, "#F7FBFE");
-      cellText(doc, row.note, x0 + 8, y, tableW - 16, 16, { size: 7, color: "#5B6B7C" });
+      cellText(doc, row.note, x0 + 8, y, tableW - 16, 16, { size: 9, color: "#5B6B7C" });
       y += 16;
     }
   });
@@ -639,19 +639,19 @@ async function loadActiveLoanReports() {
 }
 
 function drawMiniTable(doc, x0, y, cols, rows, { header = CYAN } = {}) {
-  const rowH = 14;
+  const rowH = 20;
   const tableW = cols.reduce((s, c) => s + c.w, 0);
   y = ensureRowSpace(doc, y, rowH + 4);
   let x = x0;
   cols.forEach((col) => {
     fillRect(doc, x, y, col.w, rowH, header);
-    cellText(doc, col.label, x, y, col.w, rowH, { align: "center", color: WHITE, bold: true, size: 6.5 });
+    cellText(doc, col.label, x, y, col.w, rowH, { align: "center", color: WHITE, bold: true, size: 9 });
     x += col.w;
   });
   y += rowH;
   if (!rows.length) {
     fillRect(doc, x0, y, tableW, rowH, WHITE);
-    cellText(doc, "None recorded", x0, y, tableW, rowH, { size: 7, color: "#5B6B7C" });
+    cellText(doc, "None recorded", x0, y, tableW, rowH, { size: 9, color: "#5B6B7C" });
     return y + rowH;
   }
   rows.forEach((values, index) => {
@@ -660,7 +660,7 @@ function drawMiniTable(doc, x0, y, cols, rows, { header = CYAN } = {}) {
     cols.forEach((col, i) => {
       fillRect(doc, x, y, col.w, rowH, index % 2 === 0 ? "#F7FBFE" : WHITE);
       doc.strokeColor(LINE).lineWidth(0.2).rect(x, y, col.w, rowH).stroke();
-      cellText(doc, values[i], x, y, col.w, rowH, { align: col.align || "left", size: 6.5, bold: Boolean(col.bold) });
+      cellText(doc, values[i], x, y, col.w, rowH, { align: col.align || "left", size: 9, bold: Boolean(col.bold) });
       x += col.w;
     });
     y += rowH;
@@ -672,18 +672,18 @@ function drawActiveLoanReports(doc, loans, label) {
   let y = 50;
   const pageW = doc.page.width - 36;
   const x0 = 18;
-  doc.font("Helvetica").fontSize(8).fillColor("#5B6B7C")
+  doc.font("Helvetica").fontSize(10).fillColor("#5B6B7C")
     .text(`Active and overdue loans as at ${label}. Schedule columns match loan details: due, opening, principal, interest, penalty, outstanding, paid and surplus.`, x0, y, { width: pageW });
-  y += 22;
+  y += 24;
   loans.forEach((loan, index) => {
     if (index) y = ensureRowSpace(doc, y, 120);
     const principalPaid = Number(loan.principalPaid || 0);
     const interestPaid = Number(loan.interestPaid || 0);
     const principalLeft = Number(loan.principalLeft || 0);
     const interestLeft = Number(loan.interestLeft || 0);
-    fillRect(doc, x0, y, pageW, 20, index % 2 === 0 ? NAVY : BLUE);
-    cellText(doc, `${loan.member}   ${loan.reference}   ${loan.product}   ${loan.status}`, x0, y, pageW, 20, { color: WHITE, bold: true, size: 9 });
-    y += 20;
+    fillRect(doc, x0, y, pageW, 24, index % 2 === 0 ? NAVY : BLUE);
+    cellText(doc, `${loan.member}   ${loan.reference}   ${loan.product}   ${loan.status}`, x0, y, pageW, 24, { color: WHITE, bold: true, size: 12 });
+    y += 24;
     const facts = [
       ["Requested", formatDay(loan.requestedAt)],
       ["Disbursed", formatDay(loan.disbursedAt)],
@@ -692,12 +692,12 @@ function drawActiveLoanReports(doc, loans, label) {
     ];
     const boxW = pageW / 4;
     facts.forEach((fact, i) => {
-      fillRect(doc, x0 + i * boxW, y, boxW, 28, WHITE);
-      doc.strokeColor(LINE).lineWidth(0.3).rect(x0 + i * boxW, y, boxW, 28).stroke();
-      cellText(doc, fact[0], x0 + i * boxW, y, boxW, 12, { size: 6.5, color: "#5B6B7C" });
-      cellText(doc, fact[1], x0 + i * boxW, y + 11, boxW, 16, { size: 8, bold: true, color: NAVY });
+      fillRect(doc, x0 + i * boxW, y, boxW, 36, WHITE);
+      doc.strokeColor(LINE).lineWidth(0.3).rect(x0 + i * boxW, y, boxW, 36).stroke();
+      cellText(doc, fact[0], x0 + i * boxW, y, boxW, 14, { size: 9, color: "#5B6B7C" });
+      cellText(doc, fact[1], x0 + i * boxW, y + 14, boxW, 20, { size: 11, bold: true, color: NAVY });
     });
-    y += 28;
+    y += 36;
     const penaltyLeft = Number(loan.penaltyLeft || 0);
     const moneyBoxes = [
       ["Principal paid", moneyExact(principalPaid), GREEN_CELL, GREEN_TEXT],
@@ -708,34 +708,34 @@ function drawActiveLoanReports(doc, loans, label) {
     ];
     const moneyW = pageW / 5;
     moneyBoxes.forEach((box, i) => {
-      fillRect(doc, x0 + i * moneyW, y, moneyW, 28, box[2]);
-      cellText(doc, box[0], x0 + i * moneyW, y, moneyW, 12, { size: 6.5, color: box[3] });
-      cellText(doc, box[1], x0 + i * moneyW, y + 11, moneyW, 16, { size: 8, bold: true, color: box[3] });
+      fillRect(doc, x0 + i * moneyW, y, moneyW, 40, box[2]);
+      cellText(doc, box[0], x0 + i * moneyW, y, moneyW, 16, { size: 9, color: box[3] });
+      cellText(doc, box[1], x0 + i * moneyW, y + 16, moneyW, 22, { size: 12, bold: true, color: box[3] });
     });
-    y += 34;
-    cellText(doc, "How and when installments were paid", x0, y, pageW, 14, { bold: true, size: 8, color: NAVY });
-    y += 14;
+    y += 46;
+    cellText(doc, "How and when installments were paid", x0, y, pageW, 16, { bold: true, size: 11, color: NAVY });
+    y += 16;
     y = drawMiniTable(doc, x0, y, [
       { w: 90, label: "Date paid", align: "left" },
       { w: 120, label: "How paid", align: "left" },
       { w: 110, label: "Amount", align: "right", bold: true },
       { w: 200, label: "Receipt", align: "left" },
     ], loan.payments.map((p) => [formatDay(p.paidAt), p.method || "-", moneyExact(p.amount), p.reference || "-"]), { header: GREEN_TEXT });
-    y += 8;
-    cellText(doc, "Repayment schedule", x0, y, pageW, 14, { bold: true, size: 8, color: NAVY });
-    y += 14;
+    y += 10;
+    cellText(doc, "Repayment schedule", x0, y, pageW, 16, { bold: true, size: 11, color: NAVY });
+    y += 16;
     y = drawMiniTable(doc, x0, y, [
-      { w: 28, label: "#", align: "center" },
-      { w: 72, label: "Due date", align: "left" },
-      { w: 72, label: "Opening", align: "right" },
-      { w: 70, label: "Principal", align: "right" },
-      { w: 62, label: "Interest", align: "right" },
-      { w: 58, label: "Penalty", align: "right" },
-      { w: 70, label: "Due", align: "right", bold: true },
-      { w: 72, label: "Outstanding", align: "right" },
-      { w: 70, label: "Paid amount", align: "right" },
-      { w: 58, label: "Surplus", align: "right" },
-      { w: 70, label: "Status", align: "left" },
+      { w: 32, label: "#", align: "center" },
+      { w: 78, label: "Due date", align: "left" },
+      { w: 78, label: "Opening", align: "right" },
+      { w: 76, label: "Principal", align: "right" },
+      { w: 68, label: "Interest", align: "right" },
+      { w: 64, label: "Penalty", align: "right" },
+      { w: 76, label: "Due", align: "right", bold: true },
+      { w: 82, label: "Outstanding", align: "right" },
+      { w: 76, label: "Paid amount", align: "right" },
+      { w: 64, label: "Surplus", align: "right" },
+      { w: 72, label: "Status", align: "left" },
     ], loan.schedule.map((s) => [
       s.installment,
       formatDay(s.dueDate),

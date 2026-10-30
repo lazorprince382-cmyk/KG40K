@@ -4742,7 +4742,7 @@ async function renderSecurePreview(contentHref,title) {
       const pages=host.querySelector(".pdf-preview-pages");
       const displayWidth=Math.max(280,(host.clientWidth||360)-24);
       const dpr=Math.min(Math.max(window.devicePixelRatio||1,2),3);
-      const zoomHeadroom=displayWidth<720?4:2.6;
+      const zoomHeadroom=displayWidth<720?6:3.4;
       for(let number=1;number<=pdf.numPages;number++) {
         if(!host.isConnected)return;
         const page=await pdf.getPage(number),base=page.getViewport({scale:1});

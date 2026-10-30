@@ -3,7 +3,7 @@
   const D=window.DepartmentUi;
   if(!D) return;
   const {esc,date,badge,risk,panel,empty,table,options,modal,reload,download}=D;
-  if(!document.querySelector('link[href*="supervisory-styles.css"]')){const link=document.createElement("link");link.rel="stylesheet";link.href="/supervisory-styles.css?v=42";document.head.appendChild(link);}
+  if(!document.querySelector('link[href*="supervisory-styles.css"]')){const link=document.createElement("link");link.rel="stylesheet";link.href="/supervisory-styles.css?v=43";document.head.appendChild(link);}
   const role="Supervisory Officer",key="supervisory";
   const config={
     key,title:"Supervisory Department",dashboardTitle:"",
@@ -59,32 +59,27 @@
     return list;
   }
   const alertList=list=>`<div class="dept-notification-list">${list.map(x=>`<button data-dept-target="${x.target}"><span class="${x.level}">${icons[x.level==="info"?"info":"bell"]}</span><div><strong>${esc(x.title)}</strong></div></button>`).join("")||empty("Nothing needs attention right now.")}</div>`;
-  const behindTable=rows=>rows.length?table(["Member","Short by"],rows.map(x=>`<tr><td><strong>${esc(x.name)}</strong></td><td class="negative">${money(x.shortBy)}</td></tr>`).join("")):empty("Every active member is up to date.");
+  const behindTable=rows=>rows.length?table(["Member"],rows.map(x=>`<tr><td><strong>${esc(x.name)}</strong></td></tr>`).join("")):empty("Every active member is up to date.");
 
   D.dashboards.supervisory=()=>{
     const s=S();
     if(!s||!s.stats)return `<div class="executive-loading">Loading Supervisory workspace…</div>`;
     const g=G(),open=openCounts();
-    const guide=`<section class="sup-guide"><h3>How the Supervisory desk is used</h3><ol>
-      <li><b>Check the group every month.</b> Open Group Health to see who is behind on savings, which loans are overdue and where the money is.</li>
-      <li><b>Follow meeting decisions.</b> Record each AGM or Executive resolution under Resolutions and update it until it is done.</li>
-      <li><b>Handle member concerns.</b> Register complaints, then issue recommendations to the responsible department and track them to completion.</li></ol></section>`;
     const cards=[
       card("Active members",g.activeMembers||0,"On the member roll","supervisory-group"),
-      card(`Up to date for ${String(g.monthLabel||"this month").split(" ")[0]}`,`${g.upToDate||0} / ${g.activeMembers||0}`,`Target ${money(g.requiredThisMonth||0)} per member`,"supervisory-group","good"),
+      card(`Up to date for ${String(g.monthLabel||"this month").split(" ")[0]}`,`${g.upToDate||0} / ${g.activeMembers||0}`,"Members current on savings","supervisory-group","good"),
       card("Behind on savings",(g.behind||[]).length,"Members short this month","supervisory-group",(g.behind||[]).length?"warn":""),
-      card("Money in loans",money(g.moneyInLoans||0),`${g.activeLoans||0} running loan${g.activeLoans===1?"":"s"}`,"supervisory-group"),
       card("Overdue loans",g.overdueLoans||0,"Need follow-up","supervisory-group",g.overdueLoans?"warn":""),
-      card("Centenary bank",money(g.centenary||0),"Group bank account","supervisory-group"),
-      card("UAP unit trust",money(g.uap||0),"Old Mutual investment","supervisory-group"),
-      card("Welfare fund",money(g.welfareBalance||0),"Available for members","supervisory-group")
+      card("Open resolutions",open.resolutions,"AGM and Executive decisions","supervisory-resolutions"),
+      card("Open complaints",open.complaints,"Member concerns still open","supervisory-complaints"),
+      card("Open recommendations",open.recommendations,"Not yet implemented","supervisory-recommendations")
     ];
     const oversight=`<div class="sup-open-grid">
       <button data-dept-target="supervisory-resolutions"><strong>${open.resolutions}</strong><span>Open resolutions</span></button>
       <button data-dept-target="supervisory-complaints"><strong>${open.complaints}</strong><span>Open complaints</span></button>
       <button data-dept-target="supervisory-recommendations"><strong>${open.recommendations}</strong><span>Open recommendations</span></button></div>`;
-    return `${D.dashboardGreeting()}<div class="supervisory-command">${guide}<div class="sup-cards">${cards.join("")}</div>
-      <div class="sup-two-col">${panel(`Members behind for ${esc(g.monthLabel||"this month")}`,"Largest shortfall first",behindTable((g.behind||[]).slice(0,8)))}
+    return `${D.dashboardGreeting()}<div class="supervisory-command"><div class="sup-cards">${cards.join("")}</div>
+      <div class="sup-two-col">${panel(`Members behind for ${esc(g.monthLabel||"this month")}`,"Who still needs to catch up",behindTable((g.behind||[]).slice(0,12)))}
       ${panel("Follow-up at a glance","Decisions, complaints and recommendations still open",oversight+alertList(alerts()))}</div></div>`;
   };
   D.subtitles.supervisory=()=>"";
@@ -92,16 +87,15 @@
   D.views["supervisory-group"]=()=>{
     const g=G();
     const loans=(g.overdueLoanList||[]).length
-      ?table(["Loan","Member","Balance","Overdue since"],g.overdueLoanList.map(x=>`<tr><td><strong>${esc(x.reference)}</strong></td><td>${esc(x.member)}</td><td>${money(x.balance)}</td><td>${date(x.dueSince)}</td></tr>`).join(""))
+      ?table(["Loan","Member","Overdue since"],g.overdueLoanList.map(x=>`<tr><td><strong>${esc(x.reference)}</strong></td><td>${esc(x.member)}</td><td>${date(x.dueSince)}</td></tr>`).join(""))
       :empty("No overdue loans.");
     return `<div class="dept-page"><div class="sup-cards">
-      ${card("Savings target",money(g.requiredThisMonth||0),`Each member by end of ${esc(g.monthLabel||"this month")}`,"supervisory-group")}
-      ${card("Up to date",`${g.upToDate||0} / ${g.activeMembers||0}`,"Members on target","supervisory-group","good")}
-      ${card("Total member savings",money(g.totalSavings||0),"All active members","supervisory-group")}
+      ${card("Up to date",`${g.upToDate||0} / ${g.activeMembers||0}`,"Members current on savings","supervisory-group","good")}
+      ${card("Behind on savings",(g.behind||[]).length,`For ${esc(g.monthLabel||"this month")}`,"supervisory-group",(g.behind||[]).length?"warn":"")}
+      ${card("Overdue loans",g.overdueLoans||0,"Need follow-up","supervisory-group",g.overdueLoans?"warn":"")}
       ${card("Loans waiting",g.loansWaiting||0,"Applications in progress","supervisory-group")}</div>
-      <div class="sup-two-col">${panel("Savings: members behind","Amount each member needs to be up to date",behindTable(g.behind||[]))}
-      ${panel("Loans: overdue","Loans with missed repayments",loans)}</div>
-      ${panel("Where the group's money is","Read-only positions from Finance and Credits",`<div class="sup-money-grid"><div><span>Centenary bank</span><strong>${money(g.centenary||0)}</strong></div><div><span>UAP unit trust</span><strong>${money(g.uap||0)}</strong></div><div><span>Money in loans</span><strong>${money(g.moneyInLoans||0)}</strong></div><div><span>Welfare fund</span><strong>${money(g.welfareBalance||0)}</strong></div></div>`)}</div>`;
+      <div class="sup-two-col">${panel("Savings: members behind","Who still needs to catch up",behindTable(g.behind||[]))}
+      ${panel("Loans: overdue","Loans with missed repayments",loans)}</div></div>`;
   };
   D.views["supervisory-resolutions"]=()=>panel("Meeting resolutions","Each decision, who is responsible, the deadline and progress",table(["Resolution","Meeting","Responsible","Due","Progress","Status","Update"],S().resolutions.map(x=>`<tr><td class="wide-cell"><strong>${esc(x.resolutionNumber)}</strong><small>${esc(x.title)}</small></td><td>${date(x.meetingDate)}</td><td>${esc(x.responsibleOfficer)}<small>${esc(x.department||"Whole group")}</small></td><td>${date(x.dueDate)}</td><td>${progress(x.completionPercentage)}</td><td>${badge(x.status,statusTone(x.status))}</td><td><button class="mini-btn" data-sup-resolution="${x.id}">${icons.refresh}</button></td></tr>`).join("")));
   D.views["supervisory-complaints"]=()=>panel("Member complaints","Concerns raised by members about the group, its leaders or departments",table(["Complaint","Category","About","Description","Handled by","Status","Update"],S().complaints.map(x=>`<tr><td><strong>${esc(x.complaintNumber)}</strong></td><td>${esc(x.category)}</td><td>${esc(x.department||x.subjectType)}</td><td class="wide-cell">${esc(x.description)}${x.finding?`<small>Finding: ${esc(x.finding)}</small>`:""}</td><td>${esc(x.assignedSupervisor)}</td><td>${badge(x.status,statusTone(x.status))}</td><td><button class="mini-btn" data-sup-complaint="${x.id}">${icons.refresh}</button></td></tr>`).join("")));
@@ -109,7 +103,7 @@
   D.views["supervisory-documents"]=()=>panel("Documents","Minutes, policies, annual reports and Supervisory evidence",table(["Reference","Document","Type","Updated","Open"],S().documents.map(x=>`<tr><td><strong>${esc(x.reference)}</strong></td><td>${esc(x.title)}</td><td>${esc(x.documentType)}</td><td>${date(x.updatedAt,true)}</td><td>${x.hasFile?`<div class="document-actions"><a class="mini-btn" href="/api/documents/${x.id}/view" target="_blank">${icons.eye}</a><a class="mini-btn" href="/api/documents/${x.id}/download">${icons.download}</a></div>`:`<span class="status pending">No file</span>`}</td></tr>`).join("")));
   D.views["supervisory-notifications"]=()=>panel("What needs attention","Generated from live group figures and open follow-ups",alertList(alerts()));
   D.views["supervisory-search"]=()=>panel("Search results",`${(state.supervisorySearchResults||[]).length} records found`,table(["Type","Reference","Record","Detail"],(state.supervisorySearchResults||[]).map(x=>`<tr><td>${badge(x.type)}</td><td><strong>${esc(x.reference)}</strong></td><td>${esc(x.title)}</td><td>${esc(x.detail)}</td></tr>`).join("")));
-  D.settings.supervisory=()=>`<div class="audit-settings-grid">${panel("What Supervisory can do","Oversight of the Kwagalana group",`<div class="audit-permission-list"><div>${icons.check}<span><b>See group health</b><small>Savings, loans, bank, UAP and welfare positions</small></span></div><div>${icons.check}<span><b>Record and follow resolutions</b><small>From AGM and Executive meetings</small></span></div><div>${icons.check}<span><b>Handle complaints and recommendations</b><small>Tracked until done</small></span></div></div>`)}${panel("What Supervisory cannot do","Money records stay with Finance and Credits",`<div class="audit-readonly-note">${icons.lock}<div><strong>READ ONLY ON MONEY</strong><p>Supervisory cannot change savings, loans, bank, UAP or welfare records, and cannot approve payments.</p></div></div>`)}</div>`;
+  D.settings.supervisory=()=>panel("Supervisory settings","Resolutions, complaints and recommendations",`<p class="page-subtitle">Use Resolutions for AGM and Executive decisions, Complaints for member concerns, and Recommendations to follow work until it is done.</p>`);
 
   D.actions.supervisory=()=>{
     const map={"supervisory-resolutions":["resolution","Add resolution"],"supervisory-complaints":["complaint","Register complaint"],
