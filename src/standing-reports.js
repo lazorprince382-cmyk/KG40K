@@ -471,7 +471,7 @@ async function loadAssistanceRows() {
   return rows;
 }
 
-function drawAssistanceRegister(doc, rows, label) {
+function drawAssistanceRegister(doc, rows) {
   const cols = [
     { w: 28, label: "No." },
     { w: 78, label: "Date paid" },
@@ -486,9 +486,6 @@ function drawAssistanceRegister(doc, rows, label) {
   let y = 50;
   fillRect(doc, x0, y, tableW, 22, NAVY);
   cellText(doc, "People already given welfare assistance", x0, y, tableW, 22, { align: "center", color: WHITE, bold: true, size: 10 });
-  y += 22;
-  fillRect(doc, x0, y, tableW, 18, SKY);
-  cellText(doc, `Register as at ${label}  ·  Each payout UGX 1,000,000 unless shown otherwise`, x0, y, tableW, 18, { align: "center", color: NAVY, bold: true, size: 8 });
   y += 22;
   let x = x0;
   cols.forEach((col) => {
@@ -852,8 +849,8 @@ async function buildStandingPdf(kind, { asOf } = {}) {
       drawCompanyStanding(doc, standing, label);
     } else if (kind === "assistance") {
       const rows = await loadAssistanceRows();
-      drawHeader(doc, `Welfare Assistance Register as at ${label}`);
-      drawAssistanceRegister(doc, rows, label);
+      drawHeader(doc, "Welfare Assistance Register");
+      drawAssistanceRegister(doc, rows);
     } else if (kind === "active-loans") {
       const loans = await loadActiveLoanReports();
       drawHeader(doc, `Active Loans Report as at ${label}`);
