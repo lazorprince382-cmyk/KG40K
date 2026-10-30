@@ -1,6 +1,6 @@
 /* Ordered application loader. */
 [
-  "app-core.js?v=255",
+  "app-core.js?v=256",
   "department-theme.js?v=65",
   "department-core.js?v=95",
   "audit-dashboard.js?v=83",
@@ -21,7 +21,7 @@
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", async () => {
     try {
-      const registration = await navigator.serviceWorker.register("/sw.js?v=233", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("/sw.js?v=234", { updateViaCache: "none" });
       await registration.update();
     } catch (error) {
       console.warn("Service worker registration failed", error);

@@ -2428,22 +2428,57 @@ app.post("/api/finance/accounts",auth,requireFinance("create"),asyncRoute(async(
   } catch(error){if(error.code==="23505")return res.status(409).json({error:"That finance account code already exists"});throw error;}
 }));
 app.patch("/api/finance/accounts/:id",auth,requireFinance("edit"),asyncRoute(async(req,res)=>{
+  if(req.user.role!=="Finance Officer")return res.status(403).json({error:"Only Finance can edit bank and cash account values"});
   const b=req.body,type=String(b.accountType||"").toLowerCase(),allowed=["bank","cash","petty_cash","mobile_money","restricted"];
   if(!allowed.includes(type)||!String(b.accountName||"").trim())return res.status(400).json({error:"Account name and valid account type are required"});
   if(type==="bank"&&(!String(b.bankName||"").trim()||!String(b.accountNumber||"").trim()))
     return res.status(400).json({error:"Bank name and account number are required for a bank account"});
-  const row=await one(`UPDATE finance_accounts SET account_name=$1,account_type=$2,bank_name=$3,account_number=$4,
-    restricted=$5,notes=$6,supporting_document=COALESCE($7,supporting_document),
-    supporting_document_name=COALESCE($8,supporting_document_name),updated_at=NOW() WHERE id=$9 AND active=true
-    RETURNING id,account_code AS "accountCode",account_name AS "accountName"`,
-  [String(b.accountName).trim(),type,String(b.bankName||"").trim()||null,String(b.accountNumber||"").trim()||null,
-    type==="restricted"||Boolean(b.restricted),String(b.notes||"").trim()||null,String(b.supportingDocument||"").trim()||null,
-    String(b.attachmentName||"").trim()||null,req.params.id]);
+  const nextBalance=b.balance==null||b.balance===""?null:Number(b.balance);
+  if(nextBalance!=null&&(!Number.isFinite(nextBalance)||nextBalance<0))
+    return res.status(400).json({error:"Account balance must be zero or a positive amount"});
+  const reconciled=String(b.lastReconciledAt||"").trim();
+  if(reconciled&&!/^\d{4}-\d{2}-\d{2}$/.test(reconciled))return res.status(400).json({error:"Last reconciled date must be a valid date"});
+  const row=await transaction(async client=>{
+    const current=(await client.query(`SELECT * FROM finance_accounts WHERE id=$1 AND active=true FOR UPDATE`,[req.params.id])).rows[0];
+    if(!current)return null;
+    const accountType=current.account_code==="GL-4104"||current.account_code==="GL-4500"?current.account_type:type;
+    const previous=Number(current.balance||0);
+    const live=nextBalance==null?previous:Math.round(nextBalance*100)/100;
+    const delta=Math.round((live-previous)*100)/100;
+    const updated=(await client.query(`UPDATE finance_accounts SET account_name=$1,account_type=$2,bank_name=$3,account_number=$4,
+      restricted=$5,notes=$6,supporting_document=COALESCE($7,supporting_document),
+      supporting_document_name=COALESCE($8,supporting_document_name),
+      balance=$9,
+      last_reconciled_at=CASE WHEN $10::date IS NULL THEN last_reconciled_at ELSE $10::date END,
+      updated_at=NOW() WHERE id=$11
+      RETURNING id,account_code AS "accountCode",account_name AS "accountName",balance::float AS balance,last_reconciled_at AS "lastReconciledAt"`,
+    [String(b.accountName).trim(),accountType,String(b.bankName||"").trim()||null,String(b.accountNumber||"").trim()||null,
+      accountType==="restricted"||Boolean(b.restricted),String(b.notes||"").trim()||null,String(b.supportingDocument||"").trim()||null,
+      String(b.attachmentName||"").trim()||null,live,reconciled||null,req.params.id])).rows[0];
+    if(Math.abs(delta)>0.004){
+      const financeDepartment=(await client.query("SELECT id FROM departments WHERE code='finance'")).rows[0];
+      await client.query(`INSERT INTO organization_finance_entries
+        (department_id,reference,entry_type,category,description,counterparty,payment_method,amount,status,
+          transaction_date,recorded_by,approved_by,approved_at,finance_account_id)
+        VALUES ($1,$2,'transfer','Bank balance adjustment',$3,$4,'Bank reconciliation',$5,'completed',
+          (CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date,$6,$6,NOW(),$7)`,
+      [financeDepartment.id,reference("FIN-ADJ"),
+        `Finance set ${updated.accountName} from UGX ${previous.toLocaleString()} to UGX ${live.toLocaleString()}.`,
+        updated.accountName,Math.abs(delta),req.user.id,updated.id]);
+    }
+    if(updated.accountCode==="GL-4104")await syncOrganizationBankBalanceSetting(client,updated.id);
+    return updated;
+  });
   if(!row)return res.status(404).json({error:"Active finance account not found"});
-  await audit({userId:req.user.id,action:"FINANCE_ACCOUNT_UPDATED",entityType:"finance_account",entityId:String(row.id),details:row.accountCode,...metadata(req)});
+  await audit({userId:req.user.id,action:"FINANCE_ACCOUNT_UPDATED",entityType:"finance_account",entityId:String(row.id),
+    details:`${row.accountCode} balance UGX ${Number(row.balance).toLocaleString()}`,...metadata(req)});
   res.json(row);
 }));
 app.delete("/api/finance/accounts/:id",auth,requireFinance("edit"),asyncRoute(async(req,res)=>{
+  if(req.user.role!=="Finance Officer")return res.status(403).json({error:"Only Finance can delete cash accounts"});
+  const locked=await one(`SELECT account_code AS "accountCode" FROM finance_accounts WHERE id=$1 AND active=true`,[req.params.id]);
+  if(locked&&["GL-4104","GL-4500"].includes(locked.accountCode))
+    return res.status(409).json({error:"Centenary and UAP cannot be deleted. Edit the live balance instead."});
   const row=await one(`UPDATE finance_accounts SET active=false,updated_at=NOW() WHERE id=$1 AND active=true
     RETURNING id,account_code AS "accountCode",account_name AS "accountName"`,[req.params.id]);
   if(!row)return res.status(404).json({error:"Active finance account not found"});
@@ -2927,6 +2962,7 @@ app.post("/api/finance/procurements/:id/advance",auth,requireFinance("edit"),asy
   res.json({ok:true,stage:next});
 }));
 app.post("/api/finance/accounts/:id/reconcile",auth,requireFinance("edit"),asyncRoute(async(req,res)=>{
+  if(req.user.role!=="Finance Officer")return res.status(403).json({error:"Only Finance can reconcile bank accounts"});
   const account=await one("UPDATE finance_accounts SET last_reconciled_at=NOW() WHERE id=$1 AND active=true RETURNING id,account_name",[req.params.id]);
   if(!account)return res.status(404).json({error:"Finance account not found"});
   await audit({userId:req.user.id,action:"BANK_ACCOUNT_RECONCILED",entityType:"finance_account",entityId:String(account.id),details:account.account_name,...metadata(req)});

@@ -935,7 +935,7 @@ function headActions() {
     if(state.page==="finance-expenses") return `<div class="head-actions"><button class="button primary" data-finance-modal="expense">${icons.plus}New expense</button></div>`;
     if(state.page==="finance-invoices") return `<div class="head-actions"><button class="button primary" data-finance-modal="invoice">${icons.plus}Record invoice</button></div>`;
     if(state.page==="finance-budgets") return `<div class="head-actions"><button class="button primary" data-finance-modal="budget">${icons.plus}Create or update budget</button></div>`;
-    if(state.page==="finance-bank") return `<div class="head-actions"><button class="button primary" data-finance-modal="transfer-uap">${icons.arrowUp||icons.plus}Transfer to UAP</button><button class="button secondary" data-finance-modal="withdraw-uap">${icons.withdraw}Withdraw from UAP</button><button class="button secondary" data-finance-modal="account">${icons.plus}Add cash account</button></div>`;
+    if(state.page==="finance-bank") return canFinanceEditAccounts()?`<div class="head-actions"><button class="button primary" data-finance-modal="transfer-uap">${icons.arrowUp||icons.plus}Transfer to UAP</button><button class="button secondary" data-finance-modal="withdraw-uap">${icons.withdraw}Withdraw from UAP</button><button class="button secondary" data-finance-modal="account">${icons.plus}Add cash account</button></div>`:`<div class="head-actions"><button class="button secondary" data-finance-page="finance-unit-trust">${icons.reports}Unit Trust movement</button></div>`;
     if(state.page==="finance-unit-trust") return `<div class="head-actions"><button class="button primary" data-finance-modal="transfer-uap">${icons.arrowUp||icons.plus}Transfer to UAP</button><button class="button secondary" data-finance-modal="withdraw-uap">${icons.withdraw}Withdraw from UAP</button></div>`;
     if(state.page==="finance-assets") return `<div class="head-actions"><button class="button primary" data-finance-modal="asset">${icons.plus}Register asset</button></div>`;
     if(state.page==="finance-procurement") return `<div class="head-actions"><button class="button primary" data-finance-modal="procurement">${icons.plus}Procurement request</button></div>`;
@@ -1902,6 +1902,9 @@ function financeBudgetsView() {
   const canEdit=Boolean(f.access?.canEdit||f.access?.canCreate);
   return `<div class="finance-budget-cards">${f.budgets.map(b=>`<article class="${b.utilization>=100?"danger":b.utilization>=80?"warning":""}"><div><span>${b.department}</span></div><h3>${money(b.allocated)}</h3><p>Used ${money(b.used)} - Remaining ${money(b.remaining)}</p>${progress("Budget utilization",`${b.utilization}%`,Math.min(100,b.utilization),b.utilization>=90?"amber":"lime")}<small>${b.utilization>=100?"Budget exceeded — spending must stop":b.utilization>=90?"Critical: 90% threshold reached":b.utilization>=80?"Warning: 80% threshold reached":"Within approved budget"}</small>${canEdit?`<div class="finance-account-actions"><button class="danger-action" data-finance-budget-delete="${b.id}">Delete budget</button></div>`:""}</article>`).join("")||`<div class="exec-empty">No department budgets for this period.</div>`}</div>`;
 }
+function canFinanceEditAccounts(){
+  return state.role==="Finance Officer"&&!state.executiveWorkspace&&Boolean(state.finance?.access?.canEdit||state.finance?.access?.canCreate);
+}
 function financeBankView() {
   const f=state.finance;
   const shellZero=new Set(["GL-4101","GL-4102","GL-4103","GL-4105"]);
@@ -1911,14 +1914,21 @@ function financeBankView() {
     return Number(a.balance)>0;
   });
   const historical=Boolean(f.historicalPeriod);
-  const canEdit=Boolean(f.access?.canCreate||f.access?.canEdit);
+  const canEdit=canFinanceEditAccounts();
   const welfareOnBank=Number(f.cashPosition?.welfareOnCentenaryThisMonth||f.welfareProgress?.collected||0);
   const welfareLabel=f.cashPosition?.welfareMonthLabel||f.welfareProgress?.periodLabel||"This month";
   const centenaryRows=(f.entries||[]).filter(x=>x.entryType==="income"&&["completed","approved"].includes(x.status)&&/member\s*savings/i.test(x.category||"")).slice(0,12);
   return `${canEdit&&!historical?`<div class="module-actions" style="margin-bottom:14px"><button class="button primary" data-finance-modal="transfer-uap">${icons.arrowUp||icons.wallet}Transfer to UAP</button><button class="button secondary" data-finance-modal="withdraw-uap">${icons.withdraw}Withdraw from UAP</button><button class="button secondary" data-finance-page="finance-unit-trust">${icons.reports}Unit Trust movement</button></div>`:`<div class="module-actions" style="margin-bottom:14px"><button class="button secondary" data-finance-page="finance-unit-trust">${icons.reports}Unit Trust movement</button></div>`}
   <p class="exec-report-preview-note">Welfare is not a second bank. When a member pays UGX 425,000, the whole UGX 425,000 goes onto Centenary. UGX 25,000 is marked as welfare and UGX 400,000 as savings — both already sit in this Centenary balance. Deleting the receipt reverses the same full amount.</p>
   <div class="exec-module-metrics" style="margin-bottom:14px">${executiveModuleMetric("Centenary bank",money(f.stats?.currentBankBalance||f.cashPosition?.bankBalance||0),"green")}${executiveModuleMetric(`${welfareLabel} welfare in Centenary`,money(welfareOnBank),"blue")}${executiveModuleMetric("UAP account",money(f.stats?.uapBalance||f.cashPosition?.uapBalance||0),"violet")}${executiveModuleMetric("Money in loans",money(f.stats?.loansOutstanding||f.cashPosition?.loansOutstanding||0),"orange")}</div>
-  <div class="finance-account-grid">${accounts.map(a=>`<article><div><span>${icons[a.accountType==="bank"||a.accountCode==="GL-4500"?"building":"wallet"]}</span><div><small>${a.accountCode==="GL-4500"?"Unit Trust (UAP)":a.accountCode==="GL-4104"?"Centenary bank":(a.accountType||"account").replaceAll("_"," ")}</small><h3>${a.accountCode==="GL-4500"?"UAP account":a.accountCode==="GL-4104"?"Centenary bank account":a.accountName}</h3><p>${a.bankName||"Organization cash"} ${a.accountNumber||""}</p></div></div><strong>${money(a.balance)}</strong><small>${a.accountCode==="GL-4104"?`Includes ${welfareLabel.toLowerCase()} welfare share ${money(welfareOnBank)} from member deposits`:`Opening balance: ${money(a.openingBalance||0)} - ${a.openingBalanceDate?formatLedgerDate(a.openingBalanceDate):"Date unavailable"}`}</small><small>${historical?`Statement period: ${f.selectedFiscalLabel||f.selectedFiscalYear}`:`Last reconciled: ${a.lastReconciledAt?formatLedgerDate(a.lastReconciledAt):"Never"}`}</small><div class="finance-account-actions">${historical?`<span class="status pending">Historical statement</span>`:`${a.accountType==="bank"?`<button data-finance-reconcile="${a.id}">Reconcile</button>`:""}${a.accountCode==="GL-4500"?`<button data-finance-page="finance-unit-trust">View movement</button>`:`<button data-finance-account-edit="${a.id}">Edit</button><button class="danger-action" data-finance-account-delete="${a.id}">Delete</button>`}`}</div></article>`).join("")||`<div class="exec-empty">No funded accounts yet.</div>`}</div>
+  <div class="finance-account-grid">${accounts.map(a=>{
+    const isCentenary=a.accountCode==="GL-4104";
+    const isUap=a.accountCode==="GL-4500";
+    const actions=historical
+      ?`<span class="status pending">Historical statement</span>`
+      :`${isUap?`<button data-finance-page="finance-unit-trust">View movement</button>`:""}${canEdit&&a.accountType==="bank"?`<button data-finance-reconcile="${a.id}">Reconcile</button>`:""}${canEdit&&!isUap?`<button data-finance-account-edit="${a.id}">${isCentenary?"Edit balance":"Edit"}</button>`:""}${canEdit&&!isCentenary&&!isUap?`<button class="danger-action" data-finance-account-delete="${a.id}">Delete</button>`:""}${!canEdit?`<span class="status pending">Finance only</span>`:""}`;
+    return `<article><div><span>${icons[a.accountType==="bank"||isUap?"building":"wallet"]}</span><div><small>${isUap?"Unit Trust (UAP)":isCentenary?"Centenary bank":(a.accountType||"account").replaceAll("_"," ")}</small><h3>${isUap?"UAP account":isCentenary?"Centenary bank account":a.accountName}</h3><p>${a.bankName||"Organization cash"} ${a.accountNumber||""}</p></div></div><strong>${money(a.balance)}</strong><small>${isCentenary?`Includes ${welfareLabel.toLowerCase()} welfare share ${money(welfareOnBank)} from member deposits`:`Opening balance: ${money(a.openingBalance||0)} - ${a.openingBalanceDate?formatLedgerDate(a.openingBalanceDate):"Date unavailable"}`}</small><small>${historical?`Statement period: ${f.selectedFiscalLabel||f.selectedFiscalYear}`:`Last reconciled: ${a.lastReconciledAt?formatLedgerDate(a.lastReconciledAt):"Never"}`}</small><div class="finance-account-actions">${actions}</div></article>`;
+  }).join("")||`<div class="exec-empty">No funded accounts yet.</div>`}</div>
   ${historical?"":`${financeCashPositionWidget(f)}${financeDataTable("Recent Centenary member receipts",["Receipt","Date","Member","On Centenary","Split"],centenaryRows.map(x=>{const split=savingsSplitFromText(x.description||"");const welfare=split.welfare||0;const savings=Number(x.savingsAmount)>0?Number(x.savingsAmount):Math.max(0,Number(x.amount||0)-welfare);return [x.receiptNumber||x.reference,formatLedgerDate(x.transactionDate),escapeHtml(x.counterparty||"—"),money(x.amount),welfare?`Savings ${money(savings)} · welfare ${money(welfare)}`:"Full amount savings"];}))}`}`;
 }
 async function loadFinanceUnitTrust(month){
@@ -2131,13 +2141,22 @@ async function financeVoucherDecision(id,decision) {
   try{const result=await api(`/api/finance/vouchers/${id}/decision`,{method:"POST",body:JSON.stringify({decision,comment})});state.finance=await api("/api/finance/command-center");render();toast(result.status==="executive_approval"?"Finance review complete; sent to Executive.":"Voucher decision recorded.");}catch(error){toast(error.message);}
 }
 function editFinanceAccount(id) {
+  if(!canFinanceEditAccounts())return toast("Only Finance can edit bank and cash account values.");
   const account=state.finance.accounts.find(item=>String(item.id)===String(id));if(!account)return;
   openFinanceModal("account");
   const form=document.querySelector('[data-finance-form="account"]');form.dataset.accountId=account.id;
+  const title=document.querySelector("#modal-backdrop .modal-head h2");
+  const sub=document.querySelector("#modal-backdrop .modal-head p");
+  if(title)title.textContent=account.accountCode==="GL-4104"?"Edit Centenary bank account":"Edit cash account";
+  if(sub)sub.textContent="Change the live balance, account details and last reconciled date. Other departments cannot do this.";
   form.elements.accountType.value=account.accountType;form.elements.accountCode.value=account.accountCode;form.elements.accountCode.disabled=true;
   form.elements.accountName.value=account.accountName;form.elements.bankName.value=account.bankName||"";form.elements.accountNumber.value=account.accountNumber||"";
-  form.elements.openingBalance.closest(".field").remove();form.elements.openingBalanceDate.closest(".field").remove();form.elements.restricted.checked=Boolean(account.restricted);
+  form.elements.openingBalance.closest(".field").remove();form.elements.openingBalanceDate.closest(".field").remove();
+  form.elements.restricted.checked=Boolean(account.restricted);
   form.elements.notes.value=account.notes||"";
+  const grid=form.querySelector(".form-grid");
+  const recon=account.lastReconciledAt?new Date(account.lastReconciledAt).toISOString().slice(0,10):"";
+  grid.insertAdjacentHTML("beforeend",`<div class="field"><label>Current balance (UGX)</label><input name="balance" type="number" min="0" step="0.01" value="${Number(account.balance||0)}" required><small>This is the live amount shown on Centenary / cash cards.</small></div><div class="field"><label>Last reconciled</label><input name="lastReconciledAt" type="date" max="${new Date().toISOString().slice(0,10)}" value="${recon}"><small>Leave blank to keep ${account.lastReconciledAt?formatLedgerDate(account.lastReconciledAt):"Never"}.</small></div>`);
   form.querySelector("button[type=submit]").textContent="Save account";
 }
 async function deleteFinanceIncome(id){
@@ -2159,7 +2178,9 @@ async function deleteFinanceIncome(id){
   }catch(error){toast(error.message);}
 }
 async function deactivateFinanceAccount(id) {
+  if(!canFinanceEditAccounts())return toast("Only Finance can delete cash accounts.");
   const account=state.finance.accounts.find(item=>String(item.id)===String(id));if(!account)return;
+  if(["GL-4104","GL-4500"].includes(account.accountCode))return toast("Centenary and UAP cannot be deleted. Edit the live balance instead.");
   if(!await confirmDialog(`Delete ${account.accountName}? Existing ledger history will remain available.`))return;
   try{await api(`/api/finance/accounts/${id}`,{method:"DELETE"});state.finance=await api("/api/finance/command-center");render();toast("Finance account deleted.");}catch(error){toast(error.message);}
 }
@@ -2315,6 +2336,7 @@ function downloadFinanceReceipt(id) {
   const link=document.createElement("a");link.href=URL.createObjectURL(new Blob([text],{type:"text/plain"}));link.download=`${row.receiptNumber}.txt`;link.click();URL.revokeObjectURL(link.href);toast("Receipt downloaded.");
 }
 async function reconcileFinanceAccount(id) {
+  if(!canFinanceEditAccounts())return toast("Only Finance can reconcile bank accounts.");
   const account=state.finance.accounts.find(a=>String(a.id)===String(id));if(!account)return;
   if(!await confirmDialog(`Confirm that ${account.accountName} has been reconciled against the bank statement?`))return;
   try{await api(`/api/finance/accounts/${id}/reconcile`,{method:"POST",body:"{}"});state.finance=await api("/api/finance/command-center");render();toast("Bank reconciliation recorded.");}catch(error){toast(error.message);}
