@@ -1,13 +1,13 @@
 /* Self-only member workspace and shared personal account settings. */
 (() => {
-  const pages=["member-dashboard","member-savings","member-loans","member-guarantorship","member-welfare","member-requests",
+  const pages=["member-dashboard","member-savings","member-loans","member-guarantorship","member-welfare","member-hosting-fee","member-requests",
     "member-meetings","member-documents","member-profile","member-notifications","messages","member-support"];
   const labels={"member-dashboard":"Dashboard",messages:"Messages","member-profile":"My Profile","member-savings":"My Savings",
     "member-requests":"My Requests","member-loans":"My Loans","member-guarantorship":"Guarantorship",
-    "member-welfare":"Welfare","member-documents":"Documents","member-meetings":"Meetings",
+    "member-welfare":"Welfare","member-hosting-fee":"Hosting fee","member-documents":"Documents","member-meetings":"Meetings",
     "member-notifications":"Notifications","member-support":"Support"};
   const pageIcons={"member-dashboard":"dashboard",messages:"messages","member-profile":"members","member-savings":"savings","member-loans":"loans",
-    "member-requests":"clock","member-guarantorship":"users","member-welfare":"shield","member-documents":"file",
+    "member-requests":"clock","member-guarantorship":"users","member-welfare":"shield","member-hosting-fee":"receipt","member-documents":"file",
     "member-meetings":"clock","member-notifications":"bell","member-support":"help"};
   const esc=value=>escapeHtml(value==null?"":String(value)),date=value=>value?new Date(value).toLocaleDateString():"—";
   const C=()=>state.memberCenter,S=()=>state.memberSelfService||{opportunities:[],applications:[]},linked=()=>Boolean(state.user?.member_id);
@@ -249,7 +249,7 @@
     const welfareCardNote=`Since ${welfareSinceLabel} · tap for month by month`;
     const welfareAmount=money(fromJoin.paid??s.welfareContributedSince??s.welfare??0);
     return `${oversightBanner()}<div class="member-portal"><section class="member-welcome member-hero-card"><div class="member-welcome-top"><span>${g}</span><h2>${esc(m.fullName)}</h2></div>${loanNeedCta(c)}</section>
-      <div class="member-summary-grid">${metric("My Savings",money(s.savings),"savings","member-savings",`Current carried-forward balance${savingsMonthBadge()}`)}${metric("Share Capital",money(s.shares),"building","member-savings","Current share balance")}${metric("Personal Total Funds",money(s.personalTotalFunds??s.totalMemberFunds),"wallet","member-savings","Savings plus share capital")}${metric("Welfare",welfareAmount,"shield","member-welfare",welfareCardNote)}${metric("Active Loan Balance",money(s.activeLoanBalance),"loans","member-loans","Remaining total repayment including interest")}</div>
+      <div class="member-summary-grid">${metric("My Savings",money(s.savings),"savings","member-savings",`Current carried-forward balance${savingsMonthBadge()}`)}${metric("Share Capital",money(s.shares),"building","member-savings","Current share balance")}${metric("Personal Total Funds",money(s.personalTotalFunds??s.totalMemberFunds),"wallet","member-savings","Savings plus share capital")}${metric("Welfare",welfareAmount,"shield","member-welfare",welfareCardNote)}${metric("Hosting fee",money(s.hostingFeePaid??c.hostingFee?.paid??0),"receipt","member-hosting-fee",Number(s.hostingFeePaid??c.hostingFee?.paid??0)>0.5?"Paid to Centenary":"Not paid yet")}${metric("Active Loan Balance",money(s.activeLoanBalance),"loans","member-loans","Remaining total repayment including interest")}</div>
       <div class="member-summary-grid member-org-standing">${metric("UAP account",money(uap),"building","member-dashboard","Old Mutual unit trust standing amount")}${metric("Centenary bank account",money(bank),"wallet","member-dashboard","Company Centenary account")}${metric("Money in loans",money(loansOut),"loans","member-loans","Principal + interest + penalties remaining")}${metric("Total Company Funds",money(company),"reports","member-dashboard","UAP + Centenary + money in loans + welfare remaining")}</div>
       ${dashboardNextUp(c)}
       <div class="member-dashboard-reveals">${contributionProgressReveal()}${welfareContributionsReveal()}${recentActivityReveal()}</div></div>`;
@@ -262,8 +262,9 @@
   }
   function savings(){
     const c=C(),monthly=c.transactions.filter(x=>/deposit/i.test(x.type)&&x.status==="completed"&&new Date(x.createdAt).getMonth()===new Date().getMonth()).reduce((s,x)=>s+Number(x.amount),0);
-    const rows=c.transactions.map(x=>`<tr><td><strong>${esc(x.reference)}</strong><small>${esc(x.externalReference||"")}</small></td><td>${esc(x.type)}</td><td>${esc(x.method)}</td><td>${money(x.amount)}</td><td>${esc(x.receiptNumber||"Issued after verification")}</td><td>${date(x.createdAt)}</td><td>${status(x.status)}</td><td><button class="button small secondary" data-member-transaction="${x.id}">${icons.eye}Details</button></td></tr>`).join("");
-    const cards=c.transactions.map(x=>`<article class="member-history-card"><header><strong>${esc(x.reference)}</strong>${status(x.status)}</header><p>${esc(x.type)} · ${esc(x.method)}</p><dl><div><dt>Amount</dt><dd>${money(x.amount)}</dd></div><div><dt>Receipt</dt><dd>${esc(x.receiptNumber||"After verification")}</dd></div><div><dt>Date</dt><dd>${date(x.createdAt)}</dd></div></dl>${x.externalReference?`<small>Ref ${esc(x.externalReference)}</small>`:""}<button class="button small secondary" data-member-transaction="${x.id}">${icons.eye} Details</button></article>`).join("");
+    const history=c.transactions.filter(x=>x.type!=="Hosting fee");
+    const rows=history.map(x=>`<tr><td><strong>${esc(x.reference)}</strong><small>${esc(x.externalReference||"")}</small></td><td>${esc(x.type)}</td><td>${esc(x.method)}</td><td>${money(x.amount)}</td><td>${esc(x.receiptNumber||"Issued after verification")}</td><td>${date(x.createdAt)}</td><td>${status(x.status)}</td><td><button class="button small secondary" data-member-transaction="${x.id}">${icons.eye}Details</button></td></tr>`).join("");
+    const cards=history.map(x=>`<article class="member-history-card"><header><strong>${esc(x.reference)}</strong>${status(x.status)}</header><p>${esc(x.type)} · ${esc(x.method)}</p><dl><div><dt>Amount</dt><dd>${money(x.amount)}</dd></div><div><dt>Receipt</dt><dd>${esc(x.receiptNumber||"After verification")}</dd></div><div><dt>Date</dt><dd>${date(x.createdAt)}</dd></div></dl>${x.externalReference?`<small>Ref ${esc(x.externalReference)}</small>`:""}<button class="button small secondary" data-member-transaction="${x.id}">${icons.eye} Details</button></article>`).join("");
     return `<div class="member-module"><div class="member-summary-grid compact">${metric("Current balance",money(c.member.savings),"savings","member-savings")}${metric("Verified this month",money(monthly),"receipt","member-savings")}${metric("Share capital",money(c.member.shares),"building","member-savings")}</div><div class="module-actions">${canActOnMember()?`<button class="button primary" data-member-action="deposit">${icons.plus}Submit deposit</button>`:""}${!readOnlyMember()?`<button class="button secondary" data-member-action="withdraw">${icons.arrowUp}Request withdrawal</button><a class="button secondary" href="/api/member/reports/transactions.csv">${icons.download}Download statement</a>`:""}</div>${monthlySavingsStatusReveal()}${panel("Savings history","Submitted evidence, verification decisions and official receipts",`<div class="member-history-desktop">${gridTable(["Reference","Type","Method","Amount","Official receipt","Submitted","Status","Actions"],rows)}</div><div class="member-history-cards">${cards||`<div class="member-empty">No records yet.</div>`}</div>`)}</div>`;
   }
   function requestAmount(x){
@@ -367,6 +368,13 @@
     const opportunities=service.opportunities.map(x=>`<article class="card member-opportunity"><div><small>${esc(x.category||"Investment")} - ${esc(x.reference)}</small><h3>${esc(x.name)}</h3><p>${esc(x.description)}</p></div><dl><div><dt>Minimum</dt><dd>${money(x.minimumInvestment)}</dd></div><div><dt>Expected return</dt><dd>${Number(x.expectedReturnRate||0)}%</dd></div><div><dt>Capital raised</dt><dd>${money(x.raisedAmount)} / ${money(x.targetAmount)}</dd></div><div><dt>Deadline</dt><dd>${date(x.deadline)}</dd></div></dl><button class="button primary" data-member-invest="${x.id}">${icons.plus}Invest in this project</button></article>`).join("")||`<div class="card member-empty">No projects are currently open to member investment. Investment Department controls availability.</div>`;
     return `<div class="member-stack"><div class="member-opportunity-grid">${opportunities}</div>${panel("My investment requests","Investment review and Finance verification status",gridTable(["Reference","Project","Amount","Submitted","Status","Evidence"],applications))}${panel("My confirmed investments","Personal project capital, ownership and returns",gridTable(["Project","Invested","Ownership","Expected","Received","Date","Status"],portfolio))}</div>`;
   }
+  function hostingFee(){
+    const h=C().hostingFee||{},s=C().summary||{};
+    const paid=Number(h.paid??s.hostingFeePaid??0);
+    const expected=Number(h.expected??s.hostingFeeExpected??50000);
+    const rows=(h.payments||[]).map(x=>`<tr><td><strong>${esc(x.receiptNumber||x.reference)}</strong></td><td>${esc(x.method||"Bank transfer")}</td><td>${money(x.amount)}</td><td>${date(x.paidOn)}</td><td>${status(x.status||"completed")}</td></tr>`).join("");
+    return `<div class="member-stack"><div class="member-summary-grid compact">${metric("Hosting fee paid",money(paid),"receipt","member-hosting-fee",paid>0.5?"Posted to Centenary":"Not paid yet")}${metric("Expected",money(expected),"wallet","member-hosting-fee","Amount due")}</div>${panel("Hosting fee","Amount paid goes to the Centenary bank account",gridTable(["Receipt","Method","Amount","Date","Status"],rows))}</div>`;
+  }
   function welfare(){
     const w=C().welfare||{},s=C().summary||{},fund=C().welfareFund||{},org=C()?.orgWelfareStanding||{};
     const fromJoin=s.welfareFromJoin||w.fromJoin||{};
@@ -390,7 +398,7 @@
   function view(){
     if(!C())return `<div class="card member-empty">Loading your member account?</div>`;
     return ({"member-dashboard":dashboard,messages:messagesView,"member-profile":profile,"member-savings":savings,"member-requests":requests,"member-loans":loans,
-      "member-guarantorship":guarantees,"member-welfare":welfare,
+      "member-guarantorship":guarantees,"member-welfare":welfare,"member-hosting-fee":hostingFee,
       "member-documents":documents,"member-meetings":meetings,"member-notifications":notifications,"member-support":support}[state.page]||dashboard)();
   }
   function modal(title,formOrSub,maybeForm){

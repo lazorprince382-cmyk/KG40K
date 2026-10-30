@@ -3,6 +3,7 @@ const PDFDocument = require("pdfkit");
 const { query } = require("./db");
 const { loadScheduleSettings, expectedAtEndOf, monthIndex, monthKey } = require("./savings-schedule");
 const { loadWelfareStanding } = require("./welfare-standing");
+const { loadHostingFeeStanding } = require("./hosting-fees");
 const {
   LOAN_PRINCIPAL_LEFT_SQL,
   LOAN_INTEREST_LEFT_SQL,
@@ -668,6 +669,52 @@ function drawMiniTable(doc, x0, y, cols, rows, { header = CYAN } = {}) {
   return y;
 }
 
+function drawHostingFeeReport(doc, standing, label) {
+  const expected = Number(standing.expected || 50000);
+  const paid = standing.paidMembers || (standing.members || []).filter((m) => m.status !== "unpaid");
+  const unpaid = standing.unpaidMembers || (standing.members || []).filter((m) => m.status === "unpaid");
+  let y = 50;
+  const pageW = doc.page.width - 36;
+  const x0 = 18;
+  doc.font("Helvetica").fontSize(10).fillColor("#5B6B7C")
+    .text(`Hosting fee of UGX ${money(expected)} per member. Collected UGX ${money(standing.collected)} from ${paid.length} member${paid.length === 1 ? "" : "s"} as at ${label}.`, x0, y, { width: pageW });
+  y += 28;
+  cellText(doc, "Members who have paid", x0, y, pageW, 16, { bold: true, size: 12, color: NAVY });
+  y += 18;
+  y = drawMiniTable(doc, x0, y, [
+    { w: 32, label: "No.", align: "center" },
+    { w: 170, label: "Member", align: "left" },
+    { w: 72, label: "Number", align: "left" },
+    { w: 80, label: "Paid", align: "right", bold: true },
+    { w: 72, label: "Date", align: "left" },
+    { w: 100, label: "Receipt", align: "left" },
+  ], paid.map((row, i) => [
+    String(i + 1),
+    ascii(row.name),
+    ascii(row.memberNumber || "-"),
+    moneyExact(row.paid),
+    row.lastPaidOn ? formatDay(row.lastPaidOn) : "-",
+    ascii(row.receiptNumber || "-"),
+  ]), { header: NAVY });
+  y += 16;
+  y = ensureRowSpace(doc, y, 40);
+  cellText(doc, "Members who have not paid", x0, y, pageW, 16, { bold: true, size: 12, color: RED });
+  y += 18;
+  drawMiniTable(doc, x0, y, [
+    { w: 32, label: "No.", align: "center" },
+    { w: 200, label: "Member", align: "left" },
+    { w: 90, label: "Number", align: "left" },
+    { w: 90, label: "Expected", align: "right", bold: true },
+    { w: 114, label: "Status", align: "left" },
+  ], unpaid.map((row, i) => [
+    String(i + 1),
+    ascii(row.name),
+    ascii(row.memberNumber || "-"),
+    money(expected),
+    "Not paid",
+  ]), { header: RED });
+}
+
 function drawActiveLoanReports(doc, loans, label) {
   let y = 50;
   const pageW = doc.page.width - 36;
@@ -811,6 +858,10 @@ async function buildStandingPdf(kind, { asOf } = {}) {
       const loans = await loadActiveLoanReports();
       drawHeader(doc, `Active Loans Report as at ${label}`);
       drawActiveLoanReports(doc, loans, label);
+    } else if (kind === "hosting-fee") {
+      const standing = await loadHostingFeeStanding();
+      drawHeader(doc, `Hosting Fee Report as at ${label}`);
+      drawHostingFeeReport(doc, standing, label);
     } else {
       throw Object.assign(new Error("Unknown standing report"), { status: 400 });
     }
@@ -834,6 +885,7 @@ const TITLES = {
   company: "Company standing",
   assistance: "Welfare assistance register",
   "active-loans": "Active loans and installments",
+  "hosting-fee": "Hosting fee payments",
 };
 
 module.exports = {

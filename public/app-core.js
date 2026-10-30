@@ -50,7 +50,7 @@ const rolePages = {
   "System Admin": ["dashboard","messages","audit","settings"],
   "Finance Officer": ["dashboard","finance-income","finance-expenses","finance-vouchers","finance-receipts","finance-invoices",
     "finance-budgets","finance-bank","finance-unit-trust","finance-cashbook","finance-assets","finance-approvals",
-    "finance-reports","finance-analytics","finance-documents","messages","settings"],
+    "finance-hosting-fee","finance-reports","finance-analytics","finance-documents","messages","settings"],
   "Investment Officer": ["dashboard","investment-projects","investment-portfolio","investment-proposals","investment-investors",
     "investment-revenue","investment-expenses","investment-pl","investment-budgets","investment-assets",
     "investment-contracts","investment-reports","investment-analytics","investment-documents","investment-notifications","messages","settings"],
@@ -59,7 +59,7 @@ const rolePages = {
     "credits-charges","credits-reports","credits-analytics","credits-documents","credits-notifications","messages","settings"],
   "Legal Officer": ["dashboard","settings"],
   "Welfare Officer": ["dashboard","settings"],
-  "Executive Officer": ["dashboard","messages","members","departments","users","executive-finance","executive-credits","executive-investments","executive-welfare","executive-legal","executive-audit","executive-supervisory","executive-approvals","executive-meetings","executive-reports","notifications","executive-documents","settings"],
+  "Executive Officer": ["dashboard","messages","members","departments","users","executive-finance","executive-credits","executive-investments","executive-welfare","executive-legal","executive-audit","executive-supervisory","executive-approvals","executive-meetings","executive-reports","executive-hosting-fee","notifications","executive-documents","settings"],
   "Supervisory Officer": ["dashboard","settings"]
 };const pageMeta = {
   dashboard: ["Organization overview", "Dashboard"], departments: ["Organization structure", "Departmental dashboards"], messages: ["Communication", "Messages"], users: ["System accounts", "System accounts"], members: ["People", "Members"], savings: ["Credits", "Savings"],
@@ -70,7 +70,7 @@ const rolePages = {
   "executive-legal":["Department summary","Legal"],"executive-audit":["Assurance","Audit"],
   "executive-supervisory":["Oversight","Supervisory"],"executive-approvals":["Executive authority","Approvals"],
   "executive-meetings":["Organization calendar","Meetings"],"executive-projects":["Strategic portfolio","Projects"],
-  "executive-reports":["Decision support","Reports"],
+  "executive-reports":["Decision support","Reports"],"executive-hosting-fee":["Member payments","Hosting fee"],
   notifications:["Executive alerts","Notifications"],"executive-documents":["Official records","Documents"],
   "executive-search":["Global search","Search results"],"credits-active":["Disbursed facilities","Active Loans"]
 };
@@ -82,7 +82,7 @@ Object.assign(pageMeta,{
   "finance-assets":["Organization property","Assets"],"finance-procurement":["Purchase workflow","Procurement"],
   "finance-approvals":["Finance authority","Approvals"],"finance-reports":["Financial reporting","Reports"],
   "finance-analytics":["Financial intelligence","Analytics"],"finance-documents":["Finance records","Documents"],
-  "finance-search":["Finance search","Search results"]
+  "finance-search":["Finance search","Search results"],"finance-hosting-fee":["Member payments","Hosting fee"]
 });
 Object.assign(pageMeta,{
   "credits-members":["SACCO accounts","Members"],"credits-savings":["Member funds","Savings"],
@@ -867,18 +867,18 @@ function creditsSidebar() {
   </aside>`;
 }
 function financeSidebar() {
-  const labels={dashboard:"Dashboard",messages:"Messages","finance-income":"Income","finance-expenses":"Expenses","finance-vouchers":"Payment Vouchers",
+  const labels={dashboard:"Dashboard",messages:"Messages","finance-income":"Income","finance-hosting-fee":"Hosting fee","finance-expenses":"Expenses","finance-vouchers":"Payment Vouchers",
     "finance-receipts":"Receipts","finance-invoices":"Invoices","finance-budgets":"Budgets","finance-bank":"Bank Accounts","finance-unit-trust":"Unit Trust",
     "finance-cashbook":"Cashbook","finance-assets":"Assets","finance-procurement":"Procurement","finance-approvals":"Approvals",
     "finance-reports":"Reports","finance-analytics":"Analytics","finance-documents":"Documents",settings:"Settings"};
-  const iconsByPage={"finance-income":"arrowDown","finance-expenses":"arrowUp","finance-vouchers":"approvals","finance-receipts":"receipt",
+  const iconsByPage={"finance-income":"arrowDown","finance-hosting-fee":"receipt","finance-expenses":"arrowUp","finance-vouchers":"approvals","finance-receipts":"receipt",
     "finance-invoices":"file","finance-budgets":"reports","finance-bank":"building","finance-unit-trust":"building","finance-cashbook":"wallet","finance-assets":"building",
     "finance-procurement":"users","finance-approvals":"approvals","finance-reports":"reports","finance-analytics":"reports","finance-documents":"file"};
   const pending=state.finance?.stats?.pendingPaymentRequests||0;
   const entryPending=(state.finance?.pendingEntries||state.finance?.entries||[]).filter(x=>x.status==="pending_finance_review").length+(state.finance?.pendingSavings||[]).length;
   const investmentPending=(state.finance?.investmentAnalyses||[]).length;
   const pages=rolePages[executiveWorkspaceRole()]||rolePages[state.role];
-  const sidebarPages=new Set(["dashboard","finance-approvals","finance-income","finance-expenses","finance-bank","finance-unit-trust","finance-budgets","finance-reports","finance-documents","messages","settings"]);
+  const sidebarPages=new Set(["dashboard","finance-approvals","finance-income","finance-hosting-fee","finance-expenses","finance-bank","finance-unit-trust","finance-budgets","finance-reports","finance-documents","messages","settings"]);
   const alertFor=page=>page==="finance-approvals"&&(pending||entryPending||investmentPending);
   return `<aside class="sidebar executive-sidebar finance-sidebar" id="sidebar">
     <div class="executive-brand"><div class="executive-crest finance-crest">${icons.wallet}</div><div><strong>KASANGATI G40<br>KWAGALANA</strong><span>Finance</span></div></div>
@@ -1003,6 +1003,7 @@ function view() {
   if(state.page==="credits-notifications") return creditsNotificationsView();
   if(state.page==="credits-search") return creditsSearchView();
   if(state.page==="finance-income") return financeIncomeView();
+  if(state.page==="finance-hosting-fee") return hostingFeeRosterView("finance");
   if(state.page==="finance-expenses") return financeExpensesView();
   if(state.page==="finance-vouchers"||state.page==="finance-approvals") return financeVouchersView();
   if(state.page==="finance-receipts") return financeReceiptsView();
@@ -1022,6 +1023,7 @@ function view() {
   if(state.page==="executive-meetings") return executiveMeetingsView();
   if(state.page==="executive-projects") return executiveProjectsView();
   if(state.page==="executive-reports") return executiveReportsView();
+  if(state.page==="executive-hosting-fee") return hostingFeeRosterView("executive");
   if(state.page==="executive-documents") return executiveDocumentsView();
   if(state.page==="notifications") return executiveNotificationsView();
   if(state.page==="executive-search") return executiveSearchView();
@@ -1103,6 +1105,7 @@ function executiveDashboardView() {
     ["Money in loans",money(loansOut),"loans","executive-credits","Principal + interest + penalties remaining"],
     ["Total Company Funds",money(company),"reports","executive-finance","UAP + Centenary + loans + welfare remaining"],
     ["Welfare since June 2024",money(welfareGross),"receipt","executive-welfare","Standing collected since June 2024"],
+    ["Hosting fee",money(e.hostingFee?.collected||0),"receipt","executive-hosting-fee",`${e.hostingFee?.paidCount||0} paid · ${e.hostingFee?.unpaidCount||0} not paid`],
     ["Income this month",money(s.organizationReceiptsMonth??s.organizationIncomeMonth??0),"arrowDown","executive-finance","All Centenary receipts this month, including member savings and welfare"],
     ["Expenditure this month",money(s.organizationExpenditureMonth??s.organizationExpenditure),"arrowUp","executive-finance","Live operational payments"],
     ["Total SACCO Savings",money(s.totalSavings),"savings","executive-credits","Member savings"],
@@ -1113,7 +1116,7 @@ function executiveDashboardView() {
     ["Upcoming Meetings",s.upcomingMeetings,"clock","executive-meetings","Organization calendar"]
   ];
   return `<div class="exec-welcome"><div><h2>Good ${new Date().getHours()<12?"morning":new Date().getHours()<17?"afternoon":"evening"}, ${actor().split(" ")[0]}</h2></div><div class="dashboard-year-control"><label>Financial year</label><strong class="exec-fy-static">FY 26/27</strong></div></div>
-    <div class="exec-stat-grid">${cards.slice(0,9).map((c,i)=>executiveStatCard(...c,i)).join("")}</div>
+    <div class="exec-stat-grid">${cards.slice(0,10).map((c,i)=>executiveStatCard(...c,i)).join("")}</div>
     <div class="exec-command-grid">
       ${executiveApprovalWidget(e.approvals.slice(0,5))}
       ${executiveActivityWidget(e.activities.slice(0,7))}
@@ -1440,14 +1443,15 @@ function standingReportsSection() {
     ["loans","Loans full analysis","Current facilities, outstanding balances and repayment standing"],
     ["company","Company standing","UAP, Centenary, current welfare money, money in loans, and the total"],
     ["assistance","Welfare assistance register","Designed PDF of people already given funeral or marriage support"],
-    ["active-loans","Active loans and installments","When the loan was requested, how/when each installment was paid, principal and interest paid and remaining"]
+    ["active-loans","Active loans and installments","When the loan was requested, how/when each installment was paid, principal and interest paid and remaining"],
+    ["hosting-fee","Hosting fee payments","Members who have paid the hosting fee, and those who have not"]
   ];
   return `<section class="standing-reports-block"><div class="exec-panel-head"><div><h3>Standing reports (PDF)</h3><p>Pick a month for savings and welfare. Company standing, assistance and active loans use live books.</p></div>
       <label class="standing-report-month">Report month<input type="month" min="2024-06" max="${max}" value="${month}" data-standing-report-month></label></div>
     <div class="exec-report-grid">${reports.map(([kind,name,desc],i)=>`<article><span class="${["blue","green","violet","orange","teal","blue"][i]}">${icons.file}</span><div><h3>${name}</h3><p>${desc}</p><small>PDF · ${escapeHtml(month)}</small></div><div class="exec-report-actions"><button type="button" data-standing-report-view="${kind}">${icons.eye}View PDF</button><a class="button secondary" href="${standingReportHref(kind,true)}" download>${icons.download}Download</a></div></article>`).join("")}</div></section>`;
 }
 function openStandingReport(kind){
-  const titles={savings:"Personal savings standing",welfare:"Welfare standings",loans:"Loans full analysis",company:"Company standing",assistance:"Welfare assistance register","active-loans":"Active loans and installments"};
+  const titles={savings:"Personal savings standing",welfare:"Welfare standings",loans:"Loans full analysis",company:"Company standing",assistance:"Welfare assistance register","active-loans":"Active loans and installments","hosting-fee":"Hosting fee payments"};
   const href=standingReportHref(kind,false);
   openSecureContentViewer(href,`${titles[kind]||"Standing report"} · ${standingReportMonth()}`,{downloadHref:standingReportHref(kind,true),replaceModal:false});
 }
@@ -1537,6 +1541,7 @@ function financeDashboardView() {
   ]:[
     ["Income this month",money(s.monthlyReceipts??s.monthlyIncome),"arrowDown","finance-income","All Centenary receipts this month, including member savings and welfare"],
     ["Expenses this month",money(s.monthlyExpenses),"arrowUp","finance-expenses","All payments out of Centenary this month, including loan disbursements"],
+    ["Hosting fee",money(f.hostingFee?.collected||0),"receipt","finance-hosting-fee",`${f.hostingFee?.paidCount||0} paid · ${f.hostingFee?.unpaidCount||0} not paid`],
     ["Pending payment requests",String(s.pendingPaymentRequests||0),"approvals","finance-approvals","Payments waiting for approval"]
   ];
   const liveYears=(f.availableFiscalYears||[]).filter(y=>String(y.mode||"live")==="live"||!/FY ended/i.test(String(y.label||"")));
@@ -1838,6 +1843,19 @@ function financeQuickPanel() {
     <button data-finance-page="finance-approvals">${icons.approvals}Review vouchers</button><button data-finance-modal="invoice">${icons.file}Record invoice</button>
     <button data-finance-report="Financial Statement">${icons.reports}Generate report</button><button data-finance-page="finance-bank">${icons.building}Reconcile bank</button></div>`:""}</div>`;
 }
+function hostingFeeRosterView(source="finance") {
+  const standing=(source==="executive"?state.executive?.hostingFee:state.finance?.hostingFee)||state.executive?.hostingFee||state.finance?.hostingFee||{members:[],collected:0,expected:50000,paidCount:0,unpaidCount:0,partialCount:0};
+  const members=standing.members||[];
+  const paid=members.filter(x=>x.status!=="unpaid");
+  const unpaid=members.filter(x=>x.status==="unpaid");
+  const date=value=>value?new Date(value).toLocaleDateString("en-GB"):"—";
+  const paidRows=paid.map(x=>[x.name,x.memberNumber||"",money(x.paid),date(x.lastPaidOn),x.receiptNumber||"—",status(x.status)]);
+  const unpaidRows=unpaid.map(x=>[x.name,x.memberNumber||"",money(x.expected||standing.expected||50000),"Not paid"]);
+  return `<div class="exec-module-metrics">${executiveModuleMetric("Collected",money(standing.collected||0),"green")}${executiveModuleMetric("Paid",standing.paidCount||paid.filter(x=>x.status==="paid").length,"blue")}${executiveModuleMetric("Not paid",standing.unpaidCount||unpaid.length,"orange")}${executiveModuleMetric("Expected each",money(standing.expected||50000),"violet")}</div>
+    <p class="exec-report-preview-note">Hosting fee posts to the Centenary bank account. Record it from Finance → Income → Hosting fee, then pick the member. A ledger line and member card are created on payment.</p>
+    ${financeDataTable("Members who have paid",["Member","Number","Amount","Date","Receipt","Status"],paidRows)}
+    ${financeDataTable("Members who have not paid",["Member","Number","Expected","Status"],unpaidRows)}`;
+}
 function financeIncomeView() {
   const f=state.finance;
   const rows=f.entries.filter(x=>x.entryType==="income"&&!/management accounts import/i.test(x.paymentMethod||""));
@@ -2042,7 +2060,7 @@ function financeDepartmentOptions() {
 }
 function openFinanceModal(type) {
   const forms={
-    income:["Record income","Posted immediately to Centenary. Welfare and savings are a split of the same bank receipt. Dates show as DD/MM/YYYY.",`<form class="form" data-finance-form="income"><div class="form-grid"><div class="field"><label>Income category</label><select name="category"><option>Member savings</option><option>Membership Fees</option><option>Registration Fees</option><option>Donations</option><option>Grants</option><option>Investment Income</option><option>Rental Income</option><option>Welfare Contributions</option><option>Miscellaneous Income</option></select></div><div class="field" data-savings-member><label>Member</label><select name="memberId">${(state.finance.savingsMembers||[]).filter(isSelectableActiveMember).map(m=>`<option value="${m.id}">${escapeHtml(m.memberNumber)} — ${escapeHtml(m.name)}</option>`).join("")}</select></div><div class="field"><label>Amount (UGX)</label><input name="amount" type="number" min="1" required></div><div class="field full"><label>Member / Organization paying</label><input name="counterparty" required></div><div class="field"><label>Payment method</label><select name="paymentMethod"><option>Bank transfer</option><option>Cash</option><option>Mobile Money</option><option>Cheque</option></select></div><div class="field"><label>Receiving account</label><select name="accountId" required>${financeAccountOptions()}</select><small data-account-help>Select where the money was received.</small></div><div class="field"><label>Date (DD/MM/YYYY)</label><input name="date" type="date" value="${new Date().toLocaleDateString("en-CA",{timeZone:"Africa/Kampala"})}" required></div><div class="field full"><label>Description</label><textarea name="description" required></textarea></div><div class="field full"><label>Supporting document</label><input name="supportingDocument"></div></div>${formActions("Record income")}</form>`],
+    income:["Record income","Posted immediately to Centenary. Welfare and savings are a split of the same bank receipt. Dates show as DD/MM/YYYY.",`<form class="form" data-finance-form="income"><div class="form-grid"><div class="field"><label>Income category</label><select name="category"><option>Member savings</option><option>Hosting fee</option><option>Membership Fees</option><option>Registration Fees</option><option>Donations</option><option>Grants</option><option>Investment Income</option><option>Rental Income</option><option>Welfare Contributions</option><option>Miscellaneous Income</option></select></div><div class="field" data-savings-member><label>Member</label><select name="memberId">${(state.finance.savingsMembers||[]).filter(isSelectableActiveMember).map(m=>`<option value="${m.id}">${escapeHtml(m.memberNumber)} — ${escapeHtml(m.name)}</option>`).join("")}</select></div><div class="field"><label>Amount (UGX)</label><input name="amount" type="number" min="1" required></div><div class="field full"><label>Member / Organization paying</label><input name="counterparty" required></div><div class="field"><label>Payment method</label><select name="paymentMethod"><option>Bank transfer</option><option>Cash</option><option>Mobile Money</option><option>Cheque</option></select></div><div class="field"><label>Receiving account</label><select name="accountId" required>${financeAccountOptions()}</select><small data-account-help>Select where the money was received.</small></div><div class="field"><label>Date (DD/MM/YYYY)</label><input name="date" type="date" value="${new Date().toLocaleDateString("en-CA",{timeZone:"Africa/Kampala"})}" required></div><div class="field full"><label>Description</label><textarea name="description" required></textarea></div><div class="field full"><label>Supporting document</label><input name="supportingDocument"></div></div>${formActions("Record income")}</form>`],
     account:["Add finance cash account","Register a bank, cash, petty cash, mobile money or restricted-fund account",`<form class="form" data-finance-form="account"><div class="form-grid"><div class="field"><label>Account type</label><select name="accountType"><option value="bank">Bank account</option><option value="cash">Cash account</option><option value="petty_cash">Petty cash</option><option value="mobile_money">Mobile money</option><option value="restricted">Restricted funds</option></select></div><div class="field"><label>Account code (optional)</label><input name="accountCode" placeholder="Generated if empty"></div><div class="field full"><label>Account name</label><input name="accountName" required placeholder="e.g. Stanbic Operating Account"></div><div class="field"><label>Bank / provider name</label><input name="bankName"></div><div class="field"><label>Account / wallet number</label><input name="accountNumber"></div><div class="field"><label>Opening balance (UGX)</label><input name="openingBalance" type="number" min="0" value="0" required></div><div class="field"><label>Opening balance date</label><input name="openingBalanceDate" type="date" max="${new Date().toISOString().slice(0,10)}" value="${new Date().toISOString().slice(0,10)}" required></div><div class="field"><label class="check-field"><input name="restricted" type="checkbox"> Restricted funds</label></div><div class="field full"><label>Notes / balance description</label><textarea name="notes" placeholder="Explain the source and date of the starting balance"></textarea></div><div class="field full"><label>Opening statement or supporting document</label><input name="supportingDocument"><small>Required when the opening balance is greater than zero.</small></div></div>${formActions("Add account")}</form>`],
     expense:["Record an organization expense","Use this when money leaves Centenary or cash for group work. It goes for Finance then Executive approval before it is paid.",`<form class="form" data-finance-form="expense"><div class="form-grid"><div class="field full"><label>Paid to</label><input name="supplier" required placeholder="Member, supplier or office being paid"></div><div class="field"><label>Department</label><select name="departmentId">${financeDepartmentOptions()}</select></div><div class="field"><label>What this payment is for</label><select name="category"><option>Meeting / AGM</option><option>Welfare assistance</option><option>Member savings withdrawal</option><option>Loan-related cost</option><option>Bank charges</option><option>Transport</option><option>Legal / registration</option><option>Stationery and printing</option><option>Communication</option><option>Training</option><option>Investment related</option><option>Other group expense</option></select></div><div class="field"><label>Amount (UGX)</label><input name="amount" type="number" min="1" required></div><div class="field"><label>Paid from</label><select name="paymentMethod"><option>Bank transfer</option><option>Cash</option><option>Mobile Money</option><option>Cheque</option></select></div><div class="field full"><label>Reason</label><textarea name="description" required placeholder="What happened, which meeting or member, and why the group is paying"></textarea></div><div class="field full"><label>Receipt or supporting document</label><input name="supportingDocument" placeholder="Optional receipt number or file"></div></div>${formActions("Send for approval")}</form>`],
     invoice:["Record supplier invoice","Track an obligation and its due date",`<form class="form" data-finance-form="invoice"><div class="form-grid"><div class="field"><label>Invoice number</label><input name="invoiceNumber" required></div><div class="field"><label>Supplier</label><input name="supplier" required></div><div class="field full"><label>Description</label><input name="description" required></div><div class="field"><label>Amount (UGX)</label><input name="amount" type="number" min="1" required></div><div class="field"><label>Invoice date</label><input name="invoiceDate" type="date" required></div><div class="field"><label>Due date</label><input name="dueDate" type="date" required></div><div class="field full"><label>Supporting document</label><input name="supportingDocument"></div></div>${formActions("Record invoice")}</form>`],
@@ -2065,19 +2083,28 @@ function configureFinanceIncomeAccounts(form) {
   const map={"Bank transfer":["bank"],Cheque:["bank"],Cash:["cash","petty_cash"],"Mobile Money":["mobile_money"]};
   const refresh=()=>{
     const savings=/member savings/i.test(category?.value||"");
+    const hosting=/hosting\s*fee/i.test(category?.value||"");
+    const memberPick=savings||hosting;
     const memberField=form.querySelector("[data-savings-member]");
     const payerField=form.elements.counterparty?.closest(".field");
-    if(memberField)memberField.hidden=!savings;
-    if(form.elements.memberId)form.elements.memberId.required=savings;
-    if(payerField)payerField.hidden=savings;
-    if(form.elements.counterparty)form.elements.counterparty.required=!savings;
-    if(savings){
+    if(memberField)memberField.hidden=!memberPick;
+    if(form.elements.memberId)form.elements.memberId.required=memberPick;
+    if(payerField)payerField.hidden=memberPick;
+    if(form.elements.counterparty)form.elements.counterparty.required=!memberPick;
+    if(memberPick){
       const selected=form.elements.memberId?.selectedOptions?.[0];
       if(form.elements.counterparty&&selected)form.elements.counterparty.value=selected.textContent.trim();
       const centenary=[...account.options].find(option=>option.dataset.accountCode==="GL-4104");
       [...account.options].forEach(option=>{option.hidden=Boolean(centenary)&&option!==centenary;option.disabled=option.hidden;});
       if(centenary)account.value=centenary.value;
-      form.querySelector("[data-account-help]").textContent="Always the Centenary bank account. The first deposit this month sends UGX 25,000 to welfare; later deposits this month are not deducted. The full receipt amount is posted to Centenary immediately — no approval.";
+      if(hosting){
+        const expected=Number(state.finance?.hostingFee?.expected||50000);
+        if(form.elements.amount&&!form.elements.amount.value)form.elements.amount.value=String(expected);
+        if(form.elements.description&&!form.elements.description.value)form.elements.description.value=selected?`Hosting fee from ${selected.textContent.trim()}`:"Hosting fee";
+        form.querySelector("[data-account-help]").textContent="Always the Centenary bank account. Hosting fee is not member savings. The amount posts to Centenary immediately and appears on the member hosting-fee card.";
+      }else{
+        form.querySelector("[data-account-help]").textContent="Always the Centenary bank account. The first deposit this month sends UGX 25,000 to welfare; later deposits this month are not deducted. The full receipt amount is posted to Centenary immediately — no approval.";
+      }
       return;
     }
     const allowed=map[method.value]||[];
@@ -2166,7 +2193,7 @@ async function deleteFinanceIncome(id){
   const label=entry.receiptNumber||entry.reference;
   const account=entry.accountName||"the receiving account";
   const message=savings
-    ?`Delete receipt ${label} for ${money(entry.amount)}? Centenary will be reduced by this full receipt amount. Member savings and any welfare taken from this receipt will also be reversed.`
+    ?`Delete receipt ${label} for ${money(entry.amount)}? Centenary will be reduced by this full receipt amount. Member savings, hosting fee and any welfare taken from this receipt will also be reversed.`
     :`Delete receipt ${label} for ${money(entry.amount)}? ${account} will be reduced by this receipt amount.`;
   if(!await confirmDialog(message))return;
   try{

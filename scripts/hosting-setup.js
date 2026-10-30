@@ -109,6 +109,10 @@ if (!skipSync) {
     "scripts/sync-jude-centenary-savings-1700000.js",
     ...dry,
   ]);
+  run("Jude +50,000 Centenary savings cash and 50,000 hosting fee", "node", [
+    "scripts/sync-jude-centenary-hosting-50000.js",
+    ...dry,
+  ]);
   run("Correct receipt dates (Dan 31/08; Sep as DD/MM)", "node", [
     "scripts/sync-sep2026-receipt-dates.js",
     ...dry,
@@ -137,6 +141,7 @@ console.log("  npm run db:sync-sep2026-dan");
   console.log("  npm run db:sync-justine-savings");
   console.log("  npm run db:sync-jude-savings");
   console.log("  npm run db:sync-jude-centenary-cash");
+  console.log("  npm run db:sync-jude-hosting");
 console.log("  npm run db:sync-uap-flow");
 console.log("  npm run db:clarify-uap-flow");
 console.log("  npm run db:sync-sep2026-live");

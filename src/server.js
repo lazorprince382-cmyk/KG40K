@@ -25,6 +25,7 @@ const { getRunningLoan, getSavingsTargetStatus, getGuarantorEligibility } = requ
 const { loadWelfareStanding, loadWelfareMonth, enforceOneMonthlyWelfareCharge } = require("./welfare-standing");
 const { chargeWelfareFromCoveredSavings, catchUpWelfareFromSavings, loadMemberSchedule, loadScheduleSettings, buildSchedule, monthIndex } = require("./savings-schedule");
 const { buildStandingPdf } = require("./standing-reports");
+const { isHostingFeeCategory, loadHostingFeeStanding } = require("./hosting-fees");
 const { isWordUpload, convertWordUploadToPdf, convertPlainTextToPdf } = require("./services/office-pdf");
 
 function mimeFromFilename(name="",fallback="application/octet-stream"){
@@ -733,6 +734,23 @@ async function reverseIncomeReceipt(client,entry){
       await client.query("ROLLBACK TO SAVEPOINT reverse_welfare");
       if(error.code!=="23503")throw error;
       await client.query("UPDATE welfare_contributions SET status='voided',amount=0,finance_entry_id=NULL,verification_comment=TRIM(BOTH FROM COALESCE(verification_comment,'')||' | Voided when finance receipt was deleted') WHERE id=$1",[row.id]);
+    }
+  }
+  const hostingRows=(await client.query(`SELECT id,amount,transaction_id FROM hosting_fee_payments WHERE finance_entry_id=$1 FOR UPDATE`,[entry.id])).rows;
+  effects.hostingReversed=0;
+  for(const row of hostingRows){
+    effects.hostingReversed+=Number(row.amount||0);
+    await client.query(`UPDATE hosting_fee_payments SET status='voided',finance_entry_id=NULL,transaction_id=NULL WHERE id=$1`,[row.id]);
+    if(row.transaction_id){
+      await client.query("SAVEPOINT reverse_hosting_tx");
+      try{
+        await client.query("DELETE FROM transactions WHERE id=$1",[row.transaction_id]);
+        await client.query("RELEASE SAVEPOINT reverse_hosting_tx");
+      }catch(error){
+        await client.query("ROLLBACK TO SAVEPOINT reverse_hosting_tx");
+        if(error.code!=="23503")throw error;
+        await client.query("UPDATE transactions SET status='voided',finance_entry_id=NULL,notes=TRIM(BOTH FROM COALESCE(notes,'')||' | Voided when finance receipt was deleted') WHERE id=$1",[row.transaction_id]);
+      }
     }
   }
   const repayments=(await client.query(`SELECT * FROM transactions WHERE finance_entry_id=$1 AND type='Loan repayment' FOR UPDATE`,[entry.id])).rows;
@@ -1699,6 +1717,7 @@ app.get("/api/executive/command-center",auth,requireExecutive("view"),asyncRoute
       assistancePaid:welfareStanding.assistancePaid,
       note:welfareStanding.note},
     welfareStanding,
+    hostingFee:await loadHostingFeeStanding(),
     legal:legal.rows[0],audit:{...auditIssues.rows[0],open:auditSummary.open,departmentsUnderReview:auditSummary.departments,compliance:auditSummary.compliance},
     supervisory:{...supervisory.rows[0],departmentsBelowTarget:supervisorySummary.below},monthly,notifications
   });
@@ -2168,6 +2187,7 @@ app.get("/api/finance/command-center",auth,requireFinance("view"),asyncRoute(asy
     pendingEntries:pendingFinanceEntries,invoices:invoices.rows,assets:assets.rows,
     procurements:procurements.rows,documents:documents.rows,investmentAnalyses:investmentAnalyses.rows,monthly,daily,
     incomeBySource,expensesByCategory,subscriptionProgress,welfareProgress,welfareStanding,
+    hostingFee:await loadHostingFeeStanding(),
     savingsMembers:(await query(`SELECT id, member_number AS "memberNumber", full_name AS name
       FROM members WHERE deleted_at IS NULL AND status='active' ORDER BY full_name`)).rows,
     pendingSavings:(await query(`SELECT t.id,t.reference,t.amount::float,t.method,t.status,t.external_reference AS "paymentReference",
@@ -2218,24 +2238,26 @@ app.post("/api/finance/income",auth,asyncRoute(async(req,res,next)=>{
   const b=req.body,amount=Number(b.amount);
   const category=String(b.category||"").trim();
   const savings=isMemberSavingsFinanceCategory(category);
+  const hosting=isHostingFeeCategory(category);
   const memberId=Number(b.memberId);
   if(!category||!b.paymentMethod||!b.description||!Number.isFinite(amount)||amount<=0)
     return res.status(400).json({error:"Category, method, description and a positive amount are required"});
   if(savings&&!Number.isInteger(memberId))return res.status(400).json({error:"Select the member whose savings you are recording"});
-  if(!savings&&!String(b.counterparty||"").trim())return res.status(400).json({error:"Enter who paid this income"});
+  if(hosting&&!Number.isInteger(memberId))return res.status(400).json({error:"Select the member who paid the hosting fee"});
+  if(!savings&&!hosting&&!String(b.counterparty||"").trim())return res.status(400).json({error:"Enter who paid this income"});
   const paymentMethod=String(b.paymentMethod).trim();
   const compatibleTypes={"Bank transfer":["bank"],Cheque:["bank"],Cash:["cash","petty_cash"],"Mobile Money":["mobile_money"]}[paymentMethod]||[];
   const row=await transaction(async client=>{
     const department=(await client.query("SELECT id FROM departments WHERE code='finance'")).rows[0];
-    const member=savings?(await client.query("SELECT id,full_name,member_number FROM members WHERE id=$1 AND deleted_at IS NULL AND status='active'",[memberId])).rows[0]:null;
-    if(savings&&!member){const error=new Error("Choose an active member");error.status=400;throw error;}
-    const accountId=savings
+    const member=(savings||hosting)?(await client.query("SELECT id,full_name,member_number FROM members WHERE id=$1 AND deleted_at IS NULL AND status='active'",[memberId])).rows[0]:null;
+    if((savings||hosting)&&!member){const error=new Error("Choose an active member");error.status=400;throw error;}
+    const accountId=(savings||hosting)
       ?(await client.query("SELECT id FROM finance_accounts WHERE active=true AND account_code='GL-4104' ORDER BY id LIMIT 1")).rows[0]?.id
       :Number(b.accountId);
     const account=(await client.query("SELECT * FROM finance_accounts WHERE id=$1 AND active=true FOR UPDATE",[accountId])).rows[0];
-    if(!account){const error=new Error(savings?"Centenary bank account is not set up":"Choose the account that received this income");error.status=400;throw error;}
-    if(!savings&&!compatibleTypes.includes(account.account_type)){const error=new Error(`${paymentMethod} income must be posted to a compatible registered account`);error.status=400;throw error;}
-    const payer=savings?member.full_name:String(b.counterparty).trim();
+    if(!account){const error=new Error((savings||hosting)?"Centenary bank account is not set up":"Choose the account that received this income");error.status=400;throw error;}
+    if(!savings&&!hosting&&!compatibleTypes.includes(account.account_type)){const error=new Error(`${paymentMethod} income must be posted to a compatible registered account`);error.status=400;throw error;}
+    const payer=(savings||hosting)?member.full_name:String(b.counterparty).trim();
     const paidOn=b.date||new Date();
     let split=null;
     if(savings){
@@ -2259,19 +2281,36 @@ app.post("/api/finance/income",auth,asyncRoute(async(req,res,next)=>{
     const ref=reference("FIN-INC"),receipt=receiptReference("RCPT");
     const description=savings
       ?`${String(b.description).trim()} | Received UGX ${amount.toLocaleString()} on Centenary. ${split.welfareAmount?`UGX ${split.welfareAmount.toLocaleString()} welfare (once this month). `:split.welfareAlreadyPaid?"Welfare already taken this month. ":""}UGX ${(split?.savingsAmount||0).toLocaleString()} savings.`
-      :String(b.description).trim();
+      :hosting
+        ?`${String(b.description).trim()} | Hosting fee UGX ${amount.toLocaleString()} from ${member.full_name} posted to Centenary.`
+        :String(b.description).trim();
+    const ledgerCategory=savings?"Member savings":hosting?"Hosting fee":category;
     const inserted=(await client.query(`INSERT INTO organization_finance_entries
       (department_id,reference,entry_type,category,description,counterparty,payment_method,amount,status,receipt_number,
         supporting_document,transaction_date,recorded_by,approved_by,approved_at,finance_account_id)
       VALUES ($1,$2,'income',$3,$4,$5,$6,$7,'completed',$8,$9,$10::date,$11,$11,NOW(),$12)
       RETURNING id,reference,receipt_number AS "receiptNumber"`,
-    [department.id,ref,savings?"Member savings":category,description,payer,paymentMethod,
+    [department.id,ref,ledgerCategory,description,payer,paymentMethod,
       amount,receipt,String(b.supportingDocument||"").trim()||null,paidOn,req.user.id,account.id])).rows[0];
     await client.query("UPDATE finance_accounts SET balance=balance+$1,updated_at=NOW() WHERE id=$2",[amount,account.id]);
     if(account.account_code==="GL-4104")await syncOrganizationBankBalanceSetting(client,account.id);
     if(split?.savingsTxId) await client.query("UPDATE transactions SET finance_entry_id=$1, receipt_number=$2 WHERE id=$3",[inserted.id,receipt,split.savingsTxId]);
     if(split?.welfareId) await client.query("UPDATE welfare_contributions SET finance_entry_id=$1 WHERE id=$2",[inserted.id,split.welfareId]);
-    return {...inserted,accountName:account.account_name,savings:Boolean(savings),split};
+    if(hosting){
+      const tx=(await client.query(`INSERT INTO transactions
+        (reference,member_id,type,method,amount,status,external_reference,notes,recorded_by,verified_by,verified_at,created_at,receipt_number,submission_source,finance_entry_id)
+        VALUES ($1,$2,'Hosting fee',$3,$4,'completed',$5,$6,$7,$7,NOW(),COALESCE($8::timestamptz,NOW()),$9,'finance',$10)
+        RETURNING id`,
+        [reference("TRX"),member.id,paymentMethod,amount,String(b.supportingDocument||"").trim()||null,
+          `Hosting fee posted to Centenary. received=${amount.toFixed(2)}.`,req.user.id,paidOn,receipt,inserted.id])).rows[0];
+      await client.query(`INSERT INTO hosting_fee_payments
+        (member_id,amount,paid_on,status,reference,receipt_number,finance_entry_id,transaction_id,notes,recorded_by)
+        VALUES ($1,$2,COALESCE($3::date,CURRENT_DATE),'completed',$4,$5,$6,$7,$8,$9)`,
+        [member.id,amount,paidOn,reference("HOST"),receipt,inserted.id,tx.id,description,req.user.id]);
+      await notifyQuietly(client,"INSERT INTO notifications (member_id,title,message) VALUES ($1,'Hosting fee recorded',$2)",
+        [member.id,`UGX ${amount.toLocaleString()} hosting fee posted to Centenary. Receipt ${receipt}.`]);
+    }
+    return {...inserted,accountName:account.account_name,savings:Boolean(savings),hosting:Boolean(hosting),split};
   });
   await audit({userId:req.user.id,action:"FINANCE_INCOME_RECORDED",entityType:"organization_finance",entityId:String(row.id),
     details:`${row.receiptNumber} - ${category} - ${row.accountName} - UGX ${amount}`,...metadata(req)});
@@ -2301,6 +2340,7 @@ app.delete("/api/finance/income/:id",auth,asyncRoute(async(req,res,next)=>{
   if(result.effects.savingsReversed>0)message+=` Member savings reduced by UGX ${result.effects.savingsReversed.toLocaleString()}.`;
   if(result.effects.welfareReversed>0)message+=` Welfare reduced by UGX ${result.effects.welfareReversed.toLocaleString()}.`;
   if(result.effects.loanReversed>0)message+=` Loan repayment of UGX ${result.effects.loanReversed.toLocaleString()} removed from ${result.effects.loanReference||"the loan"}.`;
+  if(result.effects.hostingReversed>0)message+=` Hosting fee of UGX ${result.effects.hostingReversed.toLocaleString()} removed from the member record.`;
   if(isMemberSavingsFinanceCategory(result.entry.category)&&!result.effects.savingsMatched)message+=" No matching savings record was found, so the member savings balance was left unchanged.";
   await audit({userId:req.user.id,action:"FINANCE_INCOME_DELETED",entityType:"organization_finance",entityId:String(result.entry.id),
     details:`${result.entry.receipt_number||result.entry.reference} - UGX ${amount} reversed from ${account}`,...metadata(req)});
@@ -6586,7 +6626,7 @@ async function canAccessStandingReports(user){
 }
 async function sendStandingReport(req,res){
   const kind=String(req.params.kind||"").toLowerCase().replace(/\.pdf$/,"");
-  if(!["savings","welfare","loans","company","assistance","active-loans"].includes(kind)) return res.status(400).json({error:"Choose a standing report"});
+  if(!["savings","welfare","loans","company","assistance","active-loans","hosting-fee"].includes(kind)) return res.status(400).json({error:"Choose a standing report"});
   if(!await canAccessStandingReports(req.user)) return res.status(403).json({error:"Standing report access denied"});
   const asOf=String(req.query.asOf||"").trim();
   const download=req.query.download==="1"||/\.pdf$/i.test(req.path);

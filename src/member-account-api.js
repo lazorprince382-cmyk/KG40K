@@ -5,6 +5,7 @@ module.exports = function registerMemberAccountApi({
   const { loadWelfareStanding } = require("./welfare-standing");
   const { loansOutstandingTotal } = require("./loan-totals");
   const { loadMemberSchedule } = require("./savings-schedule");
+  const { loadMemberHostingFee } = require("./hosting-fees");
   const { ensureFinancialYears } = require("./financial-years");
   const imageTypes = new Set(["image/jpeg","image/png","image/webp","image/gif","image/jpg"]);
   const receiptTypes = new Set(["image/jpeg","image/png","image/webp","application/pdf"]);
@@ -543,6 +544,7 @@ module.exports = function registerMemberAccountApi({
           :Math.max(0,welfareContributedSince-historicalShare));
     const welfareHistoricalShare=historicalShare;
     const welfareCardNote="";
+    const hostingFee=await loadMemberHostingFee(memberId);
     return {
       member, summary: {
         savings: member.savings, totalMemberFunds: Number(member.savings) + Number(member.shares),
@@ -562,7 +564,10 @@ module.exports = function registerMemberAccountApi({
         availableLoanLimit: Math.max(0, member.savings * 3 - activeLoans.reduce((sum, item) => sum + Number(item.balance), 0)),
         welfareContributions: contributionsTotal, investments: investmentTotal, shares: member.shares,
         pendingRequests, notifications: notifications.rows.filter(item => !item.readAt).length,
-        uapBalance, bankBalance, loansOutstanding, welfareRemaining, companyFunds
+        uapBalance, bankBalance, loansOutstanding, welfareRemaining, companyFunds,
+        hostingFeePaid: Number(hostingFee.paid || 0),
+        hostingFeeExpected: Number(hostingFee.expected || 50000),
+        hostingFeeStatus: hostingFee.status || "unpaid"
       },
       organizationStanding:{uapBalance,bankBalance,loansOutstanding,welfareRemaining,companyFunds},
       welfareFund:{
@@ -587,7 +592,8 @@ module.exports = function registerMemberAccountApi({
         contributions: welfareContributions.rows,
         assistanceHistory: welfareAssistanceHistory.rows,
         fromJoin: welfareFromJoin
-      }, meetings: meetings.rows,
+      },
+      hostingFee, meetings: meetings.rows,
       documents: documents.rows, notifications: notifications.rows, announcements: announcements.rows, support: support.rows, recentActivity,
       financialYearProgress, pastYearProgress, closedYears, closingPosition,
       loanEligibility:(()=>{
