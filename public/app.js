@@ -1,6 +1,6 @@
 /* Ordered application loader. */
 [
-  "app-core.js?v=253",
+  "app-core.js?v=254",
   "department-theme.js?v=64",
   "department-core.js?v=94",
   "audit-dashboard.js?v=82",
@@ -14,14 +14,14 @@
   "supervisory-module.js?v=82",
   "department-events.js?v=63",
   "official-policy-ui.js?v=12",
-  "member-portal.js?v=144",
+  "member-portal.js?v=145",
   "loan-calculator.js?v=7",
   "department-bootstrap.js?v=64"
 ].forEach((source) => document.write(`<script src="${source}"><\/script>`));
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", async () => {
     try {
-      const registration = await navigator.serviceWorker.register("/sw.js?v=231", { updateViaCache: "none" });
+      const registration = await navigator.serviceWorker.register("/sw.js?v=232", { updateViaCache: "none" });
       await registration.update();
     } catch (error) {
       console.warn("Service worker registration failed", error);

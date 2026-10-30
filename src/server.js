@@ -6,7 +6,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const projectRoot = path.resolve(__dirname,"..");
-const { LOAN_PRINCIPAL_LEFT_SQL } = require("./loan-totals");
+const { LOAN_MONEY_IN_LOANS_SQL } = require("./loan-totals");
 const RUNNING_BUILD=(()=>{try{return require("child_process").execSync("git rev-parse --short HEAD",{cwd:projectRoot,stdio:["ignore","pipe","ignore"]}).toString().trim();}catch{return "unknown";}})();
 const { query, one, transaction, audit, initialize, ROLES } = require("./db");
 const { officialMemberDepts, officialDeptCodes } = require("./official-department-roster");
@@ -1436,7 +1436,7 @@ app.get("/api/executive/command-center",auth,requireExecutive("view"),asyncRoute
     query(`SELECT COUNT(*) FILTER (WHERE status IN ('active','overdue'))::int AS active,
       COUNT(*) FILTER (WHERE due_date=CURRENT_DATE AND status='active')::int AS due_today,
       COUNT(*) FILTER (WHERE status='overdue')::int AS defaults,
-      ROUND(COALESCE(SUM(${LOAN_PRINCIPAL_LEFT_SQL}) FILTER (WHERE status IN ('active','overdue')),0),2)::float AS outstanding,
+      ROUND(COALESCE(SUM(${LOAN_MONEY_IN_LOANS_SQL}) FILTER (WHERE status IN ('active','overdue')),0),2)::float AS outstanding,
       COALESCE(SUM(amount) FILTER (WHERE status IN ('active','overdue','completed')),0)::float AS issued,
       COALESCE(SUM(amount-balance) FILTER (WHERE status IN ('active','overdue','completed')),0)::float AS recovered
       FROM loans`),
@@ -2141,7 +2141,7 @@ app.get("/api/finance/command-center",auth,requireFinance("view"),asyncRoute(asy
   const displayCash=historicalPeriod?periodAccounts.filter(a=>a.accountType==="cash").reduce((s,a)=>s+a.balance,0):cash;
   const uapBalance=Number((await one(`SELECT balance::float AS balance FROM finance_accounts WHERE account_code='GL-4500' AND active=true`))?.balance
     ||(await one(`SELECT value FROM settings WHERE key='organizationUapBalance'`))?.value||0);
-  const loansOutstanding=Number((await one(`SELECT ROUND(COALESCE(SUM(${LOAN_PRINCIPAL_LEFT_SQL}),0),2)::float AS total FROM loans WHERE status IN ('active','overdue')`))?.total||0);
+  const loansOutstanding=Number((await one(`SELECT ROUND(COALESCE(SUM(${LOAN_MONEY_IN_LOANS_SQL}),0),2)::float AS total FROM loans WHERE status IN ('active','overdue')`))?.total||0);
   const companyBankBalance=historicalPeriod?displayBank:Number((await one(`SELECT balance::float AS balance FROM finance_accounts WHERE account_code='GL-4104' AND active=true`))?.balance||bank);
   const welfareRemaining=Math.max(0,Number(welfareStanding.closingBalance||0));
   const companyFunds=uapBalance+companyBankBalance+loansOutstanding+welfareRemaining;
@@ -3103,7 +3103,7 @@ app.get("/api/credits/command-center",auth,requireCredits("view",{allowFinanceVi
       COUNT(*) FILTER (WHERE status='rejected')::int AS rejected,
       COUNT(*) FILTER (WHERE status='overdue' OR (balance>0 AND due_date<CURRENT_DATE))::int AS overdue,
       COUNT(*) FILTER (WHERE status='ready-disbursement')::int AS awaiting_disbursement,
-      ROUND(COALESCE(SUM(${LOAN_PRINCIPAL_LEFT_SQL}) FILTER (WHERE status IN ('active','overdue')),0),2)::float AS outstanding,
+      ROUND(COALESCE(SUM(${LOAN_MONEY_IN_LOANS_SQL}) FILTER (WHERE status IN ('active','overdue')),0),2)::float AS outstanding,
       COALESCE(SUM(amount) FILTER (WHERE disbursed_at>=date_trunc('month',CURRENT_DATE)),0)::float AS disbursed_month
       FROM loans`),
     query(`SELECT

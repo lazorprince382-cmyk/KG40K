@@ -1100,7 +1100,7 @@ function executiveDashboardView() {
     ["Pending Approvals",s.pendingApprovals,"approvals","executive-approvals","Needs authority"],
     ["UAP account",money(uap),"building","finance-unit-trust","Old Mutual unit trust — open the live movement"],
     ["Centenary bank account",money(bank),"wallet","executive-finance","Company bank live balance"],
-    ["Money in loans",money(loansOut),"loans","executive-credits","Outstanding loan principal"],
+    ["Money in loans",money(loansOut),"loans","executive-credits","Principal + interest + penalties remaining"],
     ["Total Company Funds",money(company),"reports","executive-finance","UAP + Centenary + loans + welfare remaining"],
     ["Welfare since June 2024",money(welfareGross),"receipt","executive-welfare","Standing collected since June 2024"],
     ["Income this month",money(s.organizationReceiptsMonth??s.organizationIncomeMonth??0),"arrowDown","executive-finance","All Centenary receipts this month, including member savings and welfare"],
@@ -1616,7 +1616,7 @@ function financeHistoricalSnapshot(f) {
   const cards=[
     ["UAP account",money(uap),"building","finance-unit-trust","Old Mutual unit trust — open the live movement"],
     ["Centenary bank account",money(bank),"wallet","finance-bank","Company bank live balance"],
-    ["Money in loans",money(loans),"loans","credits-active","Outstanding loan principal"],
+    ["Money in loans",money(loans),"loans","credits-active","Principal + interest + penalties remaining"],
     ["Total Company Funds",money(total),"reports","finance-bank","UAP + Centenary + loans + welfare remaining"]
   ];
   return `<section class="finance-snapshot-block"><div class="finance-period-heading"><div><strong>Company positions</strong></div><div class="head-actions"><button class="button secondary small" data-finance-page="finance-unit-trust">${icons.reports}Unit Trust</button><button class="button secondary small" data-finance-page="finance-bank">${icons.building}Bank accounts</button></div></div><div class="exec-stat-grid finance-card-grid cols-4">${cards.map((card,index)=>financeStatCard(...card,index)).join("")}</div></section>`;
