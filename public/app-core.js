@@ -681,7 +681,12 @@ function executiveWorkspaceRole() {
   return ({credits:"Credits Officer",finance:"Finance Officer",investment:"Investment Officer",welfare:"Welfare Officer",legal:"Legal Officer",audit:"Auditor",supervisory:"Supervisory Officer"})[state.executiveWorkspace]||state.role;
 }
 function isExecutiveReadOnly() {
-  return state.role==="Executive Officer"&&Boolean(state.executiveWorkspace);
+  if(state.role!=="Executive Officer"||!state.executiveWorkspace)return false;
+  if(state.executiveWorkspace==="finance"&&(state.finance?.access?.canEdit||state.finance?.access?.canCreate))return false;
+  return true;
+}
+function inFinanceDesk() {
+  return state.role==="Finance Officer"||state.executiveWorkspace==="finance";
 }
 function canCreditsDisburse(){
   const email=String(state.user?.email||"").trim().toLowerCase();
@@ -769,7 +774,7 @@ function render() {
             ${state.executiveWorkspace?`<button class="button secondary desktop-only-back" data-executive-workspace-exit>${icons.arrowUp} Back to Executive</button>`:""}
             <button class="icon-button" data-action="help" title="Help">${icons.help}</button>
             <button class="icon-button" data-action="notifications" title="Notifications">${icons.bell}<span class="notification-dot"></span></button>
-            ${state.role==="Executive Officer"?`<button class="icon-button exec-calendar-button" data-executive-page="executive-meetings">${icons.clock}</button><div class="exec-top-profile"><div class="avatar blue">${initials(actor())}</div><div><strong>${actor()}</strong><span>${state.executiveWorkspace?`Viewing ${state.executiveWorkspace} (read only)`:"Executive Department"}</span></div></div>`:""}
+            ${state.role==="Executive Officer"?`<button class="icon-button exec-calendar-button" data-executive-page="executive-meetings">${icons.clock}</button><div class="exec-top-profile"><div class="avatar blue">${initials(actor())}</div><div><strong>${actor()}</strong><span>${state.executiveWorkspace?(isExecutiveReadOnly()?`Viewing ${state.executiveWorkspace} (read only)`:`${state.executiveWorkspace==="finance"?"Finance":state.executiveWorkspace}`):"Executive Department"}</span></div></div>`:""}
             ${state.role==="Finance Officer"?`<div class="exec-top-profile"><div class="avatar blue">${initials(actor())}</div><div><strong>${actor()}</strong><span>Finance</span></div></div>`:""}
             ${state.role==="Credits Officer"?`<div class="exec-top-profile"><div class="avatar blue">${initials(actor())}</div><div><strong>${actor()}</strong><span>Credits Department</span></div></div>`:""}
             ${state.role==="Investment Officer"?`<div class="exec-top-profile"><div class="avatar blue">${initials(actor())}</div><div><strong>${actor()}</strong><span>Investment Department</span></div></div>`:""}
@@ -884,7 +889,7 @@ function financeSidebar() {
     <div class="executive-brand"><div class="executive-crest finance-crest">${icons.wallet}</div><div><strong>KASANGATI G40<br>KWAGALANA</strong><span>Finance</span></div></div>
     <nav class="nav executive-nav">${[...sidebarPages].filter(page=>pages.includes(page)).map(page=>`<button class="nav-item ${state.page===page?"active":""}" data-page="${page}">${icons[iconsByPage[page]||page]||icons.dashboard}<span>${labels[page]}</span>${page==="messages"?messagesNavBadge():navAlertDot(alertFor(page))}</button>`).join("")}</nav>
     <div class="sidebar-bottom">${state.executiveWorkspace?`<button class="executive-quick" data-executive-workspace-exit>${icons.arrowUp}<span>Back to Executive</span></button>`:`<button class="executive-quick" data-action="finance-quick">${icons.arrowUp}<span>Quick Actions</span><b>&gt;</b></button>`}
-      <div class="sidebar-user"><div class="avatar blue">${initials(actor())}</div><div><div class="user-name">${actor()}</div><div class="user-role">${state.executiveWorkspace?"Executive read-only view":"Finance"}</div></div></div></div>
+      <div class="sidebar-user"><div class="avatar blue">${initials(actor())}</div><div><div class="user-name">${actor()}</div><div class="user-role">${isExecutiveReadOnly()?"Executive read-only view":"Finance"}</div></div></div></div>
   </aside>`;
 }
 function executiveSidebar() {
@@ -930,7 +935,7 @@ function headActions() {
     if(state.page==="credits-charges") return `<div class="head-actions"><button class="button primary" data-credits-modal="charge">${icons.plus}Assess charge</button></div>`;
     if(state.page==="credits-reports") return "";
   }
-  if(state.role==="Finance Officer") {
+  if(inFinanceDesk()) {
     if(state.page==="finance-income") return `<div class="head-actions"><button class="button primary" data-finance-modal="income">${icons.plus}Record income</button></div>`;
     if(state.page==="finance-expenses") return `<div class="head-actions"><button class="button primary" data-finance-modal="expense">${icons.plus}New expense</button></div>`;
     if(state.page==="finance-invoices") return `<div class="head-actions"><button class="button primary" data-finance-modal="invoice">${icons.plus}Record invoice</button></div>`;
@@ -1921,7 +1926,8 @@ function financeBudgetsView() {
   return `<div class="finance-budget-cards">${f.budgets.map(b=>`<article class="${b.utilization>=100?"danger":b.utilization>=80?"warning":""}"><div><span>${b.department}</span></div><h3>${money(b.allocated)}</h3><p>Used ${money(b.used)} - Remaining ${money(b.remaining)}</p>${progress("Budget utilization",`${b.utilization}%`,Math.min(100,b.utilization),b.utilization>=90?"amber":"lime")}<small>${b.utilization>=100?"Budget exceeded — spending must stop":b.utilization>=90?"Critical: 90% threshold reached":b.utilization>=80?"Warning: 80% threshold reached":"Within approved budget"}</small>${canEdit?`<div class="finance-account-actions"><button class="danger-action" data-finance-budget-delete="${b.id}">Delete budget</button></div>`:""}</article>`).join("")||`<div class="exec-empty">No department budgets for this period.</div>`}</div>`;
 }
 function canFinanceEditAccounts(){
-  return state.role==="Finance Officer"&&!state.executiveWorkspace&&Boolean(state.finance?.access?.canEdit||state.finance?.access?.canCreate);
+  if(state.role==="Auditor"||state.user?.role==="Auditor"||state.role==="Member")return false;
+  return Boolean(state.finance?.access?.canEdit||state.finance?.access?.canCreate);
 }
 function financeBankView() {
   const f=state.finance;

@@ -2468,7 +2468,6 @@ app.post("/api/finance/accounts",auth,requireFinance("create"),asyncRoute(async(
   } catch(error){if(error.code==="23505")return res.status(409).json({error:"That finance account code already exists"});throw error;}
 }));
 app.patch("/api/finance/accounts/:id",auth,requireFinance("edit"),asyncRoute(async(req,res)=>{
-  if(req.user.role!=="Finance Officer")return res.status(403).json({error:"Only Finance can edit bank and cash account values"});
   const b=req.body,type=String(b.accountType||"").toLowerCase(),allowed=["bank","cash","petty_cash","mobile_money","restricted"];
   if(!allowed.includes(type)||!String(b.accountName||"").trim())return res.status(400).json({error:"Account name and valid account type are required"});
   if(type==="bank"&&(!String(b.bankName||"").trim()||!String(b.accountNumber||"").trim()))
@@ -2515,7 +2514,6 @@ app.patch("/api/finance/accounts/:id",auth,requireFinance("edit"),asyncRoute(asy
   res.json(row);
 }));
 app.delete("/api/finance/accounts/:id",auth,requireFinance("edit"),asyncRoute(async(req,res)=>{
-  if(req.user.role!=="Finance Officer")return res.status(403).json({error:"Only Finance can delete cash accounts"});
   const locked=await one(`SELECT account_code AS "accountCode" FROM finance_accounts WHERE id=$1 AND active=true`,[req.params.id]);
   if(locked&&["GL-4104","GL-4500"].includes(locked.accountCode))
     return res.status(409).json({error:"Centenary and UAP cannot be deleted. Edit the live balance instead."});
@@ -3002,7 +3000,6 @@ app.post("/api/finance/procurements/:id/advance",auth,requireFinance("edit"),asy
   res.json({ok:true,stage:next});
 }));
 app.post("/api/finance/accounts/:id/reconcile",auth,requireFinance("edit"),asyncRoute(async(req,res)=>{
-  if(req.user.role!=="Finance Officer")return res.status(403).json({error:"Only Finance can reconcile bank accounts"});
   const account=await one("UPDATE finance_accounts SET last_reconciled_at=NOW() WHERE id=$1 AND active=true RETURNING id,account_name",[req.params.id]);
   if(!account)return res.status(404).json({error:"Finance account not found"});
   await audit({userId:req.user.id,action:"BANK_ACCOUNT_RECONCILED",entityType:"finance_account",entityId:String(account.id),details:account.account_name,...metadata(req)});
