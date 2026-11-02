@@ -1485,7 +1485,7 @@ function standingReportsSection() {
   const month=standingReportMonth();
   const max=(()=>{try{return new Date().toLocaleDateString("en-CA",{timeZone:"Africa/Kampala"}).slice(0,7);}catch(_){return month;}})();
   const reports=[
-    ["savings","Personal savings standing","Available/paid up on the viewing date vs expected at month end"],
+    ["savings","Personal savings standing","Available/paid up vs expected at month end, with each member's share capital"],
     ["welfare","Welfare standings","UGX 25,000 each month from the month they joined through this month"],
     ["loans","Loans full analysis","Current facilities, outstanding balances and repayment standing"],
     ["company","Company standing","UAP, Centenary, current welfare money, money in loans, and the total"],

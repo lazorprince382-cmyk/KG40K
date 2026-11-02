@@ -130,6 +130,7 @@ async function loadPersonalSavingsRows(asOf) {
     await query(
       `SELECT m.id, m.full_name AS name, m.member_number AS "memberNumber",
          m.savings_balance::float AS savings,
+         m.share_capital::float AS shares,
          to_char(m.joined_at,'YYYY-MM') AS "joinMonth",
          COALESCE((SELECT SUM(t.amount) FROM transactions t
            WHERE t.member_id=m.id AND t.status IN ('completed','verified','approved')
@@ -159,7 +160,11 @@ async function loadPersonalSavingsRows(asOf) {
          COALESCE((SELECT SUM(t.amount) FROM transactions t
            WHERE t.member_id=m.id AND t.status IN ('completed','verified','approved')
              AND t.type='Hosting fee' AND t.method ILIKE '%savings%'
-             AND COALESCE(t.verified_at,t.created_at)::date <= $1::date),0)::float AS "hostingFromSavingsByAsOf"
+             AND COALESCE(t.verified_at,t.created_at)::date <= $1::date),0)::float AS "hostingFromSavingsByAsOf",
+         COALESCE((SELECT SUM(t.amount) FROM transactions t
+           WHERE t.member_id=m.id AND t.status IN ('completed','verified','approved')
+             AND t.type='Share purchase'
+             AND COALESCE(t.verified_at,t.created_at)::date > $1::date),0)::float AS "sharesAfter"
        FROM members m
        WHERE m.deleted_at IS NULL AND m.status='active'
        ORDER BY m.full_name`,
@@ -186,7 +191,11 @@ async function loadPersonalSavingsRows(asOf) {
       }
       const expected = expectedAtEndOf(settings, joinMonth, parsed.index);
       const variance = paid - expected;
-      return { name: m.name, memberNumber: m.memberNumber, paid, expected, variance };
+      const shares = Math.max(
+        0,
+        Number(m.shares || 0) - (parsed.isCurrent ? 0 : Number(m.sharesAfter || 0))
+      );
+      return { name: m.name, memberNumber: m.memberNumber, paid, expected, variance, shares };
     })
     .sort((a, b) => a.variance - b.variance || a.name.localeCompare(b.name));
 }
@@ -293,15 +302,20 @@ function drawSavingsStyleTable(doc, rows, {
   fromDate = "2024-01-01",
   toDate = "",
   unpaidLabel = "UNPAID SAVINGS :",
+  shareLabel = "",
 } = {}) {
   const rowH = 18;
   const headH = 36;
+  const showShares = Boolean(shareLabel);
   const cols = [
-    { key: "no", label: "No.", w: 32, align: "center", header: CYAN, body: WHITE, text: "#0B1F3B" },
-    { key: "name", label: "Client Name", w: 168, align: "left", header: CYAN, body: SKY, text: "#0B1F3B" },
-    { key: "paid", label: paidLabel, w: 100, align: "right", header: CYAN, body: CYAN_CELL, text: "#0B1F3B" },
-    { key: "expected", label: expectedLabel, w: 100, align: "right", header: GREEN_TEXT, body: GREEN_CELL, text: GREEN_TEXT },
-    { key: "variance", label: "Deficit/Surplus", w: 110, align: "right", header: RED, body: WHITE, text: "#0B1F3B" },
+    { key: "no", label: "No.", w: 28, align: "center", header: CYAN, body: WHITE, text: "#0B1F3B" },
+    { key: "name", label: "Client Name", w: showShares ? 132 : 168, align: "left", header: CYAN, body: SKY, text: "#0B1F3B" },
+    ...(showShares
+      ? [{ key: "shares", label: shareLabel, w: 92, align: "right", header: NAVY, body: WHITE, text: "#0B1F3B" }]
+      : []),
+    { key: "paid", label: paidLabel, w: showShares ? 86 : 100, align: "right", header: CYAN, body: CYAN_CELL, text: "#0B1F3B" },
+    { key: "expected", label: expectedLabel, w: showShares ? 86 : 100, align: "right", header: GREEN_TEXT, body: GREEN_CELL, text: GREEN_TEXT },
+    { key: "variance", label: "Deficit/Surplus", w: showShares ? 92 : 110, align: "right", header: RED, body: WHITE, text: "#0B1F3B" },
   ];
   const tableW = cols.reduce((sum, c) => sum + c.w, 0);
   const x0 = (doc.page.width - tableW) / 2;
@@ -309,12 +323,16 @@ function drawSavingsStyleTable(doc, rows, {
   fillRect(doc, x0, y, tableW, rowH, NAVY);
   cellText(doc, summaryTitle, x0, y, tableW, rowH, { align: "center", color: WHITE, bold: true, size: 10 });
   y += rowH;
-  fillRect(doc, x0, y, cols[0].w + cols[1].w, rowH, WHITE);
-  cellText(doc, rangeLabel, x0, y, cols[0].w + cols[1].w, rowH, { align: "left", color: NAVY, bold: true, size: 8 });
-  fillRect(doc, x0 + cols[0].w + cols[1].w, y, cols[2].w, rowH, WHITE);
-  cellText(doc, `From  ${fromDate}`, x0 + cols[0].w + cols[1].w, y, cols[2].w, rowH, { align: "center", color: NAVY, bold: true, size: 8 });
-  fillRect(doc, x0 + cols[0].w + cols[1].w + cols[2].w, y, cols[3].w + cols[4].w, rowH, WHITE);
-  cellText(doc, `To  ${toDate}`, x0 + cols[0].w + cols[1].w + cols[2].w, y, cols[3].w + cols[4].w, rowH, { align: "center", color: NAVY, bold: true, size: 8 });
+  const nameW = cols[0].w + cols[1].w;
+  const fromCols = cols.slice(2, cols.length - 2);
+  const fromW = fromCols.reduce((s, c) => s + c.w, 0);
+  const toW = cols[cols.length - 2].w + cols[cols.length - 1].w;
+  fillRect(doc, x0, y, nameW, rowH, WHITE);
+  cellText(doc, rangeLabel, x0, y, nameW, rowH, { align: "left", color: NAVY, bold: true, size: 8 });
+  fillRect(doc, x0 + nameW, y, fromW, rowH, WHITE);
+  cellText(doc, `From  ${fromDate}`, x0 + nameW, y, fromW, rowH, { align: "center", color: NAVY, bold: true, size: 8 });
+  fillRect(doc, x0 + nameW + fromW, y, toW, rowH, WHITE);
+  cellText(doc, `To  ${toDate}`, x0 + nameW + fromW, y, toW, rowH, { align: "center", color: NAVY, bold: true, size: 8 });
   y += rowH;
   let x = x0;
   cols.forEach((col) => {
@@ -328,7 +346,9 @@ function drawSavingsStyleTable(doc, rows, {
     y = ensureRowSpace(doc, y, rowH);
     const deficit = Number(row.variance) < -0.5;
     const surplus = Number(row.variance) > 0.5;
-    const values = [index + 1, row.name, money(row.paid), money(row.expected), money(row.variance)];
+    const values = showShares
+      ? [index + 1, row.name, money(row.shares), money(row.paid), money(row.expected), money(row.variance)]
+      : [index + 1, row.name, money(row.paid), money(row.expected), money(row.variance)];
     x = x0;
     cols.forEach((col, i) => {
       let bg = col.body;
@@ -353,27 +373,31 @@ function drawSavingsStyleTable(doc, rows, {
   y = ensureRowSpace(doc, y, rowH * 2 + 8);
   const totalPaid = rows.reduce((s, r) => s + Number(r.paid || 0), 0);
   const totalExpected = rows.reduce((s, r) => s + Number(r.expected || 0), 0);
+  const totalShares = rows.reduce((s, r) => s + Number(r.shares || 0), 0);
   const totalVar = totalPaid - totalExpected;
   const unpaid = rows.reduce((s, r) => s + Math.max(0, -Number(r.variance || 0)), 0);
-  const totals = ["", "Total :", money(totalPaid), money(totalExpected), money(totalVar)];
+  const totals = showShares
+    ? ["", "Total :", money(totalShares), money(totalPaid), money(totalExpected), money(totalVar)]
+    : ["", "Total :", money(totalPaid), money(totalExpected), money(totalVar)];
   x = x0;
   cols.forEach((col, i) => {
-    const bg = i >= 2 ? (Number(totalVar) < 0 ? RED_CELL : GREEN_CELL) : "#F2F2F2";
+    const moneyCol = col.key === "paid" || col.key === "expected" || col.key === "variance";
+    const bg = moneyCol ? (Number(totalVar) < 0 ? RED_CELL : GREEN_CELL) : "#F2F2F2";
     fillRect(doc, x, y, col.w, rowH, bg);
     cellText(doc, totals[i], x, y, col.w, rowH, {
       align: col.align,
       bold: true,
       size: 8,
-      color: i >= 2 && totalVar < 0 ? WHITE : "#0B1F3B",
+      color: moneyCol && totalVar < 0 ? WHITE : "#0B1F3B",
     });
     x += col.w;
   });
   if (unpaidLabel) {
     y += rowH + 6;
-    fillRect(doc, x0 + cols[0].w + cols[1].w, y, cols[2].w, rowH, RED);
-    cellText(doc, unpaidLabel, x0 + cols[0].w + cols[1].w, y, cols[2].w, rowH, { align: "center", color: WHITE, bold: true, size: 8 });
-    fillRect(doc, x0 + cols[0].w + cols[1].w + cols[2].w, y, cols[3].w + cols[4].w, rowH, RED_CELL);
-    cellText(doc, money(-unpaid), x0 + cols[0].w + cols[1].w + cols[2].w, y, cols[3].w + cols[4].w, rowH, {
+    fillRect(doc, x0 + nameW, y, fromW, rowH, RED);
+    cellText(doc, unpaidLabel, x0 + nameW, y, fromW, rowH, { align: "center", color: WHITE, bold: true, size: 8 });
+    fillRect(doc, x0 + nameW + fromW, y, toW, rowH, RED_CELL);
+    cellText(doc, money(-unpaid), x0 + nameW + fromW, y, toW, rowH, {
       align: "right",
       color: WHITE,
       bold: true,
@@ -1003,6 +1027,7 @@ async function buildStandingPdf(kind, { asOf } = {}) {
       drawSavingsStyleTable(doc, rows, {
         paidLabel: `Available\n/Paid up\n${viewDate}`,
         expectedLabel: `Expected\n${monthEndDate}`,
+        shareLabel: "Share\ncapital",
         summaryTitle: "Client Savings Summary",
         rangeLabel: "Personal Savings",
         fromDate: "2024-01-01",
