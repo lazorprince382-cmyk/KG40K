@@ -8,7 +8,6 @@ function isComputerTechnician(user) {
 }
 
 async function applyJudeOctoberSurplusToShares(client) {
-  if ((await client.query("SELECT 1 FROM settings WHERE key=$1", [JUDE_SURPLUS_KEY])).rows[0]) return null;
   const member = (
     await client.query(
       `SELECT id, full_name, member_number, savings_balance::float AS savings, share_capital::float AS shares
@@ -17,21 +16,19 @@ async function applyJudeOctoberSurplusToShares(client) {
        ORDER BY id LIMIT 1 FOR UPDATE`
     )
   ).rows[0];
-  if (!member) {
+  if (!member) return "Jude not found";
+  const shareTx = (
     await client.query(
-      `INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()`,
-      [JUDE_SURPLUS_KEY, "skipped-member-missing"]
-    );
-    return "Jude not found";
-  }
-  const take = Math.min(JUDE_SURPLUS, Math.max(0, Number(member.savings || 0)));
-  if (take < 0.5) {
-    await client.query(
-      `INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()`,
-      [JUDE_SURPLUS_KEY, "skipped-no-savings"]
-    );
-    return `${member.full_name} had no savings left to move`;
-  }
+      `SELECT id, amount::float FROM transactions
+       WHERE reference='SHR-JUDE-OCT-SURPLUS-883010' AND status IN ('completed','verified','approved')
+       LIMIT 1`
+    )
+  ).rows[0];
+  const savings = Number(member.savings || 0);
+  const surplusStillInSavings = savings + 0.5 >= 10783010;
+  if (!surplusStillInSavings && shareTx) return null;
+  const take = Math.min(JUDE_SURPLUS, Math.max(0, savings));
+  if (surplusStillInSavings && take < 0.5) return `${member.full_name} had no savings left to move`;
   const recorder = (
     await client.query(
       `SELECT id FROM users WHERE active=true
@@ -46,29 +43,34 @@ async function applyJudeOctoberSurplusToShares(client) {
        ORDER BY starts_on DESC LIMIT 1`
     )
   ).rows[0];
-  await client.query("UPDATE members SET savings_balance=GREATEST(0,savings_balance-$1), share_capital=share_capital+$1 WHERE id=$2", [
-    take,
-    member.id,
-  ]);
-  await client.query(
-    `INSERT INTO transactions
-      (reference,member_id,type,method,amount,status,notes,recorded_by,verified_by,verified_at,created_at,receipt_number,target_fiscal_year,submission_source)
-     VALUES ($1,$2,'Share purchase','Savings transfer',$3,'completed',$4,$5,$5,NOW(),'2026-10-30 12:00:00+03',$6,$7,'system')`,
-    [
-      `SHR-JUDE-OCT-SURPLUS-883010`,
-      member.id,
-      take,
-      `October 2026 surplus UGX ${take.toLocaleString()} moved from savings to annual share contribution. Expected 9,900,000; paid up 10,783,010. Not posted again to Centenary.`,
-      recorder?.id || null,
-      `RCPT-JUDE-SHR-883010`,
-      yearRow?.year || 2027,
-    ]
-  );
+  if (surplusStillInSavings) {
+    await client.query("UPDATE members SET savings_balance=GREATEST(0,savings_balance-$1) WHERE id=$2", [take, member.id]);
+  }
+  if (!shareTx) {
+    await client.query("UPDATE members SET share_capital=share_capital+$1 WHERE id=$2", [take, member.id]);
+    await client.query(
+      `INSERT INTO transactions
+        (reference,member_id,type,method,amount,status,notes,recorded_by,verified_by,verified_at,created_at,receipt_number,target_fiscal_year,submission_source)
+       VALUES ($1,$2,'Share purchase','Savings transfer',$3,'completed',$4,$5,$5,NOW(),'2026-10-30 12:00:00+03',$6,$7,'system')`,
+      [
+        `SHR-JUDE-OCT-SURPLUS-883010`,
+        member.id,
+        take,
+        `October 2026 surplus UGX ${take.toLocaleString()} moved from savings to annual share contribution. Expected 9,900,000; paid up 10,783,010. Not posted again to Centenary.`,
+        recorder?.id || null,
+        `RCPT-JUDE-SHR-883010`,
+        yearRow?.year || 2027,
+      ]
+    );
+  }
   await client.query(
     `INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()`,
-    [JUDE_SURPLUS_KEY, String(Math.round(take))]
+    [JUDE_SURPLUS_KEY, String(Math.round(take || Number(shareTx?.amount || JUDE_SURPLUS)))]
   );
-  return `${member.full_name}: UGX ${take.toLocaleString()} savings → annual shares`;
+  if (surplusStillInSavings) {
+    return `${member.full_name}: UGX ${take.toLocaleString()} taken off savings${shareTx ? " (shares already recorded)" : " → annual shares"}`;
+  }
+  return `${member.full_name}: annual shares recorded`;
 }
 
 function registerTechnicianApi({

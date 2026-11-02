@@ -143,7 +143,19 @@ async function loadPersonalSavingsRows(asOf) {
            WHERE c.member_id=m.id AND c.status IN ('verified','completed','recorded') AND c.amount>0
              AND (c.payment_method ILIKE '%savings%' OR COALESCE(c.reference,'') LIKE 'WCON-AUTO-%'
                OR COALESCE(c.reference,'') LIKE 'WCON-CATCHUP-%')
-             AND c.contribution_date > $1::date),0)::float AS "welfareFromSavingsAfter"
+             AND c.contribution_date > $1::date),0)::float AS "welfareFromSavingsAfter",
+         COALESCE((SELECT SUM(t.amount) FROM transactions t
+           WHERE t.member_id=m.id AND t.status IN ('completed','verified','approved')
+             AND t.type='Share purchase' AND t.method='Savings transfer'
+             AND COALESCE(t.verified_at,t.created_at)::date > $1::date),0)::float AS "shareFromSavingsAfter",
+         COALESCE((SELECT SUM(t.amount) FROM transactions t
+           WHERE t.member_id=m.id AND t.status IN ('completed','verified','approved')
+             AND t.type='Share purchase' AND t.method='Savings transfer'
+             AND COALESCE(t.verified_at,t.created_at)::date <= $1::date),0)::float AS "shareFromSavingsByAsOf",
+         COALESCE((SELECT SUM(t.amount) FROM transactions t
+           WHERE t.member_id=m.id AND t.status IN ('completed','verified','approved')
+             AND t.type='Hosting fee' AND t.method ILIKE '%savings%'
+             AND COALESCE(t.verified_at,t.created_at)::date > $1::date),0)::float AS "hostingFromSavingsAfter"
        FROM members m
        WHERE m.deleted_at IS NULL AND m.status='active'
        ORDER BY m.full_name`,
@@ -154,9 +166,16 @@ async function loadPersonalSavingsRows(asOf) {
     .map((m) => {
       const joinMonth = m.joinMonth ? monthIndex(m.joinMonth) : null;
       const current = Number(m.savings || 0);
-      const paid = parsed.isCurrent
+      let paid = parsed.isCurrent
         ? current
-        : current - Number(m.depositsAfter || 0) + Number(m.withdrawalsAfter || 0) + Number(m.welfareFromSavingsAfter || 0);
+        : current - Number(m.depositsAfter || 0) + Number(m.withdrawalsAfter || 0)
+          + Number(m.welfareFromSavingsAfter || 0) + Number(m.shareFromSavingsAfter || 0)
+          + Number(m.hostingFromSavingsAfter || 0);
+      const shareMoved = Number(m.shareFromSavingsByAsOf || 0);
+      if (shareMoved > 0.5) {
+        const previousExpected = expectedAtEndOf(settings, joinMonth, parsed.index - 1);
+        if (paid + 0.5 >= previousExpected + shareMoved) paid -= shareMoved;
+      }
       const expected = expectedAtEndOf(settings, joinMonth, parsed.index);
       const variance = paid - expected;
       return { name: m.name, memberNumber: m.memberNumber, paid, expected, variance };
