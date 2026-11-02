@@ -1424,7 +1424,7 @@ function executiveMeetingsView() {
   const items=state.executive.meetings||[];
   if(!items.length)return `<div class="exec-empty">No meetings on the calendar. Schedule the next sitting so members can see it and, if needed, pay hosting.</div>`;
   return `<p class="exec-report-preview-note">Last hosted meeting was 30 October 2026. Scheduling the next meeting notifies every member and opens a fresh hosting fee round.</p>
-    <div class="exec-calendar-page">${items.map(m=>{const d=new Date(m.scheduledAt);const upcoming=d.getTime()>=Date.now()-3600000;return `<article><time><strong>${d.getDate()}</strong><span>${d.toLocaleString("en",{month:"long"})}</span><em>${d.getFullYear()}</em></time><div><span>${escapeHtml(m.meetingType)} - ${escapeHtml(m.department||"Organization-wide")}${upcoming?"":" · held"}</span><h3>${escapeHtml(m.title)}</h3><p>${escapeHtml(m.agenda||"Agenda pending")}</p><small>${icons.clock}${d.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})} - ${escapeHtml(m.venue||"Venue pending")}${m.hostName?` · Host: ${escapeHtml(m.hostName)}`:""}</small></div><button data-action="meeting-details" data-id="${m.id}">View details ></button></article>`}).join("")}</div>`;
+    <div class="exec-calendar-page">${items.map(m=>{const d=new Date(m.scheduledAt);const upcoming=d.getTime()>=Date.now()-3600000;return `<article><time><strong>${d.getDate()}</strong><span>${d.toLocaleString("en",{month:"long"})}</span><em>${d.getFullYear()}</em></time><div><span>${escapeHtml(m.meetingType)} - ${escapeHtml(m.department||"Organization-wide")}${upcoming?"":" · held"}</span><h3>${escapeHtml(m.title)}</h3><p style="white-space:pre-line">${escapeHtml(m.agenda||"Agenda pending")}</p><small>${icons.clock}${d.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})} - ${escapeHtml(m.venue||"Venue pending")}${m.hostName?` · Host: ${escapeHtml(m.hostName)} (does not pay hosting)`:""}</small></div><button data-action="meeting-details" data-id="${m.id}">View details ></button></article>`}).join("")}</div>`;
 }
 function executiveProjectsView() {
   const e=state.executive;
@@ -1476,14 +1476,14 @@ function standingReportsSection() {
     ["active-loans","Active loans and installments","When the loan was requested, how/when each installment was paid, principal and interest paid and remaining"],
     ["hosting-fee","Hosting fee payments","Members who have paid the hosting fee, and those who have not"],
     ["income-statement","Income statement","Income and expenses for the report month, with year-to-date totals"],
-    ["debtors-aging","Debtors aging","Outstanding loans aged current, 1–30, 31–60, 61–90 and 90+ days"]
+    ["debtors-aging","Who still owes on loans","Simple list of members with money still on a loan, and whether they are late"]
   ];
   return `<section class="standing-reports-block"><div class="exec-panel-head"><div><h3>Standing reports (PDF)</h3><p>Pick a month for savings and welfare. Company standing, assistance and active loans use live books.</p></div>
       <label class="standing-report-month">Report month<input type="month" min="2024-06" max="${max}" value="${month}" data-standing-report-month></label></div>
     <div class="exec-report-grid">${reports.map(([kind,name,desc],i)=>`<article><span class="${["blue","green","violet","orange","teal","blue","green","orange"][i%8]}">${icons.file}</span><div><h3>${name}</h3><p>${desc}</p><small>PDF · ${escapeHtml(month)}</small></div><div class="exec-report-actions"><button type="button" data-standing-report-view="${kind}">${icons.eye}View PDF</button><a class="button secondary" href="${standingReportHref(kind,true)}" download>${icons.download}Download</a></div></article>`).join("")}</div></section>`;
 }
 function openStandingReport(kind){
-  const titles={savings:"Personal savings standing",welfare:"Welfare standings",loans:"Loans full analysis",company:"Company standing",assistance:"Welfare assistance register","active-loans":"Active loans and installments","hosting-fee":"Hosting fee payments","income-statement":"Income statement","debtors-aging":"Debtors aging"};
+  const titles={savings:"Personal savings standing",welfare:"Welfare standings",loans:"Loans full analysis",company:"Company standing",assistance:"Welfare assistance register","active-loans":"Active loans and installments","hosting-fee":"Hosting fee payments","income-statement":"Income statement","debtors-aging":"Who still owes on loans"};
   const href=standingReportHref(kind,false);
   openSecureContentViewer(href,`${titles[kind]||"Standing report"} · ${standingReportMonth()}`,{downloadHref:standingReportHref(kind,true),replaceModal:false});
 }
@@ -1885,8 +1885,8 @@ function hostingFeeRosterView(source="finance") {
   const paidRows=paid.map(x=>[x.name,x.memberNumber||"",money(x.paid),date(x.lastPaidOn),x.receiptNumber||"—",status(x.status)]);
   const unpaidRows=unpaid.map(x=>[x.name,x.memberNumber||"",money(x.expected||standing.expected||50000),"Not paid"]);
   const note=standing.reminderActive
-    ?`Hosting fee of ${money(standing.expected||50000)} is due for ${escapeHtml(standing.meetingLabel||"the upcoming meeting")}. Record it from Finance → Income → Hosting fee.`
-    :`No hosting fee is due until Executive schedules the next meeting. The last meeting was 30 October 2026.`;
+    ?`Hosting fee of ${money(standing.expected||50000)} is due for ${escapeHtml(standing.meetingLabel||"the upcoming meeting")}. The host does not pay. Record payments from Finance → Income → Hosting fee.`
+    :`No hosting fee is due until Executive schedules the next meeting. Last sitting: 30 October 2026 at Banumba Francis's place. The host does not pay hosting fee.`;
   return `<div class="exec-module-metrics">${executiveModuleMetric("Collected",money(standing.collected||0),"green")}${executiveModuleMetric("Paid",standing.paidCount||paid.filter(x=>x.status==="paid").length,"blue")}${executiveModuleMetric("Not paid",standing.reminderActive?standing.unpaidCount||unpaid.length:0,"orange")}${executiveModuleMetric("Expected each",money(standing.expected||50000),"violet")}</div>
     <p class="exec-report-preview-note">${note}</p>
     ${standing.reminderActive?`${financeDataTable("Members who have paid",["Member","Number","Amount","Date","Receipt","Status"],paidRows)}
@@ -2616,7 +2616,7 @@ function openExecutiveMeetingModal() {
   const hosts=(state.executive?.hostingFee?.members||state.finance?.hostingFee?.members||[]).map(m=>`<option value="${m.id}">${escapeHtml(m.name)}</option>`).join("");
   const expected=Number(state.executive?.hostingFee?.expected||state.finance?.hostingFee?.expected||50000);
   document.body.insertAdjacentHTML("beforeend",`<div class="modal-backdrop" id="modal-backdrop"><div class="modal"><div class="modal-head"><div><h2>Schedule organization meeting</h2><p>Members see this on their dashboards. If hosting fee is collected, the last round is closed and a new one starts for this date.</p></div><button class="modal-close" data-close>${icons.x}</button></div>
-    <form class="form" id="executive-meeting-form"><div class="form-grid"><div class="field full"><label>Meeting title</label><input name="title" required placeholder="e.g. November members meeting"></div><div class="field"><label>Meeting type</label><select name="meetingType"><option>Member meeting</option><option>Board Meeting</option><option>Executive Meeting</option><option>Loan Committee</option><option>Welfare Meeting</option><option>Investment Meeting</option><option>Training</option></select></div><div class="field"><label>Venue / host home</label><input name="venue" placeholder="Where members will meet"></div><div class="field"><label>Host member</label><select name="hostMemberId"><option value="">Not specified</option>${hosts}</select></div><div class="field"><label>Date</label><input name="date" type="date" min="${today}" value="${today}" required></div><div class="field"><label>Time</label><input name="time" type="time" value="10:00" required></div><div class="field"><label>Hosting fee (UGX)</label><input name="hostingFeeAmount" type="number" step="any" value="${expected}"></div><div class="field full"><label class="check-field"><input name="collectHostingFee" type="checkbox" checked><span>Collect hosting fee for this meeting and notify all members</span></label><small>Clears the previous hosting standing (last meeting 30 October 2026) and starts a new round for this date.</small></div><div class="field full"><label>Agenda</label><textarea name="agenda" placeholder="What the meeting will cover"></textarea></div></div>${formActions("Schedule meeting")}</form></div></div>`);
+    <form class="form" id="executive-meeting-form"><div class="form-grid"><div class="field full"><label>Meeting title</label><input name="title" required placeholder="e.g. November members meeting"></div><div class="field"><label>Meeting type</label><select name="meetingType"><option>Member meeting</option><option>Board Meeting</option><option>Executive Meeting</option><option>Loan Committee</option><option>Welfare Meeting</option><option>Investment Meeting</option><option>Training</option></select></div><div class="field"><label>Venue / host home</label><input name="venue" placeholder="Where members will meet"></div><div class="field"><label>Host member</label><select name="hostMemberId"><option value="">Not specified</option>${hosts}</select><small>The host does not pay hosting fee.</small></div><div class="field"><label>Date</label><input name="date" type="date" value="${today}" required></div><div class="field"><label>Time</label><input name="time" type="time" value="10:00" required></div><div class="field"><label>Hosting fee (UGX)</label><input name="hostingFeeAmount" type="number" step="any" value="${expected}"></div><div class="field full"><label class="check-field"><input name="alreadyHeld" type="checkbox"><span>This meeting already took place</span></label></div><div class="field full"><label class="check-field"><input name="collectHostingFee" type="checkbox" checked><span>Collect hosting fee for this meeting (not from the host)</span></label><small>For a new sitting this notifies members and starts a fresh hosting round. The host is exempt.</small></div><div class="field full"><label>Agenda</label><textarea name="agenda" rows="10" placeholder="1. Opening prayer"></textarea></div></div>${formActions("Save meeting")}</form></div></div>`);
   document.querySelector("[data-close]").onclick=closeModal;document.getElementById("executive-meeting-form").onsubmit=submitExecutiveMeeting;
 }
 async function submitExecutiveMeeting(event) {
@@ -2625,6 +2625,7 @@ async function submitExecutiveMeeting(event) {
   const data=Object.fromEntries(new FormData(form));
   data.scheduledAt=`${data.date}T${data.time}:00+03:00`;
   data.collectHostingFee=Boolean(form.elements.collectHostingFee?.checked);
+  data.alreadyHeld=Boolean(form.elements.alreadyHeld?.checked);
   data.hostingFeeAmount=Number(data.hostingFeeAmount||50000);
   try{await api("/api/executive/meetings",{method:"POST",body:JSON.stringify(data)});closeModal();state.executive=await api("/api/executive/command-center");state.page="executive-meetings";render();toast(data.collectHostingFee?"Meeting scheduled. Hosting fee round opened and members notified.":"Meeting scheduled. Members notified.");}
   catch(error){toast(error.message);}
@@ -4783,6 +4784,16 @@ async function handleAction(action, element) {
     try{state.executive=await api("/api/executive/command-center");render();toast("Executive command center refreshed.");}catch(error){toast(error.message);}return;
   }
   if (action==="schedule-meeting") return openExecutiveMeetingModal();
+  if (action==="meeting-details") {
+    const meeting=(state.executive?.meetings||[]).find(m=>String(m.id)===String(element?.dataset?.id));
+    if(!meeting)return toast("Meeting not found.");
+    const d=new Date(meeting.scheduledAt);
+    document.body.insertAdjacentHTML("beforeend",`<div class="modal-backdrop" id="modal-backdrop"><div class="modal"><div class="modal-head"><div><h2>${escapeHtml(meeting.title)}</h2><p>${escapeHtml(meeting.meetingType||"Meeting")} · ${d.toLocaleString("en-GB",{timeZone:"Africa/Kampala"})}</p></div><button class="modal-close" data-close>${icons.x}</button></div>
+      <div class="form" style="padding:8px 4px 16px"><p><strong>Venue:</strong> ${escapeHtml(meeting.venue||"Not recorded")}</p><p><strong>Host:</strong> ${escapeHtml(meeting.hostName||"Not recorded")}${meeting.hostName?" (does not pay hosting fee)":""}</p><p><strong>Status:</strong> ${escapeHtml(meeting.status||"")}</p><h3>Agenda</h3><p style="white-space:pre-line">${escapeHtml(meeting.agenda||"Agenda pending")}</p></div>
+      <div class="form-actions"><button type="button" class="button primary" data-close>Close</button></div></div></div>`);
+    document.querySelectorAll("[data-close]").forEach(btn=>btn.onclick=closeModal);
+    return;
+  }
   if (action==="assign-task") return openExecutiveTaskModal();
   if (action==="back-departments") { state.departmentData=null; render(); return window.scrollTo(0,0); }
   if (action==="new-message") return openNewMessageModal();

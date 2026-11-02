@@ -342,8 +342,11 @@ module.exports = function registerMemberAccountApi({
         WHERE COALESCE(p.status, '') IN ('paid','processed')
         ORDER BY p.paid_at DESC NULLS LAST, p.id DESC
         LIMIT 100`),
-      query(`SELECT id,reference,title,meeting_type AS "meetingType",agenda,venue,scheduled_at AS "scheduledAt",status
-        FROM organization_meetings WHERE visibility_level<=1 ORDER BY scheduled_at DESC LIMIT 100`),
+      query(`SELECT m.id,m.reference,m.title,m.meeting_type AS "meetingType",m.agenda,m.venue,
+        m.scheduled_at AS "scheduledAt",m.status,host.full_name AS "hostName"
+        FROM organization_meetings m
+        LEFT JOIN members host ON host.id=m.host_member_id
+        WHERE m.visibility_level<=1 ORDER BY m.scheduled_at DESC LIMIT 100`),
       query(`SELECT id,reference,document_type AS "documentType",title,version,file_name AS "fileName",updated_at AS "updatedAt",
         EXISTS(SELECT 1 FROM organization_document_versions v WHERE v.document_id=organization_documents.id) AS "hasFile"
         FROM organization_documents WHERE status='published' AND visibility_level<=1 ORDER BY updated_at DESC LIMIT 100`),

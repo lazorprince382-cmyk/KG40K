@@ -25,7 +25,7 @@ const { getRunningLoan, getSavingsTargetStatus, getGuarantorEligibility } = requ
 const { loadWelfareStanding, loadWelfareMonth, enforceOneMonthlyWelfareCharge } = require("./welfare-standing");
 const { chargeWelfareFromCoveredSavings, catchUpWelfareFromSavings, loadMemberSchedule, loadScheduleSettings, buildSchedule, monthIndex, monthKey, monthLabel } = require("./savings-schedule");
 const { buildStandingPdf } = require("./standing-reports");
-const { isHostingFeeCategory, loadHostingFeeStanding, paymentCycleId, startHostingCycleForMeeting } = require("./hosting-fees");
+const { isHostingFeeCategory, loadHostingFeeStanding, paymentCycleId, startHostingCycleForMeeting, recordBanumbaOctober30Meeting } = require("./hosting-fees");
 const { isComputerTechnician, applyJudeOctoberSurplusToShares, registerTechnicianApi } = require("./technician-ops");
 const { isWordUpload, convertWordUploadToPdf, convertPlainTextToPdf } = require("./services/office-pdf");
 
@@ -1968,31 +1968,36 @@ app.post("/api/executive/meetings",auth,requireExecutive("view"),asyncRoute(asyn
   const scheduledAt=new Date(/T/.test(String(b.scheduledAt||""))?b.scheduledAt:`${datePart}T${timePart}:00+03:00`);
   if(!title||Number.isNaN(scheduledAt.getTime())) return res.status(400).json({error:"Provide a meeting title and date"});
   const kampalaNow=new Date(new Date().toLocaleString("en-US",{timeZone:"Africa/Kampala"}));
-  if(scheduledAt.getTime()<kampalaNow.getTime()-60*1000) return res.status(400).json({error:"Pick a meeting date and time that has not already passed"});
-  const collectHosting=b.collectHostingFee!==false&&b.collectHostingFee!=="false"&&b.collectHostingFee!=="0"&&b.collectHostingFee!=="";
+  const alreadyHeld=b.alreadyHeld===true||b.alreadyHeld==="true"||b.alreadyHeld==="on"||b.alreadyHeld==="1";
+  if(!alreadyHeld&&scheduledAt.getTime()<kampalaNow.getTime()-60*1000) return res.status(400).json({error:"Pick a future date, or tick that this meeting already took place"});
+  const collectHosting=b.collectHostingFee===true||b.collectHostingFee==="true"||b.collectHostingFee==="on"||b.collectHostingFee==="1";
   const hostMemberId=Number(b.hostMemberId||b.host_member_id);
   const hostId=Number.isInteger(hostMemberId)&&hostMemberId>0?hostMemberId:null;
   const hostingAmount=Number(b.hostingFeeAmount||b.expectedAmount);
   const meetingDate=datePart||scheduledAt.toLocaleDateString("en-CA",{timeZone:"Africa/Kampala"});
+  const status=alreadyHeld||scheduledAt.getTime()<kampalaNow.getTime()?"held":"scheduled";
   const row=await transaction(async client=>{
     const executiveDepartment=(await client.query("SELECT id FROM departments WHERE code='executive'")).rows[0];
     const inserted=(await client.query(`INSERT INTO organization_meetings
       (reference,department_id,title,meeting_type,agenda,venue,scheduled_at,status,visibility_level,created_by,host_member_id,collect_hosting_fee)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,'scheduled',1,$8,$9,$10) RETURNING id,reference`,
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,1,$9,$10,$11) RETURNING id,reference`,
     [reference("MTG"),executiveDepartment.id,title,String(b.meetingType||"Member meeting").trim(),
-      String(b.agenda||"").trim()||null,String(b.venue||"").trim()||null,scheduledAt,
+      String(b.agenda||"").trim()||null,String(b.venue||"").trim()||null,scheduledAt,status,
       req.user.id,hostId,collectHosting])).rows[0];
     const when=scheduledAt.toLocaleString("en-GB",{timeZone:"Africa/Kampala",day:"numeric",month:"long",year:"numeric",hour:"2-digit",minute:"2-digit"});
     const venue=String(b.venue||"").trim();
-    await client.query(
-      `INSERT INTO notifications (member_id,title,message)
-       SELECT id, 'New meeting scheduled', $1
-       FROM members WHERE deleted_at IS NULL AND status='active'`,
-      [`${title} on ${when}${venue?` at ${venue}`:""}. Check your meetings page.`]
-    );
+    if(!alreadyHeld){
+      await client.query(
+        `INSERT INTO notifications (member_id,title,message)
+         SELECT id, 'New meeting scheduled', $1
+         FROM members WHERE deleted_at IS NULL AND status='active'`,
+        [`${title} on ${when}${venue?` at ${venue}`:""}. Check your meetings page.`]
+      );
+    }
     if(collectHosting){
       await startHostingCycleForMeeting(client,{
-        meetingId:inserted.id,title,meetingDate,expectedAmount:hostingAmount,createdBy:req.user.id,notify:true
+        meetingId:inserted.id,title,meetingDate,expectedAmount:hostingAmount,createdBy:req.user.id,
+        hostMemberId:hostId,notify:!alreadyHeld,open:!alreadyHeld
       });
     }
     return inserted;
@@ -7132,6 +7137,10 @@ async function runScheduledMaintenance() {
     const judeShares=await transaction(client=>applyJudeOctoberSurplusToShares(client));
     if(judeShares)console.log(`Jude October surplus to shares: ${judeShares}`);
   }catch(error){console.error("Jude October surplus to shares failed:",error.message);}
+  try{
+    const meeting=await transaction(client=>recordBanumbaOctober30Meeting(client));
+    if(meeting)console.log(`October 30 meeting: ${meeting}`);
+  }catch(error){console.error("October 30 Banumba meeting failed:",error.message);}
   await transaction(async client=>{await accrueUnitTrustInterest(client);});
   await transaction(async client=>{
     await enforceOneMonthlyWelfareCharge(client);

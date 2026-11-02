@@ -780,45 +780,42 @@ async function loadDebtorsAging() {
   return { rows, totals, total: rows.reduce((s, r) => s + r.outstanding, 0) };
 }
 
+function lateLabel(days) {
+  if (Number(days) <= 0) return "Paying on time";
+  return `${Number(days)} days late`;
+}
+
 function drawDebtorsAging(doc, aging, label) {
-  let y = 50;
-  const x0 = 18;
-  const pageW = doc.page.width - 36;
-  doc.font("Helvetica").fontSize(10).fillColor("#5B6B7C")
-    .text(`Outstanding loans (principal, interest and penalties remaining) aged by the oldest unpaid installment as at ${label}.`, x0, y, { width: pageW });
-  y += 28;
+  let y = 48;
+  const x0 = 28;
+  const pageW = doc.page.width - 56;
+  doc.font("Helvetica").fontSize(11).fillColor("#334155")
+    .text(`Who still owes the group on a loan as at ${label}. Amounts include remaining principal, interest and penalties.`, x0, y, { width: pageW });
+  y += 32;
+  const summary = [
+    ["Paying on time", aging.totals.current],
+    ["Late up to 1 month", aging.totals["1-30"]],
+    ["Late 1–2 months", aging.totals["31-60"]],
+    ["Late 2–3 months", aging.totals["61-90"]],
+    ["Late over 3 months", aging.totals["90+"]],
+  ].filter(([, amount]) => Number(amount) > 0.5);
+  cellText(doc, "How much is owed", x0, y, pageW, 18, { bold: true, size: 13, color: NAVY });
+  y += 22;
   y = drawMiniTable(doc, x0, y, [
-    { w: 90, label: "Current", align: "right", bold: true },
-    { w: 90, label: "1–30 days", align: "right", bold: true },
-    { w: 90, label: "31–60 days", align: "right", bold: true },
-    { w: 90, label: "61–90 days", align: "right", bold: true },
-    { w: 90, label: "90+ days", align: "right", bold: true },
-    { w: 90, label: "Total", align: "right", bold: true },
-  ], [[
-    moneyExact(aging.totals.current),
-    moneyExact(aging.totals["1-30"]),
-    moneyExact(aging.totals["31-60"]),
-    moneyExact(aging.totals["61-90"]),
-    moneyExact(aging.totals["90+"]),
-    moneyExact(aging.total),
-  ]], { header: NAVY });
-  y += 16;
-  cellText(doc, "Loan debtors", x0, y, pageW, 16, { bold: true, size: 12, color: NAVY });
-  y += 18;
+    { w: 260, label: "Standing", align: "left" },
+    { w: 160, label: "Amount (UGX)", align: "right", bold: true },
+  ], summary.concat([["Total still owed", aging.total]]).map(([name, amount]) => [name, money(amount)]), { header: NAVY });
+  y += 20;
+  cellText(doc, "Members", x0, y, pageW, 18, { bold: true, size: 13, color: NAVY });
+  y += 22;
   drawMiniTable(doc, x0, y, [
-    { w: 150, label: "Member", align: "left" },
-    { w: 80, label: "Loan", align: "left" },
-    { w: 72, label: "Status", align: "left" },
-    { w: 70, label: "Days", align: "right" },
-    { w: 80, label: "Bucket", align: "left" },
-    { w: 90, label: "Outstanding", align: "right", bold: true },
+    { w: 200, label: "Who owes", align: "left" },
+    { w: 130, label: "Still owes (UGX)", align: "right", bold: true },
+    { w: 190, label: "Are they late?", align: "left" },
   ], aging.rows.map((row) => [
     ascii(row.member),
-    ascii(row.reference),
-    ascii(row.status),
-    String(row.daysOverdue),
-    row.bucket,
-    moneyExact(row.outstanding),
+    money(row.outstanding),
+    lateLabel(row.daysOverdue),
   ]), { header: NAVY });
 }
 
@@ -1025,7 +1022,7 @@ async function buildStandingPdf(kind, { asOf } = {}) {
       drawIncomeStatement(doc, statement, label);
     } else if (kind === "debtors-aging") {
       const aging = await loadDebtorsAging();
-      drawHeader(doc, `Debtors Aging Report as at ${label}`);
+      drawHeader(doc, `Who still owes on loans · ${label}`);
       drawDebtorsAging(doc, aging, label);
     } else {
       throw Object.assign(new Error("Unknown standing report"), { status: 400 });
@@ -1052,7 +1049,7 @@ const TITLES = {
   "active-loans": "Active loans and installments",
   "hosting-fee": "Hosting fee payments",
   "income-statement": "Income statement",
-  "debtors-aging": "Debtors aging",
+  "debtors-aging": "Who still owes on loans",
 };
 
 module.exports = {
