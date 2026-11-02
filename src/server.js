@@ -25,7 +25,7 @@ const { getRunningLoan, getSavingsTargetStatus, getGuarantorEligibility } = requ
 const { loadWelfareStanding, loadWelfareMonth, enforceOneMonthlyWelfareCharge } = require("./welfare-standing");
 const { chargeWelfareFromCoveredSavings, catchUpWelfareFromSavings, loadMemberSchedule, loadScheduleSettings, buildSchedule, monthIndex } = require("./savings-schedule");
 const { buildStandingPdf } = require("./standing-reports");
-const { isHostingFeeCategory, loadHostingFeeStanding } = require("./hosting-fees");
+const { isHostingFeeCategory, loadHostingFeeStanding, deductUnpaidHostingFromSavings } = require("./hosting-fees");
 const { isWordUpload, convertWordUploadToPdf, convertPlainTextToPdf } = require("./services/office-pdf");
 
 function mimeFromFilename(name="",fallback="application/octet-stream"){
@@ -52,6 +52,12 @@ function isMemberSavingsFinanceCategory(category="") {
 function isShareContributionCategory(category="") {
     return /annual\s*share|share\s*contribution|share\s*purchase|share\s*capital/i.test(String(category || "").trim());
 }
+function isWelfareContributionCategory(category="") {
+    return /welfare\s*contribution/i.test(String(category || "").trim());
+}
+function isAnnualContributionCategory(category="") {
+    return /annual\s*contribution|annual\s*subscription/i.test(String(category || "").trim()) && !isShareContributionCategory(category);
+}
 async function monthlyWelfareAmount(client=null){
   const runner=client||{query:(sql,params)=>query(sql,params).then(r=>({rows:r.rows}))};
   const row=(await runner.query(`SELECT value FROM settings WHERE key='monthlyWelfareContribution'`)).rows[0];
@@ -61,60 +67,9 @@ async function monthlyWelfareAmount(client=null){
 async function applyMonthlySavingsSplit(client,{memberId,grossAmount,onDate,userId,method,paymentReference,sourceRef}){
   const gross=Number(grossAmount);
   if(!Number.isFinite(gross)||gross<=0){const error=new Error("Enter a positive savings amount");error.status=400;throw error;}
-  const welfareDue=await monthlyWelfareAmount(client);
-  const paidOn=onDate||new Date();
   await client.query(`SELECT id FROM members WHERE id=$1 FOR UPDATE`,[memberId]);
-  const already=(await client.query(`SELECT id FROM welfare_contributions
-    WHERE member_id=$1 AND status IN ('verified','completed','recorded')
-      AND amount>0
-      AND contribution_type NOT ILIKE '%standing%'
-      AND COALESCE(reference,'') NOT LIKE 'WEL-STANDING-%'
-      AND (
-        period=to_char(($2::timestamptz AT TIME ZONE 'Africa/Kampala')::date,'YYYY-MM')
-        OR (
-          (contribution_date AT TIME ZONE 'Africa/Kampala')::date
-            >= date_trunc('month',($2::timestamptz AT TIME ZONE 'Africa/Kampala')::date)::date
-          AND (contribution_date AT TIME ZONE 'Africa/Kampala')::date
-            < (date_trunc('month',($2::timestamptz AT TIME ZONE 'Africa/Kampala')::date)+INTERVAL '1 month')::date
-        )
-      )
-    LIMIT 1`,[memberId,paidOn])).rows[0];
-  let welfareAmount=already?0:Math.min(welfareDue,gross);
-  let welfareReference=null;
-  let welfareId=null;
-  let welfareAlreadyPaid=Boolean(already);
-  if(welfareAmount>0){
-    const receipt=receiptReference("WRCPT");
-    welfareReference=reference("WCON");
-    await client.query("SAVEPOINT insert_monthly_welfare");
-    try{
-      const welfare=(await client.query(`INSERT INTO welfare_contributions
-        (reference,member_id,contribution_type,period,expected_amount,amount,payment_method,receipt_number,status,
-         contribution_date,recorded_by,verified_by,verified_at,verification_comment,payment_reference)
-        VALUES ($1,$2,'Monthly Welfare Contribution',to_char(($3::timestamptz AT TIME ZONE 'Africa/Kampala')::date,'YYYY-MM'),$4,$4,$5,$6,'verified',
-          ($3::timestamptz AT TIME ZONE 'Africa/Kampala')::date,$7,$7,NOW(),$8,$9)
-        RETURNING id`,
-        [welfareReference,memberId,paidOn,welfareAmount,method||"Bank transfer",receipt,userId,
-          `Taken once this month from ${sourceRef||"member savings receipt"}`,paymentReference||null])).rows[0];
-      await client.query("RELEASE SAVEPOINT insert_monthly_welfare");
-      welfareId=welfare?.id||null;
-      await client.query(`INSERT INTO settings (key,value) VALUES ('welfareFundBalance',$1)
-        ON CONFLICT (key) DO UPDATE SET value=(COALESCE(NULLIF(settings.value,''),'0')::numeric+$2)::text, updated_at=NOW()`,
-        [String(welfareAmount),welfareAmount]);
-    }catch(error){
-      await client.query("ROLLBACK TO SAVEPOINT insert_monthly_welfare");
-      if(error.code!=="23505")throw error;
-      welfareAmount=0;
-      welfareAlreadyPaid=true;
-      welfareReference=null;
-      welfareId=null;
-    }
-  }
-  const savingsAmount=Math.max(0,Math.round((gross-welfareAmount)*100)/100);
-  if(savingsAmount>0){
-    await client.query("UPDATE members SET savings_balance=savings_balance+$1 WHERE id=$2",[savingsAmount,memberId]);
-  }
-  return {welfareAmount,savingsAmount,welfareAlreadyPaid,welfareReference,welfareId};
+  await client.query("UPDATE members SET savings_balance=savings_balance+$1 WHERE id=$2",[gross,memberId]);
+  return {welfareAmount:0,savingsAmount:gross,welfareAlreadyPaid:true,welfareReference:null,welfareId:null,onDate,userId,method,paymentReference,sourceRef};
 }
 async function syncOrganizationBankBalanceSetting(client,accountId){
   const row=(await client.query(`SELECT balance::float AS balance, account_code FROM finance_accounts WHERE id=$1`,[accountId])).rows[0];
@@ -767,6 +722,20 @@ async function reverseIncomeReceipt(client,entry){
       await client.query("RELEASE SAVEPOINT reverse_share_tx");
     }catch(error){
       await client.query("ROLLBACK TO SAVEPOINT reverse_share_tx");
+      if(error.code!=="23503")throw error;
+      await client.query("UPDATE transactions SET status='voided',finance_entry_id=NULL,notes=TRIM(BOTH FROM COALESCE(notes,'')||' | Voided when finance receipt was deleted') WHERE id=$1",[tx.id]);
+    }
+  }
+  const subscriptionRows=(await client.query(`SELECT id FROM transactions WHERE finance_entry_id=$1 AND type='Annual subscription fee' FOR UPDATE`,[entry.id])).rows;
+  effects.subscriptionReversed=0;
+  for(const tx of subscriptionRows){
+    effects.subscriptionReversed+=Number((await client.query("SELECT amount::float AS amount FROM transactions WHERE id=$1",[tx.id])).rows[0]?.amount||0);
+    await client.query("SAVEPOINT reverse_sub_tx");
+    try{
+      await client.query("DELETE FROM transactions WHERE id=$1",[tx.id]);
+      await client.query("RELEASE SAVEPOINT reverse_sub_tx");
+    }catch(error){
+      await client.query("ROLLBACK TO SAVEPOINT reverse_sub_tx");
       if(error.code!=="23503")throw error;
       await client.query("UPDATE transactions SET status='voided',finance_entry_id=NULL,notes=TRIM(BOTH FROM COALESCE(notes,'')||' | Voided when finance receipt was deleted') WHERE id=$1",[tx.id]);
     }
@@ -1718,6 +1687,23 @@ app.get("/api/executive/command-center",auth,requireExecutive("view"),asyncRoute
   const loansOutstandingLive=Number(loans.outstanding||0);
   const welfareRemaining=Math.max(0,Number(welfareBalance||0));
   const companyFunds=uapBalance+companyBankBalance+loansOutstandingLive+welfareRemaining;
+  const subscriptionPolicy=await one(`SELECT fiscal_year_label AS "fiscalYear",annual_subscription_fee::float AS fee,
+    EXTRACT(YEAR FROM ends_on)::int AS year,starts_on AS "startsOn",ends_on AS "endsOn"
+    FROM member_financial_year_policies WHERE status='active' ORDER BY ends_on DESC LIMIT 1`);
+  const subscriptionPayments=subscriptionPolicy?(await query(`SELECT t.member_id AS "memberId",t.amount::float
+      FROM transactions t JOIN members m ON m.id=t.member_id
+      WHERE t.type='Annual subscription fee' AND t.status='completed'
+        AND (t.target_fiscal_year=$1 OR (t.target_fiscal_year IS NULL AND t.created_at::date BETWEEN $2 AND $3))`,
+    [subscriptionPolicy.year,subscriptionPolicy.startsOn,subscriptionPolicy.endsOn])).rows:[];
+  const subscriptionCollected=subscriptionPayments.reduce((sum,row)=>sum+Number(row.amount||0),0);
+  const activeMemberCount=Number(memberStats.rows[0].active||0);
+  const subscriptionProgress={
+    fiscalYear:subscriptionPolicy?.fiscalYear||null,
+    fee:Number(subscriptionPolicy?.fee||0),
+    collected:subscriptionCollected,
+    activeMembers:activeMemberCount,
+    membersPaid:new Set(subscriptionPayments.map(row=>Number(row.memberId))).size
+  };
   res.json({
     selectedFiscalYear,availableFiscalYears,historicalPeriod:selectedFiscalYear!==defaultFiscalYear,
     stats:{totalMembers:memberStats.rows[0].total,activeMembers:memberStats.rows[0].active,newMembers:memberStats.rows[0].new_this_month,
@@ -1753,6 +1739,7 @@ app.get("/api/executive/command-center",auth,requireExecutive("view"),asyncRoute
       note:welfareStanding.note},
     welfareStanding,
     hostingFee:await loadHostingFeeStanding(),
+    subscriptionProgress,
     legal:legal.rows[0],audit:{...auditIssues.rows[0],open:auditSummary.open,departmentsUnderReview:auditSummary.departments,compliance:auditSummary.compliance},
     supervisory:{...supervisory.rows[0],departmentsBelowTarget:supervisorySummary.below},monthly,notifications
   });
@@ -2186,7 +2173,7 @@ app.get("/api/finance/command-center",auth,requireFinance("view"),asyncRoute(asy
     membersPaid:welfareMonth.membersPaid,
     payers:welfareMonth.rows,
     heldOnCentenary:true,
-    note:"Welfare taken from member deposits stays inside the Centenary bank balance. It is not a separate bank account."
+    note:"Record welfare separately under Income → Welfare contributions. Auto-chop from savings does not add extra Centenary cash. Cash welfare income posts to Centenary and the member welfare card."
   };
   const welfareStanding=await loadWelfareStanding();
   const displayBank=historicalPeriod
@@ -2200,6 +2187,14 @@ app.get("/api/finance/command-center",auth,requireFinance("view"),asyncRoute(asy
   const welfareRemaining=Math.max(0,Number(welfareStanding.closingBalance||0));
   const companyFunds=uapBalance+companyBankBalance+loansOutstanding+welfareRemaining;
   const liveBank=historicalPeriod?displayBank:companyBankBalance;
+  const savingsMembers=(await query(`SELECT id, member_number AS "memberNumber", full_name AS name
+    FROM members WHERE deleted_at IS NULL AND status='active' ORDER BY full_name`)).rows;
+  const welfarePaidIds=new Set((welfareMonth.rows||[]).map(row=>Number(row.memberId)));
+  const welfareDueMembers=savingsMembers.filter(row=>!welfarePaidIds.has(Number(row.id))).map(row=>({...row,due:monthlyWelfarePerMember}));
+  const subscriptionPaidIds=new Set(subscriptionPayments.map(row=>Number(row.memberId)));
+  const subscriptionDueMembers=savingsMembers.filter(row=>!subscriptionPaidIds.has(Number(row.id))).map(row=>({...row,due:Number(subscriptionPolicy?.fee||0)}));
+  subscriptionProgress.unpaidMembers=subscriptionDueMembers;
+  welfareProgress.dueMembers=welfareDueMembers;
   res.json({
     selectedFiscalYear,selectedFiscalKey,selectedFiscalLabel,availableFiscalYears,historicalPeriod,
     stats:{currentBankBalance:liveBank,cashOnHand:displayCash,uapBalance,loansOutstanding,welfareRemaining,companyFunds,
@@ -2223,8 +2218,7 @@ app.get("/api/finance/command-center",auth,requireFinance("view"),asyncRoute(asy
     procurements:procurements.rows,documents:documents.rows,investmentAnalyses:investmentAnalyses.rows,monthly,daily,
     incomeBySource,expensesByCategory,subscriptionProgress,welfareProgress,welfareStanding,
     hostingFee:await loadHostingFeeStanding(),
-    savingsMembers:(await query(`SELECT id, member_number AS "memberNumber", full_name AS name
-      FROM members WHERE deleted_at IS NULL AND status='active' ORDER BY full_name`)).rows,
+    savingsMembers,welfareDueMembers,subscriptionDueMembers,
     pendingSavings:(await query(`SELECT t.id,t.reference,t.amount::float,t.method,t.status,t.external_reference AS "paymentReference",
       t.created_at AS "createdAt",(t.evidence_stored_name IS NOT NULL) AS "hasEvidence",t.submission_source AS "submissionSource",
       m.full_name AS member,m.member_number AS "memberNumber",recorder.full_name AS "submittedBy"
@@ -2275,13 +2269,17 @@ app.post("/api/finance/income",auth,asyncRoute(async(req,res,next)=>{
   const savings=isMemberSavingsFinanceCategory(category);
   const hosting=isHostingFeeCategory(category);
   const shares=isShareContributionCategory(category);
-  const memberIncome=savings||hosting||shares;
+  const welfare=isWelfareContributionCategory(category);
+  const annual=isAnnualContributionCategory(category);
+  const memberIncome=savings||hosting||shares||welfare||annual;
   const memberId=Number(b.memberId);
   if(!category||!b.paymentMethod||!b.description||!Number.isFinite(amount)||amount<=0)
     return res.status(400).json({error:"Category, method, description and a positive amount are required"});
   if(savings&&!Number.isInteger(memberId))return res.status(400).json({error:"Select the member whose savings you are recording"});
   if(hosting&&!Number.isInteger(memberId))return res.status(400).json({error:"Select the member who paid the hosting fee"});
   if(shares&&!Number.isInteger(memberId))return res.status(400).json({error:"Select the member who paid the annual share contribution"});
+  if(welfare&&!Number.isInteger(memberId))return res.status(400).json({error:"Select the member whose welfare contribution you are recording"});
+  if(annual&&!Number.isInteger(memberId))return res.status(400).json({error:"Select the member who paid the annual contribution"});
   if(!memberIncome&&!String(b.counterparty||"").trim())return res.status(400).json({error:"Enter who paid this income"});
   const paymentMethod=String(b.paymentMethod).trim();
   const compatibleTypes={"Bank transfer":["bank"],Cheque:["bank"],Cash:["cash","petty_cash"],"Mobile Money":["mobile_money"]}[paymentMethod]||[];
@@ -2312,19 +2310,23 @@ app.post("/api/finance/income",auth,asyncRoute(async(req,res,next)=>{
           VALUES ($1,$2,'Savings deposit',$3,$4,'completed',$5,$6,$7,$7,NOW(),COALESCE($8::timestamptz,NOW()),$9,$10,'finance')
           RETURNING id`,
           [reference("TRX"),member.id,paymentMethod,split.savingsAmount,String(b.supportingDocument||"").trim()||null,
-            `Finance recorded UGX ${amount.toLocaleString()} on Centenary. received=${amount.toFixed(2)}, welfare=${split.welfareAmount.toFixed(2)}, savings=${split.savingsAmount.toFixed(2)}${split.welfareAlreadyPaid?" | welfare already taken this month":""}. Savings UGX ${split.savingsAmount.toLocaleString()}.`,
+            `Finance recorded UGX ${amount.toLocaleString()} on Centenary as savings only.`,
             req.user.id,paidOn,receiptReference("RCPT"),yearRow?.year||null])).rows[0].id;
       }
     }
     const ref=reference("FIN-INC"),receipt=receiptReference("RCPT");
     const description=savings
-      ?`${String(b.description).trim()} | Received UGX ${amount.toLocaleString()} on Centenary. ${split.welfareAmount?`UGX ${split.welfareAmount.toLocaleString()} welfare (once this month). `:split.welfareAlreadyPaid?"Welfare already taken this month. ":""}UGX ${(split?.savingsAmount||0).toLocaleString()} savings.`
+      ?`${String(b.description).trim()} | Received UGX ${amount.toLocaleString()} on Centenary as savings.`
       :hosting
         ?`${String(b.description).trim()} | Hosting fee UGX ${amount.toLocaleString()} from ${member.full_name} posted to Centenary.`
         :shares
           ?`${String(b.description).trim()} | Annual share contribution UGX ${amount.toLocaleString()} from ${member.full_name} posted to Centenary.`
-          :String(b.description).trim();
-    const ledgerCategory=savings?"Member savings":hosting?"Hosting fee":shares?"Annual share contribution":category;
+          :welfare
+            ?`${String(b.description).trim()} | Welfare contribution UGX ${amount.toLocaleString()} from ${member.full_name} posted to Centenary.`
+            :annual
+              ?`${String(b.description).trim()} | Annual contribution UGX ${amount.toLocaleString()} from ${member.full_name} posted to Centenary.`
+              :String(b.description).trim();
+    const ledgerCategory=savings?"Member savings":hosting?"Hosting fee":shares?"Annual share contribution":welfare?"Welfare contributions":annual?"Annual contribution":category;
     const inserted=(await client.query(`INSERT INTO organization_finance_entries
       (department_id,reference,entry_type,category,description,counterparty,payment_method,amount,status,receipt_number,
         supporting_document,transaction_date,recorded_by,approved_by,approved_at,finance_account_id)
@@ -2363,7 +2365,42 @@ app.post("/api/finance/income",auth,asyncRoute(async(req,res,next)=>{
       await notifyQuietly(client,"INSERT INTO notifications (member_id,title,message) VALUES ($1,'Share contribution recorded',$2)",
         [member.id,`UGX ${amount.toLocaleString()} annual share contribution posted to Centenary. Receipt ${receipt}.`]);
     }
-    return {...inserted,accountName:account.account_name,savings:Boolean(savings),hosting:Boolean(hosting),shares:Boolean(shares),split};
+    if(welfare){
+      const periodRow=(await client.query(`SELECT to_char(($1::timestamptz AT TIME ZONE 'Africa/Kampala')::date,'YYYY-MM') AS period`,[paidOn])).rows[0];
+      const already=(await client.query(`SELECT id FROM welfare_contributions
+        WHERE member_id=$1 AND status IN ('verified','completed','recorded') AND amount>0
+          AND contribution_type NOT ILIKE '%standing%' AND COALESCE(reference,'') NOT LIKE 'WEL-STANDING-%'
+          AND (period=$2 OR to_char(contribution_date,'YYYY-MM')=$2)
+        LIMIT 1`,[member.id,periodRow.period])).rows[0];
+      if(already){const error=new Error(`${member.full_name} already has welfare recorded for this month`);error.status=409;throw error;}
+      const welfareRow=(await client.query(`INSERT INTO welfare_contributions
+        (reference,member_id,contribution_type,period,expected_amount,amount,payment_method,receipt_number,status,
+         contribution_date,recorded_by,verified_by,verified_at,verification_comment,payment_reference,finance_entry_id)
+        VALUES ($1,$2,'Monthly Welfare Contribution',$3,$4,$4,$5,$6,'verified',
+          ($7::timestamptz AT TIME ZONE 'Africa/Kampala')::date,$8,$8,NOW(),$9,$10,$11)
+        RETURNING id`,
+        [reference("WCON"),member.id,periodRow.period,amount,paymentMethod,receipt,paidOn,req.user.id,
+          `Finance income posted to Centenary`,String(b.supportingDocument||"").trim()||null,inserted.id])).rows[0];
+      await client.query(`INSERT INTO settings (key,value) VALUES ('welfareFundBalance',$1)
+        ON CONFLICT (key) DO UPDATE SET value=(COALESCE(NULLIF(settings.value,''),'0')::numeric+$2)::text, updated_at=NOW()`,
+        [String(amount),amount]);
+      await notifyQuietly(client,"INSERT INTO notifications (member_id,title,message) VALUES ($1,'Welfare contribution recorded',$2)",
+        [member.id,`UGX ${amount.toLocaleString()} welfare contribution posted to Centenary. Receipt ${receipt}.`]);
+      void welfareRow;
+    }
+    if(annual){
+      const yearRow=(await client.query(`SELECT EXTRACT(YEAR FROM ends_on)::int AS year
+        FROM member_financial_year_policies WHERE status='active' AND $1::date BETWEEN starts_on AND ends_on
+        ORDER BY starts_on DESC LIMIT 1`,[paidOn])).rows[0];
+      await client.query(`INSERT INTO transactions
+        (reference,member_id,type,method,amount,status,external_reference,notes,recorded_by,verified_by,verified_at,created_at,receipt_number,target_fiscal_year,submission_source,finance_entry_id)
+        VALUES ($1,$2,'Annual subscription fee',$3,$4,'completed',$5,$6,$7,$7,NOW(),COALESCE($8::timestamptz,NOW()),$9,$10,'finance',$11)`,
+        [reference("TRX"),member.id,paymentMethod,amount,String(b.supportingDocument||"").trim()||null,
+          `Annual contribution posted to Centenary. received=${amount.toFixed(2)}.`,req.user.id,paidOn,receipt,yearRow?.year||null,inserted.id]);
+      await notifyQuietly(client,"INSERT INTO notifications (member_id,title,message) VALUES ($1,'Annual contribution recorded',$2)",
+        [member.id,`UGX ${amount.toLocaleString()} annual contribution posted to Centenary. Receipt ${receipt}.`]);
+    }
+    return {...inserted,accountName:account.account_name,savings:Boolean(savings),hosting:Boolean(hosting),shares:Boolean(shares),welfare:Boolean(welfare),annual:Boolean(annual),split};
   });
   await audit({userId:req.user.id,action:"FINANCE_INCOME_RECORDED",entityType:"organization_finance",entityId:String(row.id),
     details:`${row.receiptNumber} - ${category} - ${row.accountName} - UGX ${amount}`,...metadata(req)});
@@ -2395,6 +2432,7 @@ app.delete("/api/finance/income/:id",auth,asyncRoute(async(req,res,next)=>{
   if(result.effects.loanReversed>0)message+=` Loan repayment of UGX ${result.effects.loanReversed.toLocaleString()} removed from ${result.effects.loanReference||"the loan"}.`;
   if(result.effects.hostingReversed>0)message+=` Hosting fee of UGX ${result.effects.hostingReversed.toLocaleString()} removed from the member record.`;
   if(result.effects.sharesReversed>0)message+=` Share capital reduced by UGX ${result.effects.sharesReversed.toLocaleString()}.`;
+  if(result.effects.subscriptionReversed>0)message+=` Annual contribution of UGX ${result.effects.subscriptionReversed.toLocaleString()} removed from the member record.`;
   if(isMemberSavingsFinanceCategory(result.entry.category)&&!result.effects.savingsMatched)message+=" No matching savings record was found, so the member savings balance was left unchanged.";
   await audit({userId:req.user.id,action:"FINANCE_INCOME_DELETED",entityType:"organization_finance",entityId:String(result.entry.id),
     details:`${result.entry.receipt_number||result.entry.reference} - UGX ${amount} reversed from ${account}`,...metadata(req)});
@@ -2432,27 +2470,27 @@ app.post("/api/finance/savings/:id/review",auth,asyncRoute(async(req,res,next)=>
     });
     const posted=await postReceiptToCentenary(client,{
       grossAmount:Number(locked.amount),memberName:locked.full_name,method:locked.method,
-      description:`${locked.reference} | Centenary receipt UGX ${Number(locked.amount).toLocaleString()}. Welfare UGX ${split.welfareAmount.toLocaleString()}. Savings UGX ${split.savingsAmount.toLocaleString()}.`,
+      description:`${locked.reference} | Centenary receipt UGX ${Number(locked.amount).toLocaleString()} recorded as savings.`,
       onDate:locked.created_at||new Date(),userId:req.user.id,category:"Member savings"
     });
     if(locked.finance_entry_id&&posted?.id&&Number(locked.finance_entry_id)!==Number(posted.id)){
       await client.query(`UPDATE organization_finance_entries SET status='rejected',approved_by=$1,approved_at=NOW()
         WHERE id=$2 AND status='pending_finance_review'`,[req.user.id,locked.finance_entry_id]);
     }
-    const note=`received=${Number(locked.amount).toFixed(2)}, welfare=${split.welfareAmount.toFixed(2)}, savings=${split.savingsAmount.toFixed(2)}${split.welfareAlreadyPaid?" | welfare already taken this month":""}`;
+    const note=`received=${Number(locked.amount).toFixed(2)}, savings=${split.savingsAmount.toFixed(2)}`;
     await client.query(`UPDATE transactions SET status='completed',amount=$1,verified_by=$2,verified_at=NOW(),
       verification_comment=$3,finance_entry_id=$4,receipt_number=COALESCE($5,receipt_number),
       notes=TRIM(BOTH FROM COALESCE(notes,'')||' | '||$6) WHERE id=$7`,
       [split.savingsAmount,req.user.id,comment||"Approved by Finance and posted to Centenary",posted.id,posted.receiptNumber,note,locked.id]);
     if(split.welfareId)await client.query("UPDATE welfare_contributions SET finance_entry_id=$1 WHERE id=$2",[posted.id,split.welfareId]);
     await notifyQuietly(client,"INSERT INTO notifications (member_id,title,message) VALUES ($1,'Savings deposit approved',$2)",
-      [locked.member_id,`${locked.reference} was approved. UGX ${Number(locked.amount).toLocaleString()} is on the Centenary account. Welfare UGX ${split.welfareAmount.toLocaleString()}. Savings UGX ${split.savingsAmount.toLocaleString()}. Receipt ${posted.receiptNumber}.`]);
+      [locked.member_id,`${locked.reference} was approved. UGX ${Number(locked.amount).toLocaleString()} is on the Centenary account as savings. Receipt ${posted.receiptNumber}.`]);
     return {locked,decision,split,posted};
   });
   await audit({userId:req.user.id,action:`FINANCE_SAVINGS_${decision.toUpperCase()}`,entityType:"transaction",entityId:String(result.locked.id),
     details:`${result.locked.reference} - UGX ${result.locked.amount}`,...metadata(req)});
   const message=decision==="approve"
-    ?`Savings approved. UGX ${Number(result.locked.amount).toLocaleString()} posted to Centenary${result.split?.welfareAmount?`; UGX ${result.split.welfareAmount.toLocaleString()} welfare, UGX ${result.split.savingsAmount.toLocaleString()} savings`:""}.`
+    ?`Savings approved. UGX ${Number(result.locked.amount).toLocaleString()} posted to Centenary as savings.`
     :"Savings submission rejected.";
   res.json({ok:true,message});
 }));
@@ -5136,7 +5174,7 @@ app.post("/api/transactions/:id/verify",auth,asyncRoute(async(req,res,next)=>{
         memberId:locked.member_id,grossAmount:Number(locked.amount),onDate:locked.created_at||new Date(),
         userId:req.user.id,method:locked.method,paymentReference:locked.external_reference,sourceRef:locked.reference
       });
-      allocationNotes=`received=${Number(locked.amount).toFixed(2)}, welfare=${split.welfareAmount.toFixed(2)}, savings=${split.savingsAmount.toFixed(2)}${split.welfareAlreadyPaid?" | welfare already taken this month":""}`;
+      allocationNotes=`received=${Number(locked.amount).toFixed(2)}, savings=${split.savingsAmount.toFixed(2)}`;
       if(split.savingsAmount!==Number(locked.amount)||allocationNotes){
         await client.query(`UPDATE transactions SET amount=$1, notes=TRIM(BOTH FROM COALESCE(notes,'')||' | '||$2) WHERE id=$3`,
           [split.savingsAmount,allocationNotes,locked.id]);
@@ -5144,7 +5182,7 @@ app.post("/api/transactions/:id/verify",auth,asyncRoute(async(req,res,next)=>{
       if(member){
         const posted=await postReceiptToCentenary(client,{
           grossAmount:Number(locked.amount),memberName:member.full_name,method:locked.method,
-          description:`${locked.reference} | Centenary receipt UGX ${Number(locked.amount).toLocaleString()}. Welfare UGX ${split.welfareAmount.toLocaleString()}. Savings UGX ${split.savingsAmount.toLocaleString()}.`,
+          description:`${locked.reference} | Centenary receipt UGX ${Number(locked.amount).toLocaleString()} recorded as savings.`,
           onDate:locked.created_at||new Date(),userId:req.user.id,category:"Member savings"
         });
         if(posted?.id){
@@ -7035,6 +7073,10 @@ async function runScheduledMaintenance() {
     if(caught.length)console.log(`Welfare catch-up from savings: ${caught.map(x=>`${x.name} ${x.period} ${x.amount}`).join(", ")}`);
     const charged=await chargeWelfareFromCoveredSavings(client);
     if(charged.length)console.log(`Monthly welfare taken from covered savings: ${charged.map(x=>`${x.name} (${x.period})`).join(", ")}`);
+  });
+  await transaction(async client=>{
+    const hosting=await deductUnpaidHostingFromSavings(client);
+    if(hosting.length)console.log(`Hosting fee taken from savings: ${hosting.map(x=>`${x.name} ${x.amount}`).join(", ")}`);
   });
   await transaction(async client=>{
     const duplicates=await removeDuplicateBabiryeRepayment(client);

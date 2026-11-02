@@ -27,13 +27,13 @@
     const yearNote=sched
       ?`<div class="member-policy-note"><b>Remaining to save by 30 June ${esc(String(sched.yearEndLabel).split(" ").pop())}:</b> ${money(sched.remainingToYearEnd)} across ${sched.monthsLeftInYear} month${sched.monthsLeftInYear===1?"":"s"} (${esc(sched.monthLabel)} – ${esc(sched.yearEndLabel)}).</div>`
       :"";
-    return `<p class="member-reveal-sub">Annual targets for ${esc(f.fiscalYear)} · monthly savings ${money(f.monthlySavingsTarget)} <span class="member-policy-hint">(includes UGX 25,000 welfare share — shown as one savings figure)</span></p>
+    return `<p class="member-reveal-sub">Annual targets for ${esc(f.fiscalYear)} · monthly savings ${money(f.monthlySavingsTarget)} <span class="member-policy-hint">(savings only — welfare is recorded separately)</span></p>
       ${targetLine("Full-year savings target",yearPaid,f.annualSavingsTarget,{surplusLabel:"Surplus toward future months"})}
       ${yearNote}
       ${targetLine("Annual share contribution",shareToward,f.annualShareTarget)}
-      ${targetLine("Annual subscription fee",f.subscriptionPaid,f.annualSubscriptionFee)}
+      ${targetLine("Annual contribution",f.subscriptionPaid,f.annualSubscriptionFee)}
       ${targetLine("Combined annual contribution",Number(f.combinedAnnualPaid||0),Number(f.combinedAnnualTarget||0))}
-      <div class="member-policy-note"><b>Monthly savings:</b> ${money(f.monthlySavingsTarget)} · <b>Full-year savings:</b> ${money(f.annualSavingsTarget)} · <b>Shares:</b> ${money(f.annualShareTarget)} · <b>Subscription:</b> ${money(f.annualSubscriptionFee)} · <b>Combined target:</b> ${money(f.combinedAnnualTarget||0)}</div>`;
+      <div class="member-policy-note"><b>Monthly savings:</b> ${money(f.monthlySavingsTarget)} · <b>Full-year savings:</b> ${money(f.annualSavingsTarget)} · <b>Shares:</b> ${money(f.annualShareTarget)} · <b>Annual contribution:</b> ${money(f.annualSubscriptionFee)} · <b>Combined target:</b> ${money(f.combinedAnnualTarget||0)}</div>`;
   }
   function pastContributionBody(){
     const x=C()?.pastYearProgress;if(!x)return `<div class="member-empty">No previous-year contribution record yet.</div>`;
@@ -246,8 +246,10 @@
     const company=Number(s.companyFunds??org.companyFunds??(uap+bank+loansOut));
     const fromJoin=s.welfareFromJoin||c.welfare?.fromJoin||{};
     const welfareAmount=money(fromJoin.paid??s.welfareContributedSince??s.welfare??0);
+    const annualPaid=Number(c.financialYearProgress?.subscriptionPaid||0);
+    const annualTarget=Number(c.financialYearProgress?.annualSubscriptionFee||0);
     return `${oversightBanner()}<div class="member-portal"><section class="member-welcome member-hero-card"><div class="member-welcome-top"><span>${g}</span><h2>${esc(m.fullName)}</h2></div>${loanNeedCta(c)}</section>
-      <div class="member-summary-grid">${metric("My Savings",money(s.savings),"savings","member-savings",`Current carried-forward balance${savingsMonthBadge()}`)}${metric("Share Capital",money(s.shares),"building","member-savings","Current share balance")}${metric("Personal Total Funds",money(s.personalTotalFunds??s.totalMemberFunds),"wallet","member-savings","Savings plus share capital")}${metric("Welfare",welfareAmount,"shield","member-welfare")}${metric("Hosting fee",money(s.hostingFeePaid??c.hostingFee?.paid??0),"receipt","member-hosting-fee",Number(s.hostingFeePaid??c.hostingFee?.paid??0)>0.5?"Paid to Centenary":"Not paid yet")}${metric("Active Loan Balance",money(s.activeLoanBalance),"loans","member-loans","Remaining total repayment including interest")}</div>
+      <div class="member-summary-grid">${metric("My Savings",money(s.savings),"savings","member-savings",`Current carried-forward balance${savingsMonthBadge()}`)}${metric("Share Capital",money(s.shares),"building","member-savings","Current share balance")}${metric("Personal Total Funds",money(s.personalTotalFunds??s.totalMemberFunds),"wallet","member-savings","Savings plus share capital")}${metric("Welfare",welfareAmount,"shield","member-welfare")}${metric("Hosting fee",money(s.hostingFeePaid??c.hostingFee?.paid??0),"receipt","member-hosting-fee",Number(s.hostingFeePaid??c.hostingFee?.paid??0)>0.5?"Paid":"Not paid yet")}${metric("Annual contribution",money(annualPaid),"receipt","member-savings",annualTarget?`${annualPaid+0.5>=annualTarget?"Paid":"Not paid yet"} · ${money(annualTarget)} expected`:"")}${metric("Active Loan Balance",money(s.activeLoanBalance),"loans","member-loans","Remaining total repayment including interest")}</div>
       <div class="member-summary-grid member-org-standing">${metric("UAP account",money(uap),"building","member-dashboard","Old Mutual unit trust standing amount")}${metric("Centenary bank account",money(bank),"wallet","member-dashboard","Company Centenary account")}${metric("Money in loans",money(loansOut),"loans","member-loans","Principal + interest + penalties remaining")}${metric("Total Company Funds",money(company),"reports","member-dashboard","UAP + Centenary + money in loans + welfare remaining")}</div>
       ${dashboardNextUp(c)}
       <div class="member-dashboard-reveals">${contributionProgressReveal()}${welfareContributionsReveal()}${recentActivityReveal()}</div></div>`;

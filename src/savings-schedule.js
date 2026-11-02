@@ -153,7 +153,6 @@ async function chargeWelfareFromCoveredSavings(client) {
     FOR UPDATE OF m`, [settings.benchmarkDate, period])).rows;
   const charged = [];
   for (const member of candidates) {
-    if (isVicentName(member.name)) continue;
     if (Number(member.savings) < settings.welfareAmount) continue;
     const reference = `WCON-AUTO-${period}-${member.id}`;
     await client.query("SAVEPOINT auto_welfare");
@@ -199,8 +198,7 @@ async function catchUpWelfareFromSavings(client) {
     FOR UPDATE OF m`)).rows;
   const posted = [];
   for (const member of members) {
-    if (isVicentName(member.name)) continue;
-    const start = monthIndex(member.startMonth || "2024-06");
+    const start = monthIndex(isVicentName(member.name) ? "2026-07" : (member.startMonth || "2024-06"));
     const standingCover = Number((await client.query(`SELECT COALESCE(SUM(amount),0)::float AS paid FROM welfare_contributions
       WHERE member_id=$1 AND status IN ('verified','completed','recorded') AND amount>0
         AND (contribution_type ILIKE '%standing%' OR COALESCE(reference,'') LIKE 'WEL-STANDING-%')`,

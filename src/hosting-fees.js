@@ -96,9 +96,79 @@ async function loadMemberHostingFee(memberId) {
   };
 }
 
+async function deductUnpaidHostingFromSavings(client) {
+  const exec = (sql, params) => client.query(sql, params);
+  const expected = await hostingFeeExpected(client);
+  const recorder = (
+    await exec(
+      `SELECT id FROM users WHERE active=true
+       ORDER BY CASE role WHEN 'Finance Officer' THEN 1 WHEN 'System Admin' THEN 2 ELSE 3 END, id LIMIT 1`
+    )
+  ).rows[0];
+  if (!recorder) return [];
+  const members = (
+    await exec(
+      `SELECT m.id, m.full_name AS name, m.savings_balance::float AS savings,
+         COALESCE((SELECT SUM(p.amount) FROM hosting_fee_payments p
+           WHERE p.member_id=m.id AND p.status='completed'),0)::float AS paid
+       FROM members m
+       WHERE m.deleted_at IS NULL AND m.status='active'
+       FOR UPDATE OF m`
+    )
+  ).rows;
+  const taken = [];
+  for (const member of members) {
+    const due = Math.max(0, Number(expected) - Number(member.paid || 0));
+    const take = Math.min(due, Number(member.savings || 0));
+    if (take < 0.5) continue;
+    const stamp = `${member.id}-${Date.now().toString(36).toUpperCase()}`;
+    await exec("SAVEPOINT hosting_from_savings");
+    try {
+      const tx = (
+        await exec(
+          `INSERT INTO transactions
+            (reference,member_id,type,method,amount,status,notes,recorded_by,verified_by,verified_at,created_at,receipt_number,submission_source)
+           VALUES ($1,$2,'Hosting fee','Savings deduction',$3,'completed',$4,$5,$5,NOW(),NOW(),$6,'system')
+           RETURNING id`,
+          [
+            `HOST-SAV-${stamp}`,
+            member.id,
+            take,
+            "Taken from savings because hosting fee was not paid separately.",
+            recorder.id,
+            `RCPT-HOST-${stamp}`,
+          ]
+        )
+      ).rows[0];
+      await exec(
+        `INSERT INTO hosting_fee_payments
+          (member_id,amount,paid_on,status,reference,receipt_number,transaction_id,notes,recorded_by)
+         VALUES ($1,$2,(CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date,'completed',$3,$4,$5,$6,$7)`,
+        [
+          member.id,
+          take,
+          `HOST-SAV-${stamp}`,
+          `RCPT-HOST-${stamp}`,
+          tx.id,
+          "Deducted from savings",
+          recorder.id,
+        ]
+      );
+      await exec(`UPDATE members SET savings_balance=GREATEST(0,savings_balance-$1) WHERE id=$2`, [take, member.id]);
+      await exec("RELEASE SAVEPOINT hosting_from_savings");
+      taken.push({ memberId: member.id, name: member.name, amount: take });
+    } catch (error) {
+      await exec("ROLLBACK TO SAVEPOINT hosting_from_savings");
+      if (error.code !== "23505") throw error;
+    }
+  }
+  return taken;
+}
+
 module.exports = {
   isHostingFeeCategory,
   hostingFeeExpected,
   loadHostingFeeStanding,
   loadMemberHostingFee,
+  deductUnpaidHostingFromSavings,
 };

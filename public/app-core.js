@@ -1111,6 +1111,7 @@ function executiveDashboardView() {
     ["Total Company Funds",money(company),"reports","executive-finance","UAP + Centenary + loans + welfare remaining"],
     ["Welfare since June 2024",money(welfareGross),"receipt","executive-welfare","Standing collected since June 2024"],
     ["Hosting fee",money(e.hostingFee?.collected||0),"receipt","executive-hosting-fee",`${e.hostingFee?.paidCount||0} paid · ${e.hostingFee?.unpaidCount||0} not paid`],
+    ["Annual contribution",money(e.subscriptionProgress?.collected||e.stats?.annualSubscriptionsCollected||0),"receipt","executive-finance",`${e.subscriptionProgress?.membersPaid||0} paid · ${(e.subscriptionProgress?.activeMembers||0)-(e.subscriptionProgress?.membersPaid||0)} not paid`],
     ["Income this month",money(s.organizationReceiptsMonth??s.organizationIncomeMonth??0),"arrowDown","executive-finance","All Centenary receipts this month, including member savings and welfare"],
     ["Expenditure this month",money(s.organizationExpenditureMonth??s.organizationExpenditure),"arrowUp","executive-finance","Live operational payments"],
     ["Total SACCO Savings",money(s.totalSavings),"savings","executive-credits","Member savings"],
@@ -1547,6 +1548,7 @@ function financeDashboardView() {
     ["Income this month",money(s.monthlyReceipts??s.monthlyIncome),"arrowDown","finance-income","All Centenary receipts this month, including member savings and welfare"],
     ["Expenses this month",money(s.monthlyExpenses),"arrowUp","finance-expenses","All payments out of Centenary this month, including loan disbursements"],
     ["Hosting fee",money(f.hostingFee?.collected||0),"receipt","finance-hosting-fee",`${f.hostingFee?.paidCount||0} paid · ${f.hostingFee?.unpaidCount||0} not paid`],
+    ["Annual contribution",money(f.subscriptionProgress?.collected||s.annualSubscriptionsCollected||0),"receipt","finance-income",`${f.subscriptionProgress?.membersPaid||0} paid · ${(f.subscriptionProgress?.activeMembers||0)-(f.subscriptionProgress?.membersPaid||0)} not paid`],
     ["Pending payment requests",String(s.pendingPaymentRequests||0),"approvals","finance-approvals","Payments waiting for approval"]
   ];
   const liveYears=(f.availableFiscalYears||[]).filter(y=>String(y.mode||"live")==="live"||!/FY ended/i.test(String(y.label||"")));
@@ -1675,7 +1677,7 @@ function financeSavingsApprovalQueue(f){
   const canApprove=financeCanApproveSavings(f);
   const canDelete=financeCanDeleteSavings(f);
   const waiting=rows.filter(x=>["pending","pending_finance_review"].includes(x.status)).length;
-  return `<section class="finance-panel finance-entry-review"><div class="finance-panel-head"><div><h3>Member savings requests</h3><p>Approve to post the full receipt to Centenary. The first deposit in a month sends UGX 25,000 to welfare and records the rest as savings. Approved requests stay here as a record. Delete removes the request from Finance and from the member's requests.</p></div><strong>${waiting} waiting</strong></div>
+  return `<section class="finance-panel finance-entry-review"><div class="finance-panel-head"><div><h3>Member savings requests</h3><p>Approve to post the full receipt to Centenary as savings only. Welfare is recorded separately under Income → Welfare contributions.</p></div><strong>${waiting} waiting</strong></div>
     <div class="finance-voucher-list">${rows.map(x=>{
       const open=["pending","pending_finance_review"].includes(x.status);
       const label=["completed","verified","approved"].includes(x.status)?"approved":x.status;
@@ -1708,7 +1710,7 @@ function financeWelfareProgressWidget(f){
     ||`<tr><td colspan="5"><div class="member-empty">No new-member welfare rows yet.</div></td></tr>`;
   return `<section class="finance-panel finance-subscription-progress">
     <div class="finance-subscription-bar">
-      <div class="finance-panel-head"><div><h3>Monthly welfare contributions</h3><p>${escapeHtml(w.periodLabel||"This month")} · ${money(w.perMember)} welfare share of ${money(w.monthlyCombined||425000)} member deposit</p></div><strong>${percent}%</strong></div>
+      <div class="finance-panel-head"><div><h3>Monthly welfare contributions</h3><p>${escapeHtml(w.periodLabel||"This month")} · ${money(w.perMember)} recorded separately from savings · ${(w.dueMembers||[]).length} still to record</p></div><strong>${percent}%</strong></div>
       <div class="finance-subscription-track"><em style="width:${percent}%"></em></div>
       <div class="finance-subscription-meta"><span>${money(w.collected)} collected</span><span>${money(w.expected)} expected</span><span>${w.membersPaid||0} of ${w.activeMembers||0} members</span></div>
     </div>
@@ -1735,7 +1737,7 @@ async function reviewFinanceSavings(id,decision){
     comment=await promptDialog("Reason for rejecting this savings submission:","");
     if(comment===null)return;
     comment=String(comment).trim()||"Rejected";
-  }else if(!await confirmDialog("Approve this savings submission? The full amount posts to Centenary. The first deposit in the month sends UGX 25,000 to welfare and records the rest as savings."))return;
+  }else if(!await confirmDialog("Approve this savings submission? The full amount posts to Centenary as savings only."))return;
   try{
     const result=await api(`/api/finance/savings/${id}/review`,{method:"POST",body:JSON.stringify({decision,comment})});
     closeModal();
@@ -1867,7 +1869,7 @@ function financeIncomeView() {
   const topSource=[...(f.incomeBySource||[])].sort((a,b)=>b.amount-a.amount)[0];
   const canDelete=f.access?.canDeleteIncome!==false&&state.role!=="Auditor"&&state.user?.role!=="Auditor";
   return `<div class="exec-module-metrics">${executiveModuleMetric("Today",money(f.stats.receiptsToday??f.stats.incomeToday),"green")}${executiveModuleMetric("This month",money(f.stats.monthlyReceipts??f.stats.monthlyIncome),"blue")}${executiveModuleMetric("Receipts",rows.length,"violet")}${executiveModuleMetric("Top source",topSource?topSource.label:"—","orange")}</div>
-    <p class="exec-report-preview-note">Every receipt posts to the Centenary bank account. The first deposit in a month takes UGX 25,000 as welfare and the rest as savings — both stay on the same Centenary account. Dates show as DD/MM/YYYY. Deleting a receipt takes that amount back off Centenary.</p>
+    <p class="exec-report-preview-note">Every receipt posts to the Centenary bank account. Savings, welfare, hosting, shares and annual contribution are recorded as their own categories. Dates show as DD/MM/YYYY. Deleting a receipt takes that amount back off Centenary.</p>
     ${financeIncomeWidget(f)}${financeDataTable("Income ledger",["Receipt","Date","Payer / Organization","Category","Method","Amount","Status",...(canDelete?["Actions"]:[])],rows.map(x=>[x.receiptNumber||x.reference,formatLedgerDate(x.transactionDate),x.counterparty||"?",x.category,x.paymentMethod||"?",financeIncomeAmountCell(x),status(x.status),...(canDelete?[`<button type="button" class="danger-action" data-finance-income-delete="${x.id}">Delete</button>`]:[])]))}`;
 }
 function financeExpensesView() {
@@ -2066,7 +2068,7 @@ function financeDepartmentOptions() {
 }
 function openFinanceModal(type) {
   const forms={
-    income:["Record income","Posted immediately to Centenary. Welfare and savings are a split of the same bank receipt. Dates show as DD/MM/YYYY.",`<form class="form" data-finance-form="income"><div class="form-grid"><div class="field"><label>Income category</label><select name="category"><option>Member savings</option><option>Hosting fee</option><option>Annual share contribution</option><option>Membership Fees</option><option>Registration Fees</option><option>Donations</option><option>Grants</option><option>Investment Income</option><option>Rental Income</option><option>Welfare Contributions</option><option>Miscellaneous Income</option></select></div><div class="field" data-savings-member><label>Member</label><select name="memberId">${(state.finance.savingsMembers||[]).filter(isSelectableActiveMember).map(m=>`<option value="${m.id}">${escapeHtml(m.memberNumber)} — ${escapeHtml(m.name)}</option>`).join("")}</select></div><div class="field"><label>Amount (UGX)</label><input name="amount" type="number" min="1" required></div><div class="field full"><label>Member / Organization paying</label><input name="counterparty" required></div><div class="field"><label>Payment method</label><select name="paymentMethod"><option>Bank transfer</option><option>Cash</option><option>Mobile Money</option><option>Cheque</option></select></div><div class="field"><label>Receiving account</label><select name="accountId" required>${financeAccountOptions()}</select><small data-account-help>Select where the money was received.</small></div><div class="field"><label>Date (DD/MM/YYYY)</label><input name="date" type="date" value="${new Date().toLocaleDateString("en-CA",{timeZone:"Africa/Kampala"})}" required></div><div class="field full"><label>Description</label><textarea name="description" required></textarea></div><div class="field full"><label>Supporting document</label><input name="supportingDocument"></div></div>${formActions("Record income")}</form>`],
+    income:["Record income","Posted immediately to Centenary. Savings, welfare, hosting, shares and annual contribution are recorded separately. Dates show as DD/MM/YYYY.",`<form class="form" data-finance-form="income"><div class="form-grid"><div class="field"><label>Income category</label><select name="category"><option>Member savings</option><option>Hosting fee</option><option>Welfare contributions</option><option>Annual share contribution</option><option>Annual contribution</option></select></div><div class="field" data-savings-member><label>Member</label><select name="memberId"></select><small data-member-help></small></div><div class="field"><label>Amount (UGX)</label><input name="amount" type="number" min="1" required></div><div class="field full"><label>Member / Organization paying</label><input name="counterparty" required></div><div class="field"><label>Payment method</label><select name="paymentMethod"><option>Bank transfer</option><option>Cash</option><option>Mobile Money</option><option>Cheque</option></select></div><div class="field"><label>Receiving account</label><select name="accountId" required>${financeAccountOptions()}</select><small data-account-help>Select where the money was received.</small></div><div class="field"><label>Date (DD/MM/YYYY)</label><input name="date" type="date" value="${new Date().toLocaleDateString("en-CA",{timeZone:"Africa/Kampala"})}" required></div><div class="field full"><label>Description</label><textarea name="description" required></textarea></div><div class="field full"><label>Supporting document</label><input name="supportingDocument"></div></div>${formActions("Record income")}</form>`],
     account:["Add finance cash account","Register a bank, cash, petty cash, mobile money or restricted-fund account",`<form class="form" data-finance-form="account"><div class="form-grid"><div class="field"><label>Account type</label><select name="accountType"><option value="bank">Bank account</option><option value="cash">Cash account</option><option value="petty_cash">Petty cash</option><option value="mobile_money">Mobile money</option><option value="restricted">Restricted funds</option></select></div><div class="field"><label>Account code (optional)</label><input name="accountCode" placeholder="Generated if empty"></div><div class="field full"><label>Account name</label><input name="accountName" required placeholder="e.g. Stanbic Operating Account"></div><div class="field"><label>Bank / provider name</label><input name="bankName"></div><div class="field"><label>Account / wallet number</label><input name="accountNumber"></div><div class="field"><label>Opening balance (UGX)</label><input name="openingBalance" type="number" min="0" value="0" required></div><div class="field"><label>Opening balance date</label><input name="openingBalanceDate" type="date" max="${new Date().toISOString().slice(0,10)}" value="${new Date().toISOString().slice(0,10)}" required></div><div class="field"><label class="check-field"><input name="restricted" type="checkbox"> Restricted funds</label></div><div class="field full"><label>Notes / balance description</label><textarea name="notes" placeholder="Explain the source and date of the starting balance"></textarea></div><div class="field full"><label>Opening statement or supporting document</label><input name="supportingDocument"><small>Required when the opening balance is greater than zero.</small></div></div>${formActions("Add account")}</form>`],
     expense:["Record an organization expense","Use this when money leaves Centenary or cash for group work. It goes for Finance then Executive approval before it is paid.",`<form class="form" data-finance-form="expense"><div class="form-grid"><div class="field full"><label>Paid to</label><input name="supplier" required placeholder="Member, supplier or office being paid"></div><div class="field"><label>Department</label><select name="departmentId">${financeDepartmentOptions()}</select></div><div class="field"><label>What this payment is for</label><select name="category"><option>Meeting / AGM</option><option>Welfare assistance</option><option>Member savings withdrawal</option><option>Loan-related cost</option><option>Bank charges</option><option>Transport</option><option>Legal / registration</option><option>Stationery and printing</option><option>Communication</option><option>Training</option><option>Investment related</option><option>Other group expense</option></select></div><div class="field"><label>Amount (UGX)</label><input name="amount" type="number" min="1" required></div><div class="field"><label>Paid from</label><select name="paymentMethod"><option>Bank transfer</option><option>Cash</option><option>Mobile Money</option><option>Cheque</option></select></div><div class="field full"><label>Reason</label><textarea name="description" required placeholder="What happened, which meeting or member, and why the group is paying"></textarea></div><div class="field full"><label>Receipt or supporting document</label><input name="supportingDocument" placeholder="Optional receipt number or file"></div></div>${formActions("Send for approval")}</form>`],
     invoice:["Record supplier invoice","Track an obligation and its due date",`<form class="form" data-finance-form="invoice"><div class="form-grid"><div class="field"><label>Invoice number</label><input name="invoiceNumber" required></div><div class="field"><label>Supplier</label><input name="supplier" required></div><div class="field full"><label>Description</label><input name="description" required></div><div class="field"><label>Amount (UGX)</label><input name="amount" type="number" min="1" required></div><div class="field"><label>Invoice date</label><input name="invoiceDate" type="date" required></div><div class="field"><label>Due date</label><input name="dueDate" type="date" required></div><div class="field full"><label>Supporting document</label><input name="supportingDocument"></div></div>${formActions("Record invoice")}</form>`],
@@ -2084,14 +2086,37 @@ function openFinanceModal(type) {
   if(type==="income")configureFinanceIncomeAccounts(financeForm);
   financeForm.onsubmit=submitFinanceForm;
 }
+function financeIncomeMemberList(kind){
+  const all=(state.finance.savingsMembers||[]).filter(isSelectableActiveMember);
+  if(kind==="hosting"){
+    const unpaid=(state.finance.hostingFee?.unpaidMembers||state.finance.hostingFee?.members||[]).filter(m=>m.status!=="paid");
+    return (unpaid.length?unpaid:all).map(m=>({id:m.id,memberNumber:m.memberNumber,name:m.name||m.fullName,due:Number(m.due??Math.max(0,Number(m.expected||state.finance.hostingFee?.expected||50000)-Number(m.paid||0)))}));
+  }
+  if(kind==="welfare")return (state.finance.welfareDueMembers||all).map(m=>({id:m.id,memberNumber:m.memberNumber,name:m.name,due:Number(m.due||state.finance.welfareProgress?.perMember||25000)}));
+  if(kind==="annual")return (state.finance.subscriptionDueMembers||all).map(m=>({id:m.id,memberNumber:m.memberNumber,name:m.name,due:Number(m.due||state.finance.subscriptionProgress?.fee||0)}));
+  return all.map(m=>({id:m.id,memberNumber:m.memberNumber,name:m.name,due:0}));
+}
 function configureFinanceIncomeAccounts(form) {
   const method=form.elements.paymentMethod,account=form.elements.accountId,category=form.elements.category;
   const map={"Bank transfer":["bank"],Cheque:["bank"],Cash:["cash","petty_cash"],"Mobile Money":["mobile_money"]};
+  const fillMembers=(kind,keepId)=>{
+    const select=form.elements.memberId;if(!select)return [];
+    const members=financeIncomeMemberList(kind);
+    select.innerHTML=members.map(m=>`<option value="${m.id}" data-due="${Number(m.due||0)}">${escapeHtml(m.memberNumber)} — ${escapeHtml(m.name)}</option>`).join("")||`<option value="">No members left to record</option>`;
+    if(keepId&&[...select.options].some(o=>o.value===String(keepId)))select.value=String(keepId);
+    const help=form.querySelector("[data-member-help]");
+    if(help)help.textContent=kind==="savings"?`${members.length} active members`:`${members.length} member${members.length===1?"":"s"} still to record`;
+    return members;
+  };
   const refresh=()=>{
-    const savings=/member savings/i.test(category?.value||"");
-    const hosting=/hosting\s*fee/i.test(category?.value||"");
-    const shares=/annual\s*share|share\s*contribution|share\s*purchase|share\s*capital/i.test(category?.value||"");
-    const memberPick=savings||hosting||shares;
+    const value=category?.value||"";
+    const savings=/member savings/i.test(value);
+    const hosting=/hosting\s*fee/i.test(value);
+    const shares=/annual\s*share/i.test(value);
+    const welfare=/welfare\s*contribution/i.test(value);
+    const annual=/^annual contribution$/i.test(value);
+    const memberPick=savings||hosting||shares||welfare||annual;
+    const kind=hosting?"hosting":welfare?"welfare":annual?"annual":"savings";
     const memberField=form.querySelector("[data-savings-member]");
     const payerField=form.elements.counterparty?.closest(".field");
     if(memberField)memberField.hidden=!memberPick;
@@ -2099,21 +2124,30 @@ function configureFinanceIncomeAccounts(form) {
     if(payerField)payerField.hidden=memberPick;
     if(form.elements.counterparty)form.elements.counterparty.required=!memberPick;
     if(memberPick){
+      fillMembers(kind,form.elements.memberId?.value);
       const selected=form.elements.memberId?.selectedOptions?.[0];
       if(form.elements.counterparty&&selected)form.elements.counterparty.value=selected.textContent.trim();
+      const due=Number(selected?.dataset.due||0);
       const centenary=[...account.options].find(option=>option.dataset.accountCode==="GL-4104");
       [...account.options].forEach(option=>{option.hidden=Boolean(centenary)&&option!==centenary;option.disabled=option.hidden;});
       if(centenary)account.value=centenary.value;
       if(hosting){
-        const expected=Number(state.finance?.hostingFee?.expected||50000);
-        if(form.elements.amount&&!form.elements.amount.value)form.elements.amount.value=String(expected);
-        if(form.elements.description&&!form.elements.description.value)form.elements.description.value=selected?`Hosting fee from ${selected.textContent.trim()}`:"Hosting fee";
-        form.querySelector("[data-account-help]").textContent="Always the Centenary bank account. Hosting fee is not member savings. The amount posts to Centenary immediately and appears on the member hosting-fee card.";
+        if(form.elements.amount)form.elements.amount.value=String(due||state.finance?.hostingFee?.expected||50000);
+        if(form.elements.description)form.elements.description.value=selected?`Hosting fee from ${selected.textContent.trim()}`:"Hosting fee";
+        form.querySelector("[data-account-help]").textContent="Always the Centenary bank account. The amount posts immediately and marks the member hosting-fee card paid.";
       }else if(shares){
-        if(form.elements.description&&!form.elements.description.value)form.elements.description.value=selected?`Annual share contribution from ${selected.textContent.trim()}`:"Annual share contribution";
-        form.querySelector("[data-account-help]").textContent="Always the Centenary bank account. Annual shares post to Centenary immediately and are added to the member's share capital.";
+        if(form.elements.description)form.elements.description.value=selected?`Annual share contribution from ${selected.textContent.trim()}`:"Annual share contribution";
+        form.querySelector("[data-account-help]").textContent="Always the Centenary bank account. Annual shares post immediately and update the member share-capital card.";
+      }else if(welfare){
+        if(form.elements.amount)form.elements.amount.value=String(due||25000);
+        if(form.elements.description)form.elements.description.value=selected?`Welfare contribution from ${selected.textContent.trim()}`:"Welfare contribution";
+        form.querySelector("[data-account-help]").textContent="Always the Centenary bank account. This is separate from savings. It updates the member welfare card for the month.";
+      }else if(annual){
+        if(due>0&&form.elements.amount)form.elements.amount.value=String(due);
+        if(form.elements.description)form.elements.description.value=selected?`Annual contribution from ${selected.textContent.trim()}`:"Annual contribution";
+        form.querySelector("[data-account-help]").textContent="Always the Centenary bank account. This updates the member annual contribution card.";
       }else{
-        form.querySelector("[data-account-help]").textContent="Always the Centenary bank account. The first deposit this month sends UGX 25,000 to welfare; later deposits this month are not deducted. The full receipt amount is posted to Centenary immediately — no approval.";
+        form.querySelector("[data-account-help]").textContent="Always the Centenary bank account. The full amount is member savings only — welfare is recorded separately.";
       }
       return;
     }
@@ -2124,10 +2158,13 @@ function configureFinanceIncomeAccounts(form) {
     form.querySelector("[data-account-help]").textContent=first?`Showing registered ${method.value.toLowerCase()} accounts.`:`No compatible account exists. Add one from Bank Accounts first.`;
   };
   method.addEventListener("change",refresh);
-  category?.addEventListener("change",refresh);
+  category?.addEventListener("change",()=>{if(form.elements.amount)form.elements.amount.value="";if(form.elements.description)form.elements.description.value="";refresh();});
   form.elements.memberId?.addEventListener("change",()=>{
     const selected=form.elements.memberId.selectedOptions?.[0];
     if(form.elements.counterparty&&selected)form.elements.counterparty.value=selected.textContent.trim();
+    const due=Number(selected?.dataset.due||0);
+    if(due>0&&form.elements.amount)form.elements.amount.value=String(due);
+    refresh();
   });
   refresh();
 }
@@ -2168,7 +2205,7 @@ async function submitFinanceForm(event) {
     const accountId=form.dataset.accountId;
     const result=await api(accountId?`/api/finance/accounts/${accountId}`:endpoints[type],{method:accountId?"PATCH":"POST",body:JSON.stringify(data)});
     closeModal();state.finance=await api("/api/finance/command-center");render();
-    toast(type==="income"?(result.split?`Recorded on Centenary. Receipt ${result.receiptNumber}. Welfare ${money(result.split.welfareAmount)}, savings ${money(result.split.savingsAmount)}${result.split.welfareAlreadyPaid?" — welfare already taken this month.":"."}`:`Income recorded. Receipt ${result.receiptNumber}.`):type==="expense"?`Payment voucher ${result.voucherNumber} created.`:`${type[0].toUpperCase()+type.slice(1)} record saved.`);
+    toast(type==="income"?`Income recorded on Centenary. Receipt ${result.receiptNumber}.`:type==="expense"?`Payment voucher ${result.voucherNumber} created.`:`${type[0].toUpperCase()+type.slice(1)} record saved.`);
   } catch(error){button.disabled=false;button.textContent="Try again";toast(error.message);}
 }
 async function financeVoucherDecision(id,decision) {
@@ -2889,7 +2926,7 @@ function creditsMembersView() {
   const row=m=>`<tr><td><div class="cell-main">${escapeHtml(m.name)}</div><div class="cell-sub">${escapeHtml(m.memberNumber||"")}</div></td><td>${escapeHtml(memberPhoneLabel(m.phone))}</td><td class="mono">${money(m.savings)}</td><td class="mono">${money(m.shares)}</td><td class="mono">${money(m.outstandingBalance)}</td><td>${Number(m.activeLoans||0)}</td><td>${status(m.status||"active")}</td><td><button class="mini-btn" title="Open member account" data-open-member-dashboard="${m.id}">${icons.eye}</button></td></tr>`;
   const cards=members.map(m=>`<article class="credits-member-card"><header><strong>${escapeHtml(m.name)}</strong>${status(m.status||"active")}</header><small>${escapeHtml(m.memberNumber||"")} · ${escapeHtml(memberPhoneLabel(m.phone))}</small><dl><div><dt>Savings</dt><dd>${money(m.savings)}</dd></div><div><dt>Shares</dt><dd>${money(m.shares)}</dd></div><div><dt>Outstanding loan</dt><dd>${money(m.outstandingBalance)}</dd></div><div><dt>Active loans</dt><dd>${Number(m.activeLoans||0)}</dd></div></dl><button class="button small secondary" data-open-member-dashboard="${m.id}">${icons.eye} Open account</button></article>`).join("");
   return `<div class="exec-module-metrics">${executiveModuleMetric("Active members",members.length,"blue")}${executiveModuleMetric("Savings + capital",money(c.contributionProgress?.totalMemberFunds||0),"green")}${executiveModuleMetric("Savings for completed months",money(c.contributionProgress?.expectedSavingsToDate||0),"violet")}${executiveModuleMetric("Verified this year",money(c.contributionProgress?.verifiedSavings||0),"orange")}</div>
-    <div class="credits-policy-explainer"><strong>${p?.fiscalYear||"Current year"} rules</strong><span>Monthly savings ${money(p?.monthlySavingsTarget||0)}</span><span>Welfare UGX 25,000 once a month from the first deposit</span><span>Annual shares ${money(p?.annualShareTarget||0)}</span><span>Annual subscription ${money(p?.annualSubscriptionFee||0)}</span><small>A 425,000 payment sends 25,000 to welfare and 400,000 to savings the first time that month. Later deposits in the same month stay fully on savings and on the Centenary account.</small></div>
+    <div class="credits-policy-explainer"><strong>${p?.fiscalYear||"Current year"} rules</strong><span>Monthly savings ${money(p?.monthlySavingsTarget||0)}</span><span>Welfare UGX 25,000 recorded separately</span><span>Annual shares ${money(p?.annualShareTarget||0)}</span><span>Annual contribution ${money(p?.annualSubscriptionFee||0)}</span><small>A savings payment of 425,000 stays in savings. Welfare is recorded on its own income category and member card.</small></div>
     <section class="finance-panel"><div class="finance-panel-head"><div><h3>Member accounts</h3><p>Active members only — open any account for savings, loans and repayments</p></div></div>
       <div class="table-scroll credits-members-desktop"><table><thead><tr><th>Member</th><th>Contact</th><th>Savings</th><th>Share capital</th><th>Outstanding loan</th><th>Active loans</th><th>Status</th><th></th></tr></thead><tbody>${members.map(row).join("")||`<tr><td colspan="8">No active members.</td></tr>`}</tbody></table></div>
       <div class="credits-member-cards">${cards||`<div class="exec-empty">No active members.</div>`}</div>
