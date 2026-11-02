@@ -1490,6 +1490,7 @@ app.get("/api/executive/command-center",auth,requireExecutive("view"),asyncRoute
       (SELECT COUNT(*) FROM supervisory_followups WHERE status NOT IN ('completed','closed'))::int AS followups
       FROM supervisory_recommendations`),
     query(`SELECT m.id,m.reference,m.title,m.meeting_type AS "meetingType",m.agenda,m.venue,m.scheduled_at AS "scheduledAt",
+      m.ended_at AS "endedAt",
       m.status,m.host_member_id AS "hostMemberId",m.collect_hosting_fee AS "collectHostingFee",
       host.full_name AS "hostName",d.name AS department FROM organization_meetings m
       LEFT JOIN departments d ON d.id=m.department_id
@@ -1978,11 +1979,19 @@ app.post("/api/executive/meetings",auth,requireExecutive("view"),asyncRoute(asyn
   const status=alreadyHeld||scheduledAt.getTime()<kampalaNow.getTime()?"held":"scheduled";
   const row=await transaction(async client=>{
     const executiveDepartment=(await client.query("SELECT id FROM departments WHERE code='executive'")).rows[0];
+    const endPart=String(b.endTime||b.endedAt||"").slice(0,5);
+    let endedAt=null;
+    if(/^\d{2}:\d{2}$/.test(endPart)&&datePart){
+      endedAt=new Date(`${datePart}T${endPart}:00+03:00`);
+      if(!Number.isNaN(endedAt.getTime())&&endedAt.getTime()<=scheduledAt.getTime()){
+        endedAt=new Date(endedAt.getTime()+86400000);
+      }
+    }
     const inserted=(await client.query(`INSERT INTO organization_meetings
-      (reference,department_id,title,meeting_type,agenda,venue,scheduled_at,status,visibility_level,created_by,host_member_id,collect_hosting_fee)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,1,$9,$10,$11) RETURNING id,reference`,
+      (reference,department_id,title,meeting_type,agenda,venue,scheduled_at,ended_at,status,visibility_level,created_by,host_member_id,collect_hosting_fee)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,1,$10,$11,$12) RETURNING id,reference`,
     [reference("MTG"),executiveDepartment.id,title,String(b.meetingType||"Member meeting").trim(),
-      String(b.agenda||"").trim()||null,String(b.venue||"").trim()||null,scheduledAt,status,
+      String(b.agenda||"").trim()||null,String(b.venue||"").trim()||null,scheduledAt,endedAt,status,
       req.user.id,hostId,collectHosting])).rows[0];
     const when=scheduledAt.toLocaleString("en-GB",{timeZone:"Africa/Kampala",day:"numeric",month:"long",year:"numeric",hour:"2-digit",minute:"2-digit"});
     const venue=String(b.venue||"").trim();

@@ -287,6 +287,14 @@ async function refundHostHostingFee(client, memberId, maxAmount = 50000) {
 }
 
 async function recordBanumbaOctober30Meeting(client) {
+  await client.query(
+    `UPDATE organization_meetings
+       SET scheduled_at=TIMESTAMPTZ '2026-10-30 21:00:00+03',
+           ended_at=TIMESTAMPTZ '2026-10-31 00:00:00+03'
+     WHERE reference='MTG-20261030-BANUMBA'
+        OR (scheduled_at::date=DATE '2026-10-30'
+            AND (venue ILIKE '%banumba%' OR title ILIKE '%banumba%' OR title ILIKE '%francis%'))`
+  );
   if ((await client.query("SELECT 1 FROM settings WHERE key=$1", [BANUMBA_MEETING_KEY])).rows[0]) return null;
   const host = (
     await client.query(
@@ -331,8 +339,8 @@ async function recordBanumbaOctober30Meeting(client) {
       const inserted = (
         await client.query(
           `INSERT INTO organization_meetings
-            (reference,department_id,title,meeting_type,agenda,venue,scheduled_at,status,visibility_level,created_by,host_member_id,collect_hosting_fee)
-           VALUES ($1,$2,$3,'Member meeting',$4,$5,'2026-10-30 10:00:00+03','held',1,$6,$7,true)
+            (reference,department_id,title,meeting_type,agenda,venue,scheduled_at,ended_at,status,visibility_level,created_by,host_member_id,collect_hosting_fee)
+           VALUES ($1,$2,$3,'Member meeting',$4,$5,'2026-10-30 21:00:00+03','2026-10-31 00:00:00+03','held',1,$6,$7,true)
            RETURNING id`,
           [
             `MTG-20261030-BANUMBA`,
@@ -356,7 +364,9 @@ async function recordBanumbaOctober30Meeting(client) {
     await client.query(
       `UPDATE organization_meetings
          SET title=$2, meeting_type='Member meeting', agenda=$3, venue=$4, status='held',
-             visibility_level=1, host_member_id=$5, collect_hosting_fee=true
+             visibility_level=1, host_member_id=$5, collect_hosting_fee=true,
+             scheduled_at=TIMESTAMPTZ '2026-10-30 21:00:00+03',
+             ended_at=TIMESTAMPTZ '2026-10-31 00:00:00+03'
        WHERE id=$1`,
       [meetingId, "Members meeting at Banumba Francis's home", OCT30_AGENDA, "Banumba Francis's place", host.id]
     );

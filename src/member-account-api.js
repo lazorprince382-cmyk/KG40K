@@ -343,7 +343,7 @@ module.exports = function registerMemberAccountApi({
         ORDER BY p.paid_at DESC NULLS LAST, p.id DESC
         LIMIT 100`),
       query(`SELECT m.id,m.reference,m.title,m.meeting_type AS "meetingType",m.agenda,m.venue,
-        m.scheduled_at AS "scheduledAt",m.status,host.full_name AS "hostName"
+        m.scheduled_at AS "scheduledAt",m.ended_at AS "endedAt",m.status,host.full_name AS "hostName"
         FROM organization_meetings m
         LEFT JOIN members host ON host.id=m.host_member_id
         WHERE m.visibility_level<=1 ORDER BY m.scheduled_at DESC LIMIT 100`),
