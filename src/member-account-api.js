@@ -409,21 +409,22 @@ module.exports = function registerMemberAccountApi({
           AND (t.target_fiscal_year=EXTRACT(YEAR FROM p.ends_on)::int OR (t.target_fiscal_year IS NULL AND t.created_at::date BETWEEN p.starts_on AND p.ends_on))),0)::float AS "subscriptionPaid"
       FROM member_financial_year_policies p
       WHERE p.ends_on < CURRENT_DATE ORDER BY p.starts_on DESC`, [memberId])).rows.map(y => {
-      const monthly = combinedMonthlySetting > 0 ? combinedMonthlySetting : Number(y.monthlySavingsTarget) + Math.max(0, welfareMonthlySetting);
+      const monthly = Number(y.monthlySavingsTarget) > 0
+        ? Number(y.monthlySavingsTarget)
+        : (combinedMonthlySetting > welfareMonthlySetting ? combinedMonthlySetting - welfareMonthlySetting : 400000);
       return { ...y, fiscalYear: `FY ${y.fiscalYear}`, monthlyTarget: monthly, annualSavingsTarget: monthly * 12,
-        savingsTowardTarget: Number(y.savingsPaid) + Number(y.welfarePaid) };
+        savingsTowardTarget: Number(y.savingsPaid) };
     });
-    // Display bar uses the combined monthly pay (400k savings + 25k welfare) × 12 = 5,100,000.
-    const monthlyTarget = combinedMonthlySetting > 0
-      ? combinedMonthlySetting
-      : (savingsMonthlyTarget > 0 ? savingsMonthlyTarget + Math.max(0, welfareMonthlySetting) : 0);
+    const monthlyTarget = savingsMonthlyTarget > 0
+      ? savingsMonthlyTarget
+      : (combinedMonthlySetting > welfareMonthlySetting ? combinedMonthlySetting - welfareMonthlySetting : 400000);
     const pastSurplus = Math.max(0, Number(pastYearProgress?.variance || 0));
     const coveredMonthsExact = savingsMonthlyTarget > 0 ? pastSurplus / savingsMonthlyTarget : 0;
     const coveredMonths = Math.floor(coveredMonthsExact + 1e-9);
     const coveredMonthsRemainder = Math.max(0, pastSurplus - (coveredMonths * savingsMonthlyTarget));
     const openingShareCredit = 0;
     const savingsPaidThisYear = Number(yearContributions.savings || 0);
-    const savingsTowardTarget = savingsPaidThisYear + welfarePaidThisYear + pastSurplus;
+    const savingsTowardTarget = savingsPaidThisYear + pastSurplus;
     const sharePaidThisYear = Number(yearContributions.shares || 0);
     const sharePaidTowardTarget = sharePaidThisYear;
     const subscriptionPaid = Number(yearContributions.subscription || 0);

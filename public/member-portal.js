@@ -165,7 +165,7 @@
         </div>
         <div class="member-policy-note">${s.joinedThisYear
           ?`You joined in ${esc(s.joinLabel)}, so your target is ${money(s.monthlyTarget)} for each month from then.`
-          :`Everyone was expected to have ${money(s.benchmarkAmount)} by the ${esc(s.benchmarkLabel)}. Each month after that adds ${money(s.monthlyTarget)}.`}</div>
+          :`Everyone was expected to have ${money(s.benchmarkAmount)} by the ${esc(s.benchmarkLabel)}. Each month after that adds ${money(s.monthlyTarget)} savings (welfare is separate).`}</div>
       </div>
     </section>`;
   }

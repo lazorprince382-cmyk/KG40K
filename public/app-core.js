@@ -2068,7 +2068,7 @@ function financeDepartmentOptions() {
 }
 function openFinanceModal(type) {
   const forms={
-    income:["Record income","Posted immediately to Centenary. Savings, welfare, hosting, shares and annual contribution are recorded separately. Dates show as DD/MM/YYYY.",`<form class="form" data-finance-form="income"><div class="form-grid"><div class="field"><label>Income category</label><select name="category"><option>Member savings</option><option>Hosting fee</option><option>Welfare contributions</option><option>Annual share contribution</option><option>Annual contribution</option></select></div><div class="field" data-savings-member><label>Member</label><select name="memberId"></select><small data-member-help></small></div><div class="field"><label>Amount (UGX)</label><input name="amount" type="number" min="1" required></div><div class="field full"><label>Member / Organization paying</label><input name="counterparty" required></div><div class="field"><label>Payment method</label><select name="paymentMethod"><option>Bank transfer</option><option>Cash</option><option>Mobile Money</option><option>Cheque</option></select></div><div class="field"><label>Receiving account</label><select name="accountId" required>${financeAccountOptions()}</select><small data-account-help>Select where the money was received.</small></div><div class="field"><label>Date (DD/MM/YYYY)</label><input name="date" type="date" value="${new Date().toLocaleDateString("en-CA",{timeZone:"Africa/Kampala"})}" required></div><div class="field full"><label>Description</label><textarea name="description" required></textarea></div><div class="field full"><label>Supporting document</label><input name="supportingDocument"></div></div>${formActions("Record income")}</form>`],
+    income:["Record income","Posted immediately to Centenary. Savings, welfare, hosting, shares and annual contribution are recorded separately. Dates show as DD/MM/YYYY.",`<form class="form" data-finance-form="income"><div class="form-grid"><div class="field"><label>Income category</label><select name="category"><option>Member savings</option><option>Hosting fee</option><option>Welfare contributions</option><option>Annual share contribution</option><option>Annual contribution</option></select></div><div class="field" data-savings-member><label>Member</label><select name="memberId"></select><small data-member-help></small></div><div class="field" data-welfare-period hidden><label>Welfare month</label><select name="period"></select><small>Record this month or a future month so members stay up to date.</small></div><div class="field"><label>Amount (UGX)</label><input name="amount" type="number" min="1" required></div><div class="field full"><label>Member / Organization paying</label><input name="counterparty" required></div><div class="field"><label>Payment method</label><select name="paymentMethod"><option>Bank transfer</option><option>Cash</option><option>Mobile Money</option><option>Cheque</option></select></div><div class="field"><label>Receiving account</label><select name="accountId" required>${financeAccountOptions()}</select><small data-account-help>Select where the money was received.</small></div><div class="field"><label>Date (DD/MM/YYYY)</label><input name="date" type="date" value="${new Date().toLocaleDateString("en-CA",{timeZone:"Africa/Kampala"})}" required></div><div class="field full"><label>Description</label><textarea name="description" required></textarea></div><div class="field full"><label>Supporting document</label><input name="supportingDocument"></div></div>${formActions("Record income")}</form>`],
     account:["Add finance cash account","Register a bank, cash, petty cash, mobile money or restricted-fund account",`<form class="form" data-finance-form="account"><div class="form-grid"><div class="field"><label>Account type</label><select name="accountType"><option value="bank">Bank account</option><option value="cash">Cash account</option><option value="petty_cash">Petty cash</option><option value="mobile_money">Mobile money</option><option value="restricted">Restricted funds</option></select></div><div class="field"><label>Account code (optional)</label><input name="accountCode" placeholder="Generated if empty"></div><div class="field full"><label>Account name</label><input name="accountName" required placeholder="e.g. Stanbic Operating Account"></div><div class="field"><label>Bank / provider name</label><input name="bankName"></div><div class="field"><label>Account / wallet number</label><input name="accountNumber"></div><div class="field"><label>Opening balance (UGX)</label><input name="openingBalance" type="number" min="0" value="0" required></div><div class="field"><label>Opening balance date</label><input name="openingBalanceDate" type="date" max="${new Date().toISOString().slice(0,10)}" value="${new Date().toISOString().slice(0,10)}" required></div><div class="field"><label class="check-field"><input name="restricted" type="checkbox"> Restricted funds</label></div><div class="field full"><label>Notes / balance description</label><textarea name="notes" placeholder="Explain the source and date of the starting balance"></textarea></div><div class="field full"><label>Opening statement or supporting document</label><input name="supportingDocument"><small>Required when the opening balance is greater than zero.</small></div></div>${formActions("Add account")}</form>`],
     expense:["Record an organization expense","Use this when money leaves Centenary or cash for group work. It goes for Finance then Executive approval before it is paid.",`<form class="form" data-finance-form="expense"><div class="form-grid"><div class="field full"><label>Paid to</label><input name="supplier" required placeholder="Member, supplier or office being paid"></div><div class="field"><label>Department</label><select name="departmentId">${financeDepartmentOptions()}</select></div><div class="field"><label>What this payment is for</label><select name="category"><option>Meeting / AGM</option><option>Welfare assistance</option><option>Member savings withdrawal</option><option>Loan-related cost</option><option>Bank charges</option><option>Transport</option><option>Legal / registration</option><option>Stationery and printing</option><option>Communication</option><option>Training</option><option>Investment related</option><option>Other group expense</option></select></div><div class="field"><label>Amount (UGX)</label><input name="amount" type="number" min="1" required></div><div class="field"><label>Paid from</label><select name="paymentMethod"><option>Bank transfer</option><option>Cash</option><option>Mobile Money</option><option>Cheque</option></select></div><div class="field full"><label>Reason</label><textarea name="description" required placeholder="What happened, which meeting or member, and why the group is paying"></textarea></div><div class="field full"><label>Receipt or supporting document</label><input name="supportingDocument" placeholder="Optional receipt number or file"></div></div>${formActions("Send for approval")}</form>`],
     invoice:["Record supplier invoice","Track an obligation and its due date",`<form class="form" data-finance-form="invoice"><div class="form-grid"><div class="field"><label>Invoice number</label><input name="invoiceNumber" required></div><div class="field"><label>Supplier</label><input name="supplier" required></div><div class="field full"><label>Description</label><input name="description" required></div><div class="field"><label>Amount (UGX)</label><input name="amount" type="number" min="1" required></div><div class="field"><label>Invoice date</label><input name="invoiceDate" type="date" required></div><div class="field"><label>Due date</label><input name="dueDate" type="date" required></div><div class="field full"><label>Supporting document</label><input name="supportingDocument"></div></div>${formActions("Record invoice")}</form>`],
@@ -2086,22 +2086,36 @@ function openFinanceModal(type) {
   if(type==="income")configureFinanceIncomeAccounts(financeForm);
   financeForm.onsubmit=submitFinanceForm;
 }
-function financeIncomeMemberList(kind){
+function financeIncomeMemberList(kind,period){
   const all=(state.finance.savingsMembers||[]).filter(isSelectableActiveMember);
   if(kind==="hosting"){
     const unpaid=(state.finance.hostingFee?.unpaidMembers||state.finance.hostingFee?.members||[]).filter(m=>m.status!=="paid");
     return (unpaid.length?unpaid:all).map(m=>({id:m.id,memberNumber:m.memberNumber,name:m.name||m.fullName,due:Number(m.due??Math.max(0,Number(m.expected||state.finance.hostingFee?.expected||50000)-Number(m.paid||0)))}));
   }
-  if(kind==="welfare")return (state.finance.welfareDueMembers||all).map(m=>({id:m.id,memberNumber:m.memberNumber,name:m.name,due:Number(m.due||state.finance.welfareProgress?.perMember||25000)}));
+  if(kind==="welfare"){
+    const months=state.finance.welfareRecordMonths||[];
+    const chosen=months.find(m=>m.period===period)||months.find(m=>Number(m.dueCount||m.dueMembers?.length||0)>0)||months[0];
+    const due=(chosen?.dueMembers||state.finance.welfareDueMembers||all);
+    return due.map(m=>({id:m.id,memberNumber:m.memberNumber,name:m.name,due:Number(m.due||state.finance.welfareProgress?.perMember||25000),period:chosen?.period||period}));
+  }
   if(kind==="annual")return (state.finance.subscriptionDueMembers||all).map(m=>({id:m.id,memberNumber:m.memberNumber,name:m.name,due:Number(m.due||state.finance.subscriptionProgress?.fee||0)}));
   return all.map(m=>({id:m.id,memberNumber:m.memberNumber,name:m.name,due:0}));
 }
 function configureFinanceIncomeAccounts(form) {
   const method=form.elements.paymentMethod,account=form.elements.accountId,category=form.elements.category;
   const map={"Bank transfer":["bank"],Cheque:["bank"],Cash:["cash","petty_cash"],"Mobile Money":["mobile_money"]};
-  const fillMembers=(kind,keepId)=>{
+  const fillWelfareMonths=(keepPeriod)=>{
+    const select=form.elements.period;if(!select)return "";
+    const months=state.finance.welfareRecordMonths||[];
+    select.innerHTML=months.map(m=>`<option value="${escapeHtml(m.period)}">${escapeHtml(m.label)} · ${Number(m.dueCount||m.dueMembers?.length||0)} to record</option>`).join("");
+    const fallback=(months.find(m=>Number(m.dueCount||m.dueMembers?.length||0)>0)||months[0]||{}).period||"";
+    if(keepPeriod&&[...select.options].some(o=>o.value===String(keepPeriod)))select.value=String(keepPeriod);
+    else if(fallback)select.value=fallback;
+    return select.value;
+  };
+  const fillMembers=(kind,keepId,period)=>{
     const select=form.elements.memberId;if(!select)return [];
-    const members=financeIncomeMemberList(kind);
+    const members=financeIncomeMemberList(kind,period);
     select.innerHTML=members.map(m=>`<option value="${m.id}" data-due="${Number(m.due||0)}">${escapeHtml(m.memberNumber)} — ${escapeHtml(m.name)}</option>`).join("")||`<option value="">No members left to record</option>`;
     if(keepId&&[...select.options].some(o=>o.value===String(keepId)))select.value=String(keepId);
     const help=form.querySelector("[data-member-help]");
@@ -2118,13 +2132,18 @@ function configureFinanceIncomeAccounts(form) {
     const memberPick=savings||hosting||shares||welfare||annual;
     const kind=hosting?"hosting":welfare?"welfare":annual?"annual":"savings";
     const memberField=form.querySelector("[data-savings-member]");
+    const welfarePeriodField=form.querySelector("[data-welfare-period]");
     const payerField=form.elements.counterparty?.closest(".field");
     if(memberField)memberField.hidden=!memberPick;
+    if(welfarePeriodField)welfarePeriodField.hidden=!welfare;
     if(form.elements.memberId)form.elements.memberId.required=memberPick;
+    if(form.elements.period)form.elements.period.required=welfare;
     if(payerField)payerField.hidden=memberPick;
     if(form.elements.counterparty)form.elements.counterparty.required=!memberPick;
     if(memberPick){
-      fillMembers(kind,form.elements.memberId?.value);
+      const period=welfare?fillWelfareMonths(form.elements.period?.value):"";
+      if(welfare&&period&&form.elements.date&&!String(form.elements.date.value||"").startsWith(period))form.elements.date.value=`${period}-01`;
+      fillMembers(kind,form.elements.memberId?.value,period);
       const selected=form.elements.memberId?.selectedOptions?.[0];
       if(form.elements.counterparty&&selected)form.elements.counterparty.value=selected.textContent.trim();
       const due=Number(selected?.dataset.due||0);
@@ -2140,8 +2159,9 @@ function configureFinanceIncomeAccounts(form) {
         form.querySelector("[data-account-help]").textContent="Always the Centenary bank account. Annual shares post immediately and update the member share-capital card.";
       }else if(welfare){
         if(form.elements.amount)form.elements.amount.value=String(due||25000);
-        if(form.elements.description)form.elements.description.value=selected?`Welfare contribution from ${selected.textContent.trim()}`:"Welfare contribution";
-        form.querySelector("[data-account-help]").textContent="Always the Centenary bank account. This is separate from savings. It updates the member welfare card for the month.";
+        const monthLabel=form.elements.period?.selectedOptions?.[0]?.textContent?.split("·")[0]?.trim()||"";
+        if(form.elements.description)form.elements.description.value=selected?`Welfare contribution from ${selected.textContent.trim()}${monthLabel?` for ${monthLabel}`:""}`:"Welfare contribution";
+        form.querySelector("[data-account-help]").textContent="Always the Centenary bank account. Choose a current or future month. This is separate from savings and updates the member welfare card.";
       }else if(annual){
         if(due>0&&form.elements.amount)form.elements.amount.value=String(due);
         if(form.elements.description)form.elements.description.value=selected?`Annual contribution from ${selected.textContent.trim()}`:"Annual contribution";
@@ -2159,6 +2179,12 @@ function configureFinanceIncomeAccounts(form) {
   };
   method.addEventListener("change",refresh);
   category?.addEventListener("change",()=>{if(form.elements.amount)form.elements.amount.value="";if(form.elements.description)form.elements.description.value="";refresh();});
+  form.elements.period?.addEventListener("change",()=>{
+    const period=form.elements.period.value;
+    if(period&&form.elements.date)form.elements.date.value=`${period}-01`;
+    fillMembers("welfare",null,period);
+    refresh();
+  });
   form.elements.memberId?.addEventListener("change",()=>{
     const selected=form.elements.memberId.selectedOptions?.[0];
     if(form.elements.counterparty&&selected)form.elements.counterparty.value=selected.textContent.trim();

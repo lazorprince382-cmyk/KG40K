@@ -23,7 +23,7 @@ const {
 } = require("./loan-security");
 const { getRunningLoan, getSavingsTargetStatus, getGuarantorEligibility } = require("./loan-eligibility");
 const { loadWelfareStanding, loadWelfareMonth, enforceOneMonthlyWelfareCharge } = require("./welfare-standing");
-const { chargeWelfareFromCoveredSavings, catchUpWelfareFromSavings, loadMemberSchedule, loadScheduleSettings, buildSchedule, monthIndex } = require("./savings-schedule");
+const { chargeWelfareFromCoveredSavings, catchUpWelfareFromSavings, loadMemberSchedule, loadScheduleSettings, buildSchedule, monthIndex, monthKey, monthLabel } = require("./savings-schedule");
 const { buildStandingPdf } = require("./standing-reports");
 const { isHostingFeeCategory, loadHostingFeeStanding, deductUnpaidHostingFromSavings } = require("./hosting-fees");
 const { isWordUpload, convertWordUploadToPdf, convertPlainTextToPdf } = require("./services/office-pdf");
@@ -2191,6 +2191,27 @@ app.get("/api/finance/command-center",auth,requireFinance("view"),asyncRoute(asy
     FROM members WHERE deleted_at IS NULL AND status='active' ORDER BY full_name`)).rows;
   const welfarePaidIds=new Set((welfareMonth.rows||[]).map(row=>Number(row.memberId)));
   const welfareDueMembers=savingsMembers.filter(row=>!welfarePaidIds.has(Number(row.id))).map(row=>({...row,due:monthlyWelfarePerMember}));
+  const welfarePaidPeriodRows=(await query(`SELECT member_id AS "memberId",
+      COALESCE(NULLIF(period,''), to_char(contribution_date,'YYYY-MM')) AS period
+    FROM welfare_contributions
+    WHERE status IN ('verified','completed','recorded') AND amount>0
+      AND contribution_type NOT ILIKE '%standing%' AND COALESCE(reference,'') NOT LIKE 'WEL-STANDING-%'`)).rows;
+  const welfarePaidByMember=new Map();
+  for(const row of welfarePaidPeriodRows){
+    if(!row.period)continue;
+    const id=Number(row.memberId);
+    if(!welfarePaidByMember.has(id))welfarePaidByMember.set(id,new Set());
+    welfarePaidByMember.get(id).add(row.period);
+  }
+  const scheduleSettings=await loadScheduleSettings();
+  const welfareThrough=Math.max(scheduleSettings.currentMonth, scheduleSettings.yearEndMonth);
+  const welfareRecordMonths=[];
+  for(let i=scheduleSettings.currentMonth;i<=welfareThrough;i++){
+    const period=monthKey(i);
+    const dueMembers=savingsMembers.filter(row=>!(welfarePaidByMember.get(Number(row.id))||new Set()).has(period))
+      .map(row=>({...row,due:monthlyWelfarePerMember,period}));
+    welfareRecordMonths.push({period,label:monthLabel(i),dueCount:dueMembers.length,dueMembers});
+  }
   const subscriptionPaidIds=new Set(subscriptionPayments.map(row=>Number(row.memberId)));
   const subscriptionDueMembers=savingsMembers.filter(row=>!subscriptionPaidIds.has(Number(row.id))).map(row=>({...row,due:Number(subscriptionPolicy?.fee||0)}));
   subscriptionProgress.unpaidMembers=subscriptionDueMembers;
@@ -2218,7 +2239,7 @@ app.get("/api/finance/command-center",auth,requireFinance("view"),asyncRoute(asy
     procurements:procurements.rows,documents:documents.rows,investmentAnalyses:investmentAnalyses.rows,monthly,daily,
     incomeBySource,expensesByCategory,subscriptionProgress,welfareProgress,welfareStanding,
     hostingFee:await loadHostingFeeStanding(),
-    savingsMembers,welfareDueMembers,subscriptionDueMembers,
+    savingsMembers,welfareDueMembers,welfareRecordMonths,subscriptionDueMembers,
     pendingSavings:(await query(`SELECT t.id,t.reference,t.amount::float,t.method,t.status,t.external_reference AS "paymentReference",
       t.created_at AS "createdAt",(t.evidence_stored_name IS NOT NULL) AS "hasEvidence",t.submission_source AS "submissionSource",
       m.full_name AS member,m.member_number AS "memberNumber",recorder.full_name AS "submittedBy"
@@ -2366,21 +2387,24 @@ app.post("/api/finance/income",auth,asyncRoute(async(req,res,next)=>{
         [member.id,`UGX ${amount.toLocaleString()} annual share contribution posted to Centenary. Receipt ${receipt}.`]);
     }
     if(welfare){
-      const periodRow=(await client.query(`SELECT to_char(($1::timestamptz AT TIME ZONE 'Africa/Kampala')::date,'YYYY-MM') AS period`,[paidOn])).rows[0];
+      const datePeriod=(await client.query(`SELECT to_char(($1::timestamptz AT TIME ZONE 'Africa/Kampala')::date,'YYYY-MM') AS period,
+        to_char(($1::timestamptz AT TIME ZONE 'Africa/Kampala')::date,'YYYY-MM-DD') AS day`,[paidOn])).rows[0];
+      const period=/^\d{4}-\d{2}$/.test(String(b.period||"").trim())?String(b.period).trim():datePeriod.period;
+      const contributionDay=datePeriod.day?.startsWith(period)?datePeriod.day:`${period}-01`;
       const already=(await client.query(`SELECT id FROM welfare_contributions
         WHERE member_id=$1 AND status IN ('verified','completed','recorded') AND amount>0
           AND contribution_type NOT ILIKE '%standing%' AND COALESCE(reference,'') NOT LIKE 'WEL-STANDING-%'
           AND (period=$2 OR to_char(contribution_date,'YYYY-MM')=$2)
-        LIMIT 1`,[member.id,periodRow.period])).rows[0];
-      if(already){const error=new Error(`${member.full_name} already has welfare recorded for this month`);error.status=409;throw error;}
+        LIMIT 1`,[member.id,period])).rows[0];
+      if(already){const error=new Error(`${member.full_name} already has welfare recorded for ${period}`);error.status=409;throw error;}
       const welfareRow=(await client.query(`INSERT INTO welfare_contributions
         (reference,member_id,contribution_type,period,expected_amount,amount,payment_method,receipt_number,status,
          contribution_date,recorded_by,verified_by,verified_at,verification_comment,payment_reference,finance_entry_id)
         VALUES ($1,$2,'Monthly Welfare Contribution',$3,$4,$4,$5,$6,'verified',
-          ($7::timestamptz AT TIME ZONE 'Africa/Kampala')::date,$8,$8,NOW(),$9,$10,$11)
+          $7::date,$8,$8,NOW(),$9,$10,$11)
         RETURNING id`,
-        [reference("WCON"),member.id,periodRow.period,amount,paymentMethod,receipt,paidOn,req.user.id,
-          `Finance income posted to Centenary`,String(b.supportingDocument||"").trim()||null,inserted.id])).rows[0];
+        [reference("WCON"),member.id,period,amount,paymentMethod,receipt,contributionDay,req.user.id,
+          `Finance income posted to Centenary for ${period}`,String(b.supportingDocument||"").trim()||null,inserted.id])).rows[0];
       await client.query(`INSERT INTO settings (key,value) VALUES ('welfareFundBalance',$1)
         ON CONFLICT (key) DO UPDATE SET value=(COALESCE(NULLIF(settings.value,''),'0')::numeric+$2)::text, updated_at=NOW()`,
         [String(amount),amount]);
@@ -3317,9 +3341,9 @@ app.get("/api/credits/command-center",auth,requireCredits("view",{allowFinanceVi
   const combinedMonthlySetting=Number((await one(`SELECT value FROM settings WHERE key='monthlyCombinedContribution'`))?.value||0);
   const welfareMonthlySetting=Number((await one(`SELECT value FROM settings WHERE key='monthlyWelfareContribution'`))?.value||25000);
   const savingsMonthlyOnly=Number(contributionPolicy?.monthlySavingsTarget||0);
-  const displayMonthlyTarget=combinedMonthlySetting>0
-    ?combinedMonthlySetting
-    :(savingsMonthlyOnly>0?savingsMonthlyOnly+Math.max(0,welfareMonthlySetting):0);
+  const displayMonthlyTarget=savingsMonthlyOnly>0
+    ?savingsMonthlyOnly
+    :(combinedMonthlySetting>welfareMonthlySetting?combinedMonthlySetting-welfareMonthlySetting:400000);
   const contributionProgress=contributionPolicy?{
     fiscalYear:contributionPolicy.fiscalYear,monthsDue:Number(contributionPolicy.monthsDue),
     monthlySavingsTarget:displayMonthlyTarget,

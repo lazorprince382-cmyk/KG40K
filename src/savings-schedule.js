@@ -3,9 +3,9 @@
  * Monthly savings schedule shared by the member dashboard and the monthly welfare charge.
  * Every member is expected to hold the benchmark (UGX 9,900,000 in savings) at the end of
  * October 2026 (UGX 9,100,000 at the end of August: UGX 400,000 savings a month). Every month
- * after that adds the combined monthly contribution (UGX 425,000, of which UGX 25,000 goes to
- * welfare), so any surplus covers one month per UGX 425,000. Only members who join after the
- * benchmark month owe the combined amount from their join month instead.
+ * after that adds UGX 400,000 savings. Welfare is recorded separately and is not part of this
+ * savings expected line. Surplus covers one month per UGX 400,000. Members who join after the
+ * benchmark month owe UGX 400,000 savings from their join month.
  */
 const { query } = require("./db");
 
@@ -36,27 +36,32 @@ async function loadScheduleSettings(runner = { query }) {
         WHERE status='active' AND (CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date BETWEEN starts_on AND ends_on
         ORDER BY starts_on DESC LIMIT 1) AS "yearEnd"`)).rows[0];
   const welfareAmount = Number(setting.monthlyWelfareContribution || 25000);
+  const combined = Number(setting.monthlyCombinedContribution || 425000);
+  const welfare = Number.isFinite(welfareAmount) && welfareAmount > 0 ? welfareAmount : 25000;
+  const savingsPerMonth = combined > welfare ? combined - welfare : 400000;
   return {
     benchmarkAmount: Number(setting.savingsBenchmarkAmount || DEFAULT_BENCHMARK_AMOUNT),
     benchmarkDate,
     benchmarkMonth: monthIndex(benchmarkDate),
-    monthlyTarget: Number(setting.monthlyCombinedContribution || 425000),
-    welfareAmount: Number.isFinite(welfareAmount) && welfareAmount > 0 ? welfareAmount : 25000,
+    monthlyTarget: savingsPerMonth,
+    savingsPerMonth,
+    combinedMonthly: combined,
+    welfareAmount: welfare,
     currentMonth: monthIndex(months.current),
     yearStartMonth: monthIndex(months.yearStart || "2026-07"),
     yearEndMonth: monthIndex(months.yearEnd || "2027-06"),
   };
 }
 
-/** Savings a member should hold by the end of `month` (savings + welfare taken since the benchmark). */
+/** Savings a member should hold by the end of `month`. After October 2026 this grows by 400,000 a month, not 425,000. */
 function expectedAtEndOf(settings, joinMonth, month) {
   const joinedThisYear = joinMonth !== null && joinMonth > settings.benchmarkMonth;
-  const savingsPerMonth = Math.max(0, settings.monthlyTarget - settings.welfareAmount);
+  const savingsPerMonth = Number(settings.savingsPerMonth || Math.max(0, settings.monthlyTarget - (settings.welfareAmount || 0)) || 400000);
   const expected = joinedThisYear
-    ? settings.monthlyTarget * Math.max(0, month - joinMonth + 1)
+    ? savingsPerMonth * Math.max(0, month - joinMonth + 1)
     : month <= settings.benchmarkMonth
       ? settings.benchmarkAmount - savingsPerMonth * (settings.benchmarkMonth - month)
-      : settings.benchmarkAmount + settings.monthlyTarget * (month - settings.benchmarkMonth);
+      : settings.benchmarkAmount + savingsPerMonth * (month - settings.benchmarkMonth);
   return Math.max(0, expected);
 }
 
@@ -69,7 +74,8 @@ const WELFARE_SINCE_BENCHMARK_SQL = `COALESCE((SELECT SUM(c.amount) FROM welfare
 function buildSchedule(settings, { savings, welfareSinceBenchmark, joinMonth }) {
   const { currentMonth, yearStartMonth, yearEndMonth, benchmarkMonth, monthlyTarget, benchmarkAmount } = settings;
   const joinedThisYear = joinMonth !== null && (joinMonth > benchmarkMonth || joinMonth >= yearStartMonth);
-  const contributed = Number(savings || 0) + Number(welfareSinceBenchmark || 0);
+  const contributed = Number(savings || 0);
+  void welfareSinceBenchmark;
   const requiredByMonthEnd = expectedAtEndOf(settings, joinMonth, currentMonth);
   const variance = contributed - requiredByMonthEnd;
   const joinedDuringYear = joinMonth !== null && joinMonth >= yearStartMonth;
