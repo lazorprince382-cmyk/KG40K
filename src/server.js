@@ -26,6 +26,7 @@ const { loadWelfareStanding, loadWelfareMonth, enforceOneMonthlyWelfareCharge } 
 const { chargeWelfareFromCoveredSavings, catchUpWelfareFromSavings, loadMemberSchedule, loadScheduleSettings, buildSchedule, monthIndex, monthKey, monthLabel } = require("./savings-schedule");
 const { buildStandingPdf } = require("./standing-reports");
 const { isHostingFeeCategory, loadHostingFeeStanding, deductUnpaidHostingFromSavings } = require("./hosting-fees");
+const { isComputerTechnician, applyJudeOctoberSurplusToShares, registerTechnicianApi } = require("./technician-ops");
 const { isWordUpload, convertWordUploadToPdf, convertPlainTextToPdf } = require("./services/office-pdf");
 
 function mimeFromFilename(name="",fallback="application/octet-stream"){
@@ -944,7 +945,7 @@ app.use((req,res,next)=>{
 const permissions = {
   Member:["self:read","loan:create","withdrawal:create","profile:update"],
   Auditor:["member:read","finance:read","transaction:read","loan:read","report:read","audit:read"],
-  "System Admin":["system:manage","audit:read"],
+  "System Admin":["system:manage","audit:read","dashboard:read","member:read","member:manage","finance:read","transaction:create","transaction:read","accounting:manage","report:read","user:manage","document:manage"],
   "Finance Officer":["dashboard:read","finance:read","transaction:create","transaction:verify","accounting:manage","report:read"],
   "Investment Officer":["dashboard:read","member:read","report:read"],
   "Credits Officer":["dashboard:read","member:read","transaction:read","transaction:create","loan:read","loan:manage","withdrawal:approve","withdrawal:process","report:read"],
@@ -1058,9 +1059,9 @@ async function buildAvailableWorkspaces(user){
     });
   }else if(user.role==="System Admin"){
     push({
-      id:"role:system-admin",type:"department",code:"admin",role:"System Admin",label:"System Admin",
-      title:"System administration",subtitle:"Primary account role",
-      level:null,canEdit:true,canApprove:true,isHead:false,fromAssignment:false,primary:true
+      id:"role:system-admin",type:"department",code:"admin",role:"System Admin",label:"Computer technician",
+      title:"Computer technician",subtitle:"Live books, bank, income and governance",
+      level:5,canEdit:true,canApprove:true,isHead:true,fromAssignment:false,primary:true
     });
   }
   if(user.member_id){
@@ -1122,6 +1123,11 @@ async function departmentPermission(user,code,action="view") {
     FROM departments d JOIN department_assignments da ON da.department_id=d.id
     WHERE d.code=$1 AND da.user_id=$2 AND da.active=true AND da.can_${action}=true`,[code,user.id]);
   if(assigned) return assigned;
+  if(isComputerTechnician(user)){
+    const department=await one("SELECT id,code,name,description FROM departments WHERE code=$1",[code]);
+    if(!department) return {id:0,code,name:code,description:"",position_title:"Computer technician",authority_level:5,can_view:true,can_create:true,can_edit:true,can_approve:true,is_head:true};
+    return {...department,position_title:"Computer technician",authority_level:5,can_view:true,can_create:true,can_edit:true,can_approve:true,is_head:true};
+  }
   // Executive may open any department dashboard read-only without operational write rights.
   if(user.role==="Executive Officer"&&action==="view") {
     const department=await one("SELECT id,code,name,description FROM departments WHERE code=$1",[code]);
@@ -7090,6 +7096,10 @@ function withLiveUnitTrust(project,position){
     performanceStatus:Number(position.profitThisMonth)>0?"profitable":"active",unitTrust:position};
 }
 async function runScheduledMaintenance() {
+  try{
+    const judeShares=await transaction(client=>applyJudeOctoberSurplusToShares(client));
+    if(judeShares)console.log(`Jude October surplus to shares: ${judeShares}`);
+  }catch(error){console.error("Jude October surplus to shares failed:",error.message);}
   await transaction(async client=>{await accrueUnitTrustInterest(client);});
   await transaction(async client=>{
     await enforceOneMonthlyWelfareCharge(client);
@@ -7206,6 +7216,7 @@ async function runScheduledMaintenance() {
         AND n.message=d.name||' budget utilization is '||ROUND(b.used_amount/NULLIF(b.allocated_amount,0)*100)||'%.' AND n.created_at>=CURRENT_DATE)`);
   });
 }
+registerTechnicianApi({app,auth,asyncRoute,query,one,transaction,audit,metadata,reference,receiptReference});
 app.use(express.static(publicDir,{extensions:["html"],index:"index.html",dotfiles:"deny",fallthrough:true}));
 app.all("/api/{*splat}",(req,res)=>res.status(404).json({error:"API route not found"}));
 app.get("/{*splat}",(req,res)=>{

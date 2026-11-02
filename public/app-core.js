@@ -47,7 +47,7 @@ const roles = ["Member","Executive Officer","Finance Officer","Credits Officer",
 const rolePages = {
   Member: ["member-dashboard"],
   Auditor: ["dashboard","messages","settings"],
-  "System Admin": ["dashboard","messages","audit","settings"],
+  "System Admin": ["dashboard","technician-members","finance-income","finance-bank","finance-hosting-fee","finance-reports","users","audit","messages","settings"],
   "Finance Officer": ["dashboard","finance-income","finance-expenses","finance-vouchers","finance-receipts","finance-invoices",
     "finance-budgets","finance-bank","finance-unit-trust","finance-cashbook","finance-assets","finance-approvals",
     "finance-hosting-fee","finance-reports","finance-analytics","finance-documents","messages","settings"],
@@ -72,7 +72,8 @@ const rolePages = {
   "executive-meetings":["Organization calendar","Meetings"],"executive-projects":["Strategic portfolio","Projects"],
   "executive-reports":["Decision support","Reports"],"executive-hosting-fee":["Member payments","Hosting fee"],
   notifications:["Executive alerts","Notifications"],"executive-documents":["Official records","Documents"],
-  "executive-search":["Global search","Search results"],"credits-active":["Disbursed facilities","Active Loans"]
+  "executive-search":["Global search","Search results"],"credits-active":["Disbursed facilities","Active Loans"],
+  "technician-members":["Live member books","Member savings & shares"]
 };
 Object.assign(pageMeta,{
   "finance-income":["Organization revenue","Income"],"finance-expenses":["Organization spending","Expenses"],
@@ -270,7 +271,8 @@ const WORKSPACE_CENTER={
   "Welfare Officer":"/api/welfare/command-center",
   "Legal Officer":"/api/legal/command-center",
   "Auditor":"/api/audit/command-center",
-  "Supervisory Officer":"/api/supervisory/command-center"
+  "Supervisory Officer":"/api/supervisory/command-center",
+  "System Admin":"/api/technician/command-center"
 };
 const WORKSPACE_ICONS={
   executive:"building",finance:"wallet",credits:"loans",investment:"reports",
@@ -561,6 +563,10 @@ async function refreshData(seedUser=null,{skipCenter=false,lite=false}={}) {
     if(knownRole==="Legal Officer")state.legal=center;
     if(knownRole==="Auditor")state.auditCenter=center;
     if(knownRole==="Supervisory Officer")state.supervisory=center;
+    if(knownRole==="System Admin"||data.user.role==="System Admin")state.technician=center;
+  }
+  if((knownRole==="System Admin"||data.user.role==="System Admin")&&!state.finance){
+    try{state.finance=await api("/api/finance/command-center",{timeoutMs:60000});}catch(error){console.warn("Technician finance desk failed",error.message);}
   }
   if(previousWorkspace){
     state.activeWorkspace=findWorkspace(previousWorkspace.id)||previousWorkspace;
@@ -761,6 +767,7 @@ function render() {
   if(state.page==="dashboard"&&(state.role==="Finance Officer"||state.executiveWorkspace==="finance"))[eyebrow,title]=["Finance Department Dashboard",""];
   if(state.page==="dashboard"&&(state.role==="Credits Officer"||state.executiveWorkspace==="credits"))[eyebrow,title]=["Credits Department Dashboard",""];
   if(state.page==="dashboard"&&(state.role==="Investment Officer"||state.executiveWorkspace==="investment"))[eyebrow,title]=["Investment Department Dashboard",""];
+  if(state.page==="dashboard"&&state.role==="System Admin")[eyebrow,title]=["Computer technician dashboard",""];
   const app = document.getElementById("app");
   app.innerHTML = `
     <div class="app-shell ${state.executiveWorkspace?"executive-workspace-mode":""}">
@@ -808,6 +815,7 @@ function sidebar() {
   if(state.executiveWorkspace==="investment") return injectWorkspaceSwitcher(investmentSidebar());
   if(state.role==="Executive Officer") return injectWorkspaceSwitcher(executiveSidebar());
   if(state.role==="Finance Officer") return injectWorkspaceSwitcher(financeSidebar());
+  if(state.role==="System Admin") return injectWorkspaceSwitcher(technicianSidebar());
   if(state.role==="Credits Officer") return injectWorkspaceSwitcher(creditsSidebar());
   if(state.role==="Investment Officer") return injectWorkspaceSwitcher(investmentSidebar());
   const labels = { dashboard: "Organization", departments: "Departments", messages: "Messages", users: "User accounts", members: "Members", savings: "Savings", loans: "Loans", withdrawals: "Withdrawals", approvals: "Approvals", reports: "Reports", audit: "Audit log", settings: "Settings" };
@@ -869,6 +877,17 @@ function creditsSidebar() {
     <nav class="nav executive-nav">${[...sidebarPages].filter(page=>pages.includes(page)).map(page=>`<button class="nav-item ${state.page===page?"active":""}" data-page="${page}">${icons[iconMap[page]||page]||icons.dashboard}<span>${labels[page]}</span>${page==="messages"?messagesNavBadge():navAlertDot(alertFor(page))}</button>`).join("")}</nav>
     <div class="sidebar-bottom">${state.executiveWorkspace?`<button class="executive-quick" data-executive-workspace-exit>${icons.arrowUp}<span>Back to Executive</span></button>`:`<button class="executive-quick" data-action="credits-quick">${icons.arrowUp}<span>Quick Actions</span><b>&gt;</b></button>`}
       <div class="sidebar-user"><div class="avatar blue">${initials(actor())}</div><div><div class="user-name">${actor()}</div><div class="user-role">${state.executiveWorkspace?"Executive read-only view":"Credits Department"}</div></div></div></div>
+  </aside>`;
+}
+function technicianSidebar() {
+  const labels={dashboard:"Dashboard","technician-members":"Member books","finance-income":"Income","finance-bank":"Bank accounts","finance-hosting-fee":"Hosting fee","finance-reports":"Reports",users:"User accounts",audit:"Audit log",messages:"Messages",settings:"Settings"};
+  const iconMap={"technician-members":"savings","finance-income":"arrowDown","finance-bank":"building","finance-hosting-fee":"receipt","finance-reports":"reports",users:"users",audit:"audit"};
+  const pages=rolePages["System Admin"]||[];
+  return `<aside class="sidebar executive-sidebar finance-sidebar" id="sidebar">
+    <div class="executive-brand"><div class="executive-crest finance-crest">${icons.settings}</div><div><strong>KASANGATI G40<br>KWAGALANA</strong><span>Computer technician</span></div></div>
+    <nav class="nav executive-nav">${pages.map(page=>`<button class="nav-item ${state.page===page?"active":""}" data-page="${page}">${icons[iconMap[page]||page]||icons.dashboard}<span>${labels[page]||page}</span>${page==="messages"?messagesNavBadge():""}</button>`).join("")}</nav>
+    <div class="sidebar-bottom">
+      <div class="sidebar-user"><div class="avatar blue">${initials(actor())}</div><div><div class="user-name">${actor()}</div><div class="user-role">Computer technician</div></div></div></div>
   </aside>`;
 }
 function financeSidebar() {
@@ -937,6 +956,7 @@ function headActions() {
   }
   if(inFinanceDesk()) {
     if(state.page==="finance-income") return `<div class="head-actions"><button class="button primary" data-finance-modal="income">${icons.plus}Record income</button></div>`;
+    if(state.page==="technician-members") return `<div class="head-actions"><button class="button primary" data-technician-books="transfer">${icons.wallet}Transfer books</button><button class="button secondary" data-technician-books="set">${icons.savings}Set balances</button></div>`;
     if(state.page==="finance-expenses") return `<div class="head-actions"><button class="button primary" data-finance-modal="expense">${icons.plus}New expense</button></div>`;
     if(state.page==="finance-invoices") return `<div class="head-actions"><button class="button primary" data-finance-modal="invoice">${icons.plus}Record invoice</button></div>`;
     if(state.page==="finance-budgets") return `<div class="head-actions"><button class="button primary" data-finance-modal="budget">${icons.plus}Create or update budget</button></div>`;
@@ -1023,6 +1043,7 @@ function view() {
   if(state.page==="finance-analytics") return financeAnalyticsView();
   if(state.page==="finance-documents") return financeDocumentsView();
   if(state.page==="finance-search") return financeSearchView();
+  if(state.page==="technician-members") return technicianMembersView();
   if(views[state.page]) return views[state.page]();
   if(state.page==="executive-approvals") return executiveApprovalsView();
   if(state.page==="executive-meetings") return executiveMeetingsView();
@@ -3520,6 +3541,7 @@ function dashboardView() {
   if (state.role === "Finance Officer") return financeDashboardView();
   if (state.role === "Credits Officer") return creditsDashboardView();
   if (state.role === "Investment Officer") return investmentDashboardView();
+  if (state.role === "System Admin") return technicianDashboardView();
   const totalSavings = state.members.reduce((n, m) => n + m.savings, 0);
   const outstanding = state.loans.filter(l => ["active", "overdue"].includes(l.status)).reduce((n, l) => n + l.balance, 0);
   const pending = state.loans.filter(l => ["pending", "review"].includes(l.status)).length + state.withdrawals.filter(w => w.status === "pending").length;
@@ -3549,6 +3571,73 @@ function dashboardView() {
     </div>`;
 }
 
+function technicianDashboardView() {
+  const t=state.technician||{};
+  const s=t.stats||{};
+  const f=state.finance||{};
+  const jude=t.judeOctoberSurplus||{};
+  const hour=new Date().getHours();
+  const greeting=hour<12?"morning":hour<17?"afternoon":"evening";
+  const cards=[
+    ["Centenary bank",money(s.bankBalance||f.stats?.currentBankBalance||0),"wallet","finance-bank","Live GL-4104"],
+    ["UAP / Unit Trust",money(s.uapBalance||f.stats?.uapBalance||0),"building","finance-bank","Live GL-4500"],
+    ["Member savings",money(s.totalSavings||0),"savings","technician-members","All active member books"],
+    ["Share capital",money(s.totalShares||0),"receipt","technician-members","Annual share books"],
+    ["Active members",String(s.activeMembers||0),"members","technician-members","On the live roll"],
+    ["Hosting fee",money(f.hostingFee?.collected||0),"receipt","finance-hosting-fee",`${f.hostingFee?.paidCount||0} paid · ${f.hostingFee?.unpaidCount||0} not paid`]
+  ];
+  const recent=(t.recent||[]).slice(0,8);
+  return `<div class="finance-title-strip finance-welcome-strip"><div><h2>Good ${greeting}, ${escapeHtml((actor()||"there").split(" ")[0])}</h2><p class="page-subtitle">Computer technician desk — edit savings, move money between books, record income and edit bank accounts.</p></div></div>
+    <div class="module-actions" style="margin-bottom:14px">
+      <button class="button primary" data-finance-modal="income">${icons.plus}Record income</button>
+      <button class="button secondary" data-page="finance-bank">${icons.building}Edit bank</button>
+      <button class="button secondary" data-technician-books="transfer">${icons.wallet}Transfer savings ↔ shares</button>
+      <button class="button secondary" data-page="technician-members">${icons.savings}Member books</button>
+    </div>
+    <div class="exec-stat-grid">${cards.map((c,i)=>financeStatCard(...c,i)).join("")}</div>
+    <section class="finance-panel" style="margin-top:16px"><div class="finance-panel-head"><div><h3>Jude October surplus</h3><p>UGX 883,010 from the 30 October 2026 savings report (10,783,010 paid vs 9,900,000 expected) moved to annual share contribution. Centenary is not increased again.</p></div><strong>${jude.posted&&/^[0-9]+$/.test(String(jude.posted))?"Posted":escapeHtml(String(jude.posted||"Pending restart"))}</strong></div></section>
+    <section class="finance-panel" style="margin-top:16px"><div class="finance-panel-head"><div><h3>Recent technician transfers</h3><p>Savings and share adjustments that do not re-post Centenary cash</p></div></div>
+      ${recent.length?`<div class="table-scroll"><table><thead><tr><th>When</th><th>Member</th><th>Type</th><th>Amount</th><th>Note</th></tr></thead><tbody>${recent.map(x=>`<tr><td>${escapeHtml(new Date(x.createdAt).toLocaleString())}</td><td>${escapeHtml(x.member)}</td><td>${escapeHtml(x.type)}</td><td>${money(x.amount)}</td><td>${escapeHtml(x.notes||"")}</td></tr>`).join("")}</tbody></table></div>`:`<div class="exec-empty">No technician transfers yet.</div>`}
+    </section>`;
+}
+function technicianMembersView() {
+  const rows=(state.technician?.members||state.members||[]).filter(m=>m.status!=="exited");
+  return `<section class="finance-panel"><div class="finance-panel-head"><div><h3>Member savings and share capital</h3><p>Edit a balance or transfer surplus from savings into annual shares. This updates the member card only — it does not add extra money on Centenary.</p></div><strong>${rows.length}</strong></div>
+    <div class="table-scroll"><table><thead><tr><th>Member</th><th>Number</th><th>Savings</th><th>Share capital</th><th></th></tr></thead><tbody>${rows.map(m=>`<tr><td>${escapeHtml(m.name||m.fullName)}</td><td>${escapeHtml(m.memberNumber||"")}</td><td>${money(m.savings)}</td><td>${money(m.shares)}</td><td><button type="button" class="text-button" data-technician-member="${m.id}">Edit</button></td></tr>`).join("")||`<tr><td colspan="5">No members loaded.</td></tr>`}</tbody></table></div></section>`;
+}
+async function openTechnicianBooks(mode,memberId){
+  const members=state.technician?.members||[];
+  const selected=members.find(m=>String(m.id)===String(memberId))||members[0];
+  const isTransfer=mode!=="set";
+  const options=members.map(m=>`<option value="${m.id}" ${selected&&String(m.id)===String(memberId||selected.id)?"selected":""}>${escapeHtml(m.memberNumber)} — ${escapeHtml(m.name)}</option>`).join("");
+  document.body.insertAdjacentHTML("beforeend",`<div class="modal-backdrop" id="modal-backdrop"><div class="modal"><div class="modal-head"><div><h2>${isTransfer?"Transfer member books":"Set member balances"}</h2><p>${isTransfer?"Move money between savings and annual share contribution.":"Type the new savings and/or share capital. Centenary is left unchanged."}</p></div><button class="modal-close" data-close>${icons.x}</button></div>
+    <form class="form" id="technician-books-form"><div class="form-grid">
+      <div class="field full"><label>Member</label><select name="memberId" required>${options}</select></div>
+      ${isTransfer?`<div class="field"><label>From</label><select name="from"><option value="savings">Savings</option><option value="shares">Share capital</option></select></div>
+      <div class="field"><label>To</label><select name="to"><option value="shares">Share capital</option><option value="savings">Savings</option></select></div>
+      <div class="field"><label>Amount (UGX)</label><input name="amount" type="number" min="1" required></div>`
+      :`<div class="field"><label>Savings (UGX)</label><input name="savings" type="number" min="0" step="1" value="${selected?Math.round(Number(selected.savings||0)):""}"></div>
+      <div class="field"><label>Share capital (UGX)</label><input name="shares" type="number" min="0" step="1" value="${selected?Math.round(Number(selected.shares||0)):""}"></div>`}
+      <div class="field"><label>Date</label><input name="date" type="date" value="${new Date().toLocaleDateString("en-CA",{timeZone:"Africa/Kampala"})}" required></div>
+      <div class="field full"><label>Note</label><textarea name="note" placeholder="Why this change is being made"></textarea></div>
+    </div>${formActions(isTransfer?"Transfer":"Save balances")}</form></div></div>`);
+  document.querySelector("[data-close]").onclick=closeModal;
+  const form=document.getElementById("technician-books-form");
+  form.onsubmit=async event=>{
+    event.preventDefault();
+    const button=form.querySelector("button[type=submit]");button.disabled=true;
+    try{
+      const data=Object.fromEntries(new FormData(form).entries());
+      data.action=isTransfer?"transfer":"set";
+      const result=await api("/api/technician/books",{method:"POST",body:JSON.stringify(data)});
+      closeModal();
+      const [technician,finance]=await Promise.all([api("/api/technician/command-center"),api("/api/finance/command-center").catch(()=>state.finance)]);
+      state.technician=technician;if(finance)state.finance=finance;
+      render();
+      toast(result.message||"Member books updated.");
+    }catch(error){button.disabled=false;toast(error.message);}
+  };
+}
 function memberDashboard() {
   const member = state.members[0];
   const memberLoans = state.loans.filter(l => l.member === member.name);
@@ -4303,7 +4392,15 @@ function bind() {
         render();
       } catch(error) { toast(error.message); }
     }
+    if(state.role==="System Admin"&&["finance-income","finance-bank","finance-hosting-fee","finance-reports","finance-unit-trust"].includes(state.page)&&!state.finance){
+      try{state.finance=await api("/api/finance/command-center");render();}catch(error){toast(error.message);}
+    }
+    if(state.role==="System Admin"&&(state.page==="dashboard"||state.page==="technician-members")&&!state.technician){
+      try{state.technician=await api("/api/technician/command-center");render();}catch(error){toast(error.message);}
+    }
   }));
+  document.querySelectorAll("[data-technician-books]").forEach(el=>el.addEventListener("click",()=>openTechnicianBooks(el.dataset.technicianBooks)));
+  document.querySelectorAll("[data-technician-member]").forEach(el=>el.addEventListener("click",()=>openTechnicianBooks("set",el.dataset.technicianMember)));
   document.querySelectorAll("[data-department]").forEach(el=>el.addEventListener("click",async()=>{
     try {
       el.disabled=true;
