@@ -228,17 +228,33 @@ async function refundHostHostingFee(client, memberId, maxAmount = 50000) {
       [memberId]
     )
   ).rows;
+  const extraTx = (
+    await client.query(
+      `SELECT t.id AS transaction_id, t.amount::float, t.finance_entry_id, t.method, t.type, t.notes, NULL::bigint AS id
+       FROM transactions t
+       WHERE t.member_id=$1 AND t.status IN ('completed','verified','approved')
+         AND t.type='Hosting fee'
+         AND (t.method ILIKE '%savings%' OR t.notes ILIKE '%savings%')
+         AND NOT EXISTS (
+           SELECT 1 FROM hosting_fee_payments p WHERE p.transaction_id=t.id AND p.status='completed'
+         )
+       ORDER BY t.id`,
+      [memberId]
+    )
+  ).rows;
   let restored = 0;
-  for (const row of payments) {
+  for (const row of [...payments, ...extraTx]) {
     if (restored >= maxAmount - 0.5) break;
     const amount = Math.min(Number(row.amount || 0), maxAmount - restored);
     if (amount < 0.5) continue;
-    await client.query(
-      `UPDATE hosting_fee_payments SET status='voided',
-         notes=TRIM(BOTH FROM COALESCE(notes,'')||' | Returned: host does not pay hosting fee')
-       WHERE id=$1`,
-      [row.id]
-    );
+    if (row.id) {
+      await client.query(
+        `UPDATE hosting_fee_payments SET status='voided',
+           notes=TRIM(BOTH FROM COALESCE(notes,'')||' | Returned: host does not pay hosting fee')
+         WHERE id=$1`,
+        [row.id]
+      );
+    }
     await client.query(`UPDATE members SET savings_balance=savings_balance+$1 WHERE id=$2`, [amount, memberId]);
     if (row.transaction_id) {
       await client.query(
@@ -295,14 +311,31 @@ async function recordBanumbaOctober30Meeting(client) {
         OR (scheduled_at::date=DATE '2026-10-30'
             AND (venue ILIKE '%banumba%' OR title ILIKE '%banumba%' OR title ILIKE '%francis%'))`
   );
-  if ((await client.query("SELECT 1 FROM settings WHERE key=$1", [BANUMBA_MEETING_KEY])).rows[0]) return null;
   const host = (
     await client.query(
       `SELECT id, full_name FROM members
        WHERE deleted_at IS NULL AND full_name ILIKE '%banumba%' AND full_name ILIKE '%francis%'
-       ORDER BY id LIMIT 1`
+       ORDER BY id LIMIT 1 FOR UPDATE`
     )
   ).rows[0];
+  let restoredNow = 0;
+  if (host) {
+    restoredNow = await refundHostHostingFee(client, host.id, 50000);
+    if (restoredNow > 0.5) {
+      await client.query(
+        `INSERT INTO notifications (member_id,title,message) VALUES ($1,$2,$3)`,
+        [
+          host.id,
+          "Hosting fee returned",
+          `UGX ${restoredNow.toLocaleString()} hosting fee was returned to your savings. The member who hosts the meeting does not pay hosting fee.`,
+        ]
+      );
+    }
+  }
+  if ((await client.query("SELECT 1 FROM settings WHERE key=$1", [BANUMBA_MEETING_KEY])).rows[0]) {
+    if (!host) return "Banumba Francis not found";
+    return restoredNow > 0.5 ? `${host.full_name}: UGX ${restoredNow.toLocaleString()} hosting returned to savings` : null;
+  }
   if (!host) {
     await client.query(
       `INSERT INTO settings (key,value) VALUES ($1,'skipped-host-missing') ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()`,
@@ -394,22 +427,11 @@ async function recordBanumbaOctober30Meeting(client) {
       open: false,
     });
   }
-  const restored = await refundHostHostingFee(client, host.id, 50000);
-  if (restored > 0.5) {
-    await client.query(
-      `INSERT INTO notifications (member_id,title,message) VALUES ($1,$2,$3)`,
-      [
-        host.id,
-        "Hosting fee returned",
-        `UGX ${restored.toLocaleString()} hosting fee was returned to your savings. The member who hosts the meeting does not pay hosting fee.`,
-      ]
-    );
-  }
   await client.query(
     `INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()`,
-    [BANUMBA_MEETING_KEY, JSON.stringify({ meetingId, hostId: host.id, restored })]
+    [BANUMBA_MEETING_KEY, JSON.stringify({ meetingId, hostId: host.id, restored: restoredNow })]
   );
-  return `${host.full_name}: meeting recorded${restored > 0.5 ? `, UGX ${restored.toLocaleString()} hosting returned to savings` : ", no hosting chop to return"}`;
+  return `${host.full_name}: meeting recorded${restoredNow > 0.5 ? `, UGX ${restoredNow.toLocaleString()} hosting returned to savings` : ", no hosting chop to return"}`;
 }
 
 module.exports = {

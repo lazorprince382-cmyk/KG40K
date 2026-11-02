@@ -155,7 +155,11 @@ async function loadPersonalSavingsRows(asOf) {
          COALESCE((SELECT SUM(t.amount) FROM transactions t
            WHERE t.member_id=m.id AND t.status IN ('completed','verified','approved')
              AND t.type='Hosting fee' AND t.method ILIKE '%savings%'
-             AND COALESCE(t.verified_at,t.created_at)::date > $1::date),0)::float AS "hostingFromSavingsAfter"
+             AND COALESCE(t.verified_at,t.created_at)::date > $1::date),0)::float AS "hostingFromSavingsAfter",
+         COALESCE((SELECT SUM(t.amount) FROM transactions t
+           WHERE t.member_id=m.id AND t.status IN ('completed','verified','approved')
+             AND t.type='Hosting fee' AND t.method ILIKE '%savings%'
+             AND COALESCE(t.verified_at,t.created_at)::date <= $1::date),0)::float AS "hostingFromSavingsByAsOf"
        FROM members m
        WHERE m.deleted_at IS NULL AND m.status='active'
        ORDER BY m.full_name`,
@@ -175,6 +179,10 @@ async function loadPersonalSavingsRows(asOf) {
       if (shareMoved > 0.5) {
         const previousExpected = expectedAtEndOf(settings, joinMonth, parsed.index - 1);
         if (paid + 0.5 >= previousExpected + shareMoved) paid -= shareMoved;
+      }
+      const hostChop = Number(m.hostingFromSavingsByAsOf || 0);
+      if (hostChop > 0.5 && /banumba/i.test(m.name || "") && /francis/i.test(m.name || "")) {
+        paid += hostChop;
       }
       const expected = expectedAtEndOf(settings, joinMonth, parsed.index);
       const variance = paid - expected;
