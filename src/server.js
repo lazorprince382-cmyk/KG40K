@@ -25,7 +25,7 @@ const { getRunningLoan, getSavingsTargetStatus, getGuarantorEligibility } = requ
 const { loadWelfareStanding, loadWelfareMonth, enforceOneMonthlyWelfareCharge } = require("./welfare-standing");
 const { chargeWelfareFromCoveredSavings, catchUpWelfareFromSavings, loadMemberSchedule, loadScheduleSettings, buildSchedule, monthIndex, monthKey, monthLabel } = require("./savings-schedule");
 const { buildStandingPdf } = require("./standing-reports");
-const { isHostingFeeCategory, loadHostingFeeStanding, deductUnpaidHostingFromSavings } = require("./hosting-fees");
+const { isHostingFeeCategory, loadHostingFeeStanding, paymentCycleId, startHostingCycleForMeeting } = require("./hosting-fees");
 const { isComputerTechnician, applyJudeOctoberSurplusToShares, registerTechnicianApi } = require("./technician-ops");
 const { isWordUpload, convertWordUploadToPdf, convertPlainTextToPdf } = require("./services/office-pdf");
 
@@ -1490,8 +1490,12 @@ app.get("/api/executive/command-center",auth,requireExecutive("view"),asyncRoute
       (SELECT COUNT(*) FROM supervisory_followups WHERE status NOT IN ('completed','closed'))::int AS followups
       FROM supervisory_recommendations`),
     query(`SELECT m.id,m.reference,m.title,m.meeting_type AS "meetingType",m.agenda,m.venue,m.scheduled_at AS "scheduledAt",
-      m.status,d.name AS department FROM organization_meetings m LEFT JOIN departments d ON d.id=m.department_id
-      WHERE m.scheduled_at>=NOW() AND m.visibility_level<=$1 ORDER BY m.scheduled_at LIMIT 20`,[level]),
+      m.status,m.host_member_id AS "hostMemberId",m.collect_hosting_fee AS "collectHostingFee",
+      host.full_name AS "hostName",d.name AS department FROM organization_meetings m
+      LEFT JOIN departments d ON d.id=m.department_id
+      LEFT JOIN members host ON host.id=m.host_member_id
+      WHERE m.scheduled_at>=NOW()-INTERVAL '120 days' AND m.visibility_level<=$1
+      ORDER BY m.scheduled_at DESC LIMIT 50`,[level]),
     query(`SELECT a.id,a.reference,a.activity_type AS "activityType",a.title,a.description,a.status,a.created_at AS "createdAt",
       d.code AS "departmentCode",d.name AS department,u.full_name AS "createdBy"
       FROM department_activities a JOIN departments d ON d.id=a.department_id JOIN users u ON u.id=a.created_by
@@ -1721,7 +1725,8 @@ app.get("/api/executive/command-center",auth,requireExecutive("view"),asyncRoute
       outstandingLoans:loansOutstandingLive,uapBalance,bankBalance:companyBankBalance,companyFunds,
       activeInvestments:investment.running,welfareFundBalance:welfareBalance,
       legalCases:legal.rows[0].open_cases,auditIssues:auditIssues.rows[0].open,
-      supervisoryRecommendations:supervisory.rows[0].recommendations,upcomingMeetings:meetings.rows.length},
+      supervisoryRecommendations:supervisory.rows[0].recommendations,
+      upcomingMeetings:meetings.rows.filter(m=>new Date(m.scheduledAt).getTime()>=Date.now()).length},
     performance,performanceSource,departments:departments.rows,approvals:approvals.rows,approvalHistory:approvalHistory.rows,activities:activities.rows,meetings:meetings.rows,
     documents:documents.rows,financeEntries:financeEntries.rows,welfareRequests:welfareRequests.rows,governance:governanceRows.rows,
     finance:{...finance,budgetUtilization,budgetAllocated:budgetSummary.allocated,budgetUsed:budgetSummary.used,
@@ -1957,15 +1962,41 @@ app.get("/api/executive/search",auth,requireExecutive("view"),asyncRoute(async(r
   res.json({results:rows.rows});
 }));
 app.post("/api/executive/meetings",auth,requireExecutive("view"),asyncRoute(async(req,res)=>{
-  const b=req.body,title=String(b.title||"").trim(),scheduledAt=new Date(b.scheduledAt);
-  if(!title||Number.isNaN(scheduledAt.getTime())||scheduledAt<=new Date()) return res.status(400).json({error:"Provide a title and a future meeting date"});
-  const executiveDepartment=await one("SELECT id FROM departments WHERE code='executive'");
-  const row=await one(`INSERT INTO organization_meetings
-    (reference,department_id,title,meeting_type,agenda,venue,scheduled_at,status,visibility_level,created_by)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,'scheduled',$8,$9) RETURNING id,reference`,
-  [reference("MTG"),executiveDepartment.id,title,String(b.meetingType||"Executive Meeting").trim(),
-    String(b.agenda||"").trim()||null,String(b.venue||"").trim()||null,scheduledAt,
-    Math.min(4,Math.max(1,Number(b.visibilityLevel||2))),req.user.id]);
+  const b=req.body,title=String(b.title||"").trim();
+  const datePart=String(b.date||b.scheduledAt||"").slice(0,10);
+  const timePart=String(b.time||"10:00").slice(0,5);
+  const scheduledAt=new Date(/T/.test(String(b.scheduledAt||""))?b.scheduledAt:`${datePart}T${timePart}:00+03:00`);
+  if(!title||Number.isNaN(scheduledAt.getTime())) return res.status(400).json({error:"Provide a meeting title and date"});
+  const kampalaNow=new Date(new Date().toLocaleString("en-US",{timeZone:"Africa/Kampala"}));
+  if(scheduledAt.getTime()<kampalaNow.getTime()-60*1000) return res.status(400).json({error:"Pick a meeting date and time that has not already passed"});
+  const collectHosting=b.collectHostingFee!==false&&b.collectHostingFee!=="false"&&b.collectHostingFee!=="0"&&b.collectHostingFee!=="";
+  const hostMemberId=Number(b.hostMemberId||b.host_member_id);
+  const hostId=Number.isInteger(hostMemberId)&&hostMemberId>0?hostMemberId:null;
+  const hostingAmount=Number(b.hostingFeeAmount||b.expectedAmount);
+  const meetingDate=datePart||scheduledAt.toLocaleDateString("en-CA",{timeZone:"Africa/Kampala"});
+  const row=await transaction(async client=>{
+    const executiveDepartment=(await client.query("SELECT id FROM departments WHERE code='executive'")).rows[0];
+    const inserted=(await client.query(`INSERT INTO organization_meetings
+      (reference,department_id,title,meeting_type,agenda,venue,scheduled_at,status,visibility_level,created_by,host_member_id,collect_hosting_fee)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,'scheduled',1,$8,$9,$10) RETURNING id,reference`,
+    [reference("MTG"),executiveDepartment.id,title,String(b.meetingType||"Member meeting").trim(),
+      String(b.agenda||"").trim()||null,String(b.venue||"").trim()||null,scheduledAt,
+      req.user.id,hostId,collectHosting])).rows[0];
+    const when=scheduledAt.toLocaleString("en-GB",{timeZone:"Africa/Kampala",day:"numeric",month:"long",year:"numeric",hour:"2-digit",minute:"2-digit"});
+    const venue=String(b.venue||"").trim();
+    await client.query(
+      `INSERT INTO notifications (member_id,title,message)
+       SELECT id, 'New meeting scheduled', $1
+       FROM members WHERE deleted_at IS NULL AND status='active'`,
+      [`${title} on ${when}${venue?` at ${venue}`:""}. Check your meetings page.`]
+    );
+    if(collectHosting){
+      await startHostingCycleForMeeting(client,{
+        meetingId:inserted.id,title,meetingDate,expectedAmount:hostingAmount,createdBy:req.user.id,notify:true
+      });
+    }
+    return inserted;
+  });
   await audit({userId:req.user.id,action:"EXECUTIVE_MEETING_SCHEDULED",entityType:"meeting",entityId:String(row.id),details:title,...metadata(req)});
   res.status(201).json(row);
 }));
@@ -2372,10 +2403,11 @@ app.post("/api/finance/income",auth,asyncRoute(async(req,res,next)=>{
         RETURNING id`,
         [reference("TRX"),member.id,paymentMethod,amount,String(b.supportingDocument||"").trim()||null,
           `Hosting fee posted to Centenary. received=${amount.toFixed(2)}.`,req.user.id,paidOn,receipt,inserted.id])).rows[0];
+      const cycleId=await paymentCycleId(client);
       await client.query(`INSERT INTO hosting_fee_payments
-        (member_id,amount,paid_on,status,reference,receipt_number,finance_entry_id,transaction_id,notes,recorded_by)
-        VALUES ($1,$2,COALESCE($3::date,CURRENT_DATE),'completed',$4,$5,$6,$7,$8,$9)`,
-        [member.id,amount,paidOn,reference("HOST"),receipt,inserted.id,tx.id,description,req.user.id]);
+        (member_id,amount,paid_on,status,reference,receipt_number,finance_entry_id,transaction_id,notes,recorded_by,cycle_id)
+        VALUES ($1,$2,COALESCE($3::date,CURRENT_DATE),'completed',$4,$5,$6,$7,$8,$9,$10)`,
+        [member.id,amount,paidOn,reference("HOST"),receipt,inserted.id,tx.id,description,req.user.id,cycleId]);
       await notifyQuietly(client,"INSERT INTO notifications (member_id,title,message) VALUES ($1,'Hosting fee recorded',$2)",
         [member.id,`UGX ${amount.toLocaleString()} hosting fee posted to Centenary. Receipt ${receipt}.`]);
     }
@@ -6756,7 +6788,7 @@ async function canAccessStandingReports(user){
 }
 async function sendStandingReport(req,res){
   const kind=String(req.params.kind||"").toLowerCase().replace(/\.pdf$/,"");
-  if(!["savings","welfare","loans","company","assistance","active-loans","hosting-fee"].includes(kind)) return res.status(400).json({error:"Choose a standing report"});
+  if(!["savings","welfare","loans","company","assistance","active-loans","hosting-fee","income-statement","debtors-aging"].includes(kind)) return res.status(400).json({error:"Choose a standing report"});
   if(!await canAccessStandingReports(req.user)) return res.status(403).json({error:"Standing report access denied"});
   const asOf=String(req.query.asOf||"").trim();
   const download=req.query.download==="1"||/\.pdf$/i.test(req.path);
@@ -7107,10 +7139,6 @@ async function runScheduledMaintenance() {
     if(caught.length)console.log(`Welfare catch-up from savings: ${caught.map(x=>`${x.name} ${x.period} ${x.amount}`).join(", ")}`);
     const charged=await chargeWelfareFromCoveredSavings(client);
     if(charged.length)console.log(`Monthly welfare taken from covered savings: ${charged.map(x=>`${x.name} (${x.period})`).join(", ")}`);
-  });
-  await transaction(async client=>{
-    const hosting=await deductUnpaidHostingFromSavings(client);
-    if(hosting.length)console.log(`Hosting fee taken from savings: ${hosting.map(x=>`${x.name} ${x.amount}`).join(", ")}`);
   });
   await transaction(async client=>{
     const duplicates=await removeDuplicateBabiryeRepayment(client);

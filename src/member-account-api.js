@@ -580,7 +580,13 @@ module.exports = function registerMemberAccountApi({
         uapBalance, bankBalance, loansOutstanding, welfareRemaining, companyFunds,
         hostingFeePaid: Number(hostingFee.paid || 0),
         hostingFeeExpected: Number(hostingFee.expected || 50000),
-        hostingFeeStatus: hostingFee.status || "unpaid"
+        hostingFeeDue: Number(hostingFee.due || 0),
+        hostingFeeStatus: hostingFee.status || "unpaid",
+        hostingFeeReminder: Boolean(hostingFee.reminderActive && Number(hostingFee.due || 0) > 0.5),
+        hostingMeetingLabel: hostingFee.meetingLabel || null,
+        welfareDueThisMonth: Boolean((welfareFromJoin.months||[]).some(row=>row.month===kampalaDay.slice(0,7) && Number(row.paid||0)<Number(row.expected||25000)-0.5)),
+        welfareDueAmount: 25000,
+        welfareDueLabel: (welfareFromJoin.months||[]).find(row=>row.month===kampalaDay.slice(0,7))?.label || null
       },
       organizationStanding:{uapBalance,bankBalance,loansOutstanding,welfareRemaining,companyFunds},
       welfareFund:{

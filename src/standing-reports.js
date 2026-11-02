@@ -666,6 +666,162 @@ function drawMiniTable(doc, x0, y, cols, rows, { header = CYAN } = {}) {
   return y;
 }
 
+async function loadIncomeStatement(parsed) {
+  const monthStart = `${parsed.asOfMonth}-01`;
+  const asOfDate = parsed.asOfDate;
+  const fyStart = (await query(
+    `SELECT starts_on FROM member_financial_year_policies
+     WHERE status='active' AND $1::date BETWEEN starts_on AND ends_on
+     ORDER BY starts_on DESC LIMIT 1`,
+    [asOfDate]
+  )).rows[0]?.starts_on || `${parsed.year}-01-01`;
+  const rows = (
+    await query(
+      `SELECT entry_type AS "entryType", COALESCE(NULLIF(category,''),'Uncategorised') AS category,
+         SUM(amount) FILTER (WHERE transaction_date>=$1::date AND transaction_date<=$2::date)::float AS month_amount,
+         SUM(amount) FILTER (WHERE transaction_date>=$3::date AND transaction_date<=$2::date)::float AS ytd_amount
+       FROM organization_finance_entries
+       WHERE status IN ('approved','completed')
+         AND COALESCE(payment_method,'') NOT ILIKE 'Management accounts import'
+       GROUP BY entry_type, COALESCE(NULLIF(category,''),'Uncategorised')
+       ORDER BY entry_type, category`,
+      [monthStart, asOfDate, fyStart]
+    )
+  ).rows;
+  const income = rows.filter((r) => r.entryType === "income");
+  const expenses = rows.filter((r) => r.entryType === "expense");
+  const sum = (list, key) => list.reduce((s, r) => s + Number(r[key] || 0), 0);
+  return {
+    income,
+    expenses,
+    fyStart,
+    monthIncome: sum(income, "month_amount"),
+    monthExpenses: sum(expenses, "month_amount"),
+    ytdIncome: sum(income, "ytd_amount"),
+    ytdExpenses: sum(expenses, "ytd_amount"),
+  };
+}
+
+function drawIncomeStatement(doc, statement, label) {
+  let y = 50;
+  const x0 = 18;
+  const pageW = doc.page.width - 36;
+  doc.font("Helvetica").fontSize(10).fillColor("#5B6B7C")
+    .text(`Income and expenses posted to the books as at ${label}. Year-to-date starts ${statement.fyStart ? formatDay(statement.fyStart) : "FY start"}. Member savings receipts are included as recorded.`, x0, y, { width: pageW });
+  y += 28;
+  cellText(doc, "Income", x0, y, pageW, 16, { bold: true, size: 12, color: NAVY });
+  y += 18;
+  y = drawMiniTable(doc, x0, y, [
+    { w: 220, label: "Category", align: "left" },
+    { w: 120, label: "This month", align: "right", bold: true },
+    { w: 120, label: "Year to date", align: "right", bold: true },
+  ], statement.income.map((row) => [ascii(row.category), moneyExact(row.month_amount), moneyExact(row.ytd_amount)]).concat([
+    ["Total income", moneyExact(statement.monthIncome), moneyExact(statement.ytdIncome)],
+  ]), { header: NAVY });
+  y += 16;
+  cellText(doc, "Expenses", x0, y, pageW, 16, { bold: true, size: 12, color: RED });
+  y += 18;
+  y = drawMiniTable(doc, x0, y, [
+    { w: 220, label: "Category", align: "left" },
+    { w: 120, label: "This month", align: "right", bold: true },
+    { w: 120, label: "Year to date", align: "right", bold: true },
+  ], statement.expenses.map((row) => [ascii(row.category), moneyExact(row.month_amount), moneyExact(row.ytd_amount)]).concat([
+    ["Total expenses", moneyExact(statement.monthExpenses), moneyExact(statement.ytdExpenses)],
+  ]), { header: RED });
+  y += 18;
+  const monthNet = statement.monthIncome - statement.monthExpenses;
+  const ytdNet = statement.ytdIncome - statement.ytdExpenses;
+  y = drawMiniTable(doc, x0, y, [
+    { w: 220, label: "Result", align: "left" },
+    { w: 120, label: "This month", align: "right", bold: true },
+    { w: 120, label: "Year to date", align: "right", bold: true },
+  ], [["Surplus / (deficit)", moneyExact(monthNet), moneyExact(ytdNet)]], { header: BLUE });
+}
+
+async function loadDebtorsAging() {
+  const today = kampalaTodayKey();
+  const loans = (
+    await query(
+      `SELECT l.id, l.reference, m.full_name AS member, m.member_number AS "memberNumber",
+         l.status, ROUND((${withLoanAlias(LOAN_MONEY_IN_LOANS_SQL, "l")})::numeric,2)::float AS outstanding,
+         COALESCE((SELECT MIN(s.due_date) FROM loan_repayment_schedule s
+           WHERE s.loan_id=l.id AND s.paid_amount < s.total_due - 0.5
+             AND s.due_date < $1::date), NULL) AS "oldestDue"
+       FROM loans l JOIN members m ON m.id=l.member_id
+       WHERE l.status IN ('active','overdue')
+       ORDER BY m.full_name`,
+      [today]
+    )
+  ).rows;
+  const bucketOf = (days) => {
+    if (days <= 0) return "current";
+    if (days <= 30) return "1-30";
+    if (days <= 60) return "31-60";
+    if (days <= 90) return "61-90";
+    return "90+";
+  };
+  const rows = loans.map((loan) => {
+    const dueKey = kampalaDateKey(loan.oldestDue);
+    const days = dueKey && dueKey < today
+      ? Math.round((new Date(`${today}T00:00:00+03:00`) - new Date(`${dueKey}T00:00:00+03:00`)) / 86400000)
+      : 0;
+    return {
+      member: loan.member,
+      memberNumber: loan.memberNumber,
+      reference: loan.reference,
+      status: loan.status,
+      outstanding: Number(loan.outstanding || 0),
+      daysOverdue: Math.max(0, days),
+      bucket: bucketOf(Math.max(0, days)),
+    };
+  });
+  const totals = { current: 0, "1-30": 0, "31-60": 0, "61-90": 0, "90+": 0 };
+  rows.forEach((row) => { totals[row.bucket] += row.outstanding; });
+  return { rows, totals, total: rows.reduce((s, r) => s + r.outstanding, 0) };
+}
+
+function drawDebtorsAging(doc, aging, label) {
+  let y = 50;
+  const x0 = 18;
+  const pageW = doc.page.width - 36;
+  doc.font("Helvetica").fontSize(10).fillColor("#5B6B7C")
+    .text(`Outstanding loans (principal, interest and penalties remaining) aged by the oldest unpaid installment as at ${label}.`, x0, y, { width: pageW });
+  y += 28;
+  y = drawMiniTable(doc, x0, y, [
+    { w: 90, label: "Current", align: "right", bold: true },
+    { w: 90, label: "1–30 days", align: "right", bold: true },
+    { w: 90, label: "31–60 days", align: "right", bold: true },
+    { w: 90, label: "61–90 days", align: "right", bold: true },
+    { w: 90, label: "90+ days", align: "right", bold: true },
+    { w: 90, label: "Total", align: "right", bold: true },
+  ], [[
+    moneyExact(aging.totals.current),
+    moneyExact(aging.totals["1-30"]),
+    moneyExact(aging.totals["31-60"]),
+    moneyExact(aging.totals["61-90"]),
+    moneyExact(aging.totals["90+"]),
+    moneyExact(aging.total),
+  ]], { header: NAVY });
+  y += 16;
+  cellText(doc, "Loan debtors", x0, y, pageW, 16, { bold: true, size: 12, color: NAVY });
+  y += 18;
+  drawMiniTable(doc, x0, y, [
+    { w: 150, label: "Member", align: "left" },
+    { w: 80, label: "Loan", align: "left" },
+    { w: 72, label: "Status", align: "left" },
+    { w: 70, label: "Days", align: "right" },
+    { w: 80, label: "Bucket", align: "left" },
+    { w: 90, label: "Outstanding", align: "right", bold: true },
+  ], aging.rows.map((row) => [
+    ascii(row.member),
+    ascii(row.reference),
+    ascii(row.status),
+    String(row.daysOverdue),
+    row.bucket,
+    moneyExact(row.outstanding),
+  ]), { header: NAVY });
+}
+
 function drawHostingFeeReport(doc, standing, label) {
   const expected = Number(standing.expected || 50000);
   const paid = standing.paidMembers || (standing.members || []).filter((m) => m.status !== "unpaid");
@@ -674,7 +830,9 @@ function drawHostingFeeReport(doc, standing, label) {
   const pageW = doc.page.width - 36;
   const x0 = 18;
   doc.font("Helvetica").fontSize(10).fillColor("#5B6B7C")
-    .text(`Hosting fee of UGX ${money(expected)} per member. Collected UGX ${money(standing.collected)} from ${paid.length} member${paid.length === 1 ? "" : "s"} as at ${label}.`, x0, y, { width: pageW });
+    .text(standing.reminderActive
+      ? `Hosting fee of UGX ${money(expected)} per member for ${standing.meetingLabel || "the upcoming meeting"}. Collected UGX ${money(standing.collected)} from ${paid.length} member${paid.length === 1 ? "" : "s"} as at ${label}.`
+      : `No hosting fee is currently due. The last meeting was 30 October 2026. Reminders start when Executive schedules the next meeting.`, x0, y, { width: pageW });
   y += 28;
   cellText(doc, "Members who have paid", x0, y, pageW, 16, { bold: true, size: 12, color: NAVY });
   y += 18;
@@ -857,8 +1015,18 @@ async function buildStandingPdf(kind, { asOf } = {}) {
       drawActiveLoanReports(doc, loans, label);
     } else if (kind === "hosting-fee") {
       const standing = await loadHostingFeeStanding();
-      drawHeader(doc, `Hosting Fee Report as at ${label}`);
+      drawHeader(doc, standing.reminderActive
+        ? `Hosting Fee Report for ${standing.meetingLabel || label}`
+        : `Hosting Fee Report as at ${label}`);
       drawHostingFeeReport(doc, standing, label);
+    } else if (kind === "income-statement") {
+      const statement = await loadIncomeStatement(parsed);
+      drawHeader(doc, `Income Statement as at ${label}`);
+      drawIncomeStatement(doc, statement, label);
+    } else if (kind === "debtors-aging") {
+      const aging = await loadDebtorsAging();
+      drawHeader(doc, `Debtors Aging Report as at ${label}`);
+      drawDebtorsAging(doc, aging, label);
     } else {
       throw Object.assign(new Error("Unknown standing report"), { status: 400 });
     }
@@ -883,6 +1051,8 @@ const TITLES = {
   assistance: "Welfare assistance register",
   "active-loans": "Active loans and installments",
   "hosting-fee": "Hosting fee payments",
+  "income-statement": "Income statement",
+  "debtors-aging": "Debtors aging",
 };
 
 module.exports = {
