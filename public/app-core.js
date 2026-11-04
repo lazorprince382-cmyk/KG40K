@@ -401,9 +401,9 @@ function onBrowserBack(){
   }
 }
 async function restoreExecutiveWorkspace(code){
-  if(!code||state.role!=="Executive Officer")return;
-  const endpoints={credits:"/api/credits/command-center",finance:"/api/finance/command-center",investment:"/api/investment/command-center",welfare:"/api/welfare/command-center",legal:"/api/legal/command-center",audit:"/api/audit/command-center",supervisory:"/api/supervisory/command-center"};
-  const stateKeys={credits:"credits",finance:"finance",investment:"investment",welfare:"welfare",legal:"legal",audit:"auditCenter",supervisory:"supervisory"};
+  if(!code||!canOpenDepartmentDesks())return;
+  const endpoints={executive:"/api/executive/command-center",credits:"/api/credits/command-center",finance:"/api/finance/command-center",investment:"/api/investment/command-center",welfare:"/api/welfare/command-center",legal:"/api/legal/command-center",audit:"/api/audit/command-center",supervisory:"/api/supervisory/command-center"};
+  const stateKeys={executive:"executive",credits:"credits",finance:"finance",investment:"investment",welfare:"welfare",legal:"legal",audit:"auditCenter",supervisory:"supervisory"};
   if(!endpoints[code])return;
   try{
     state[stateKeys[code]]=await api(endpoints[code]);
@@ -684,9 +684,19 @@ function loginView(error = "") {
 }
 
 function executiveWorkspaceRole() {
-  return ({credits:"Credits Officer",finance:"Finance Officer",investment:"Investment Officer",welfare:"Welfare Officer",legal:"Legal Officer",audit:"Auditor",supervisory:"Supervisory Officer"})[state.executiveWorkspace]||state.role;
+  return ({executive:"Executive Officer",credits:"Credits Officer",finance:"Finance Officer",investment:"Investment Officer",welfare:"Welfare Officer",legal:"Legal Officer",audit:"Auditor",supervisory:"Supervisory Officer"})[state.executiveWorkspace]||state.role;
+}
+function canOpenDepartmentDesks() {
+  return state.role==="Executive Officer"||state.role==="Auditor";
+}
+function oversightHomeName() {
+  return state.role==="Auditor"?"Audit":"Executive";
+}
+function oversightExitLabel() {
+  return `Back to ${oversightHomeName()}`;
 }
 function isExecutiveReadOnly() {
+  if(state.role==="Auditor") return Boolean(state.executiveWorkspace&&state.executiveWorkspace!=="audit");
   if(state.role!=="Executive Officer"||!state.executiveWorkspace)return false;
   if(state.executiveWorkspace==="finance"&&(state.finance?.access?.canEdit||state.finance?.access?.canCreate))return false;
   return true;
@@ -778,10 +788,11 @@ function render() {
           <button class="mobile-back" data-action="nav-back" title="Back" aria-label="Go back">${icons.arrowLeft}</button>
           <div class="top-search">${icons.search}<input id="global-search" value="${searchTerm}" placeholder="${state.role==="Executive Officer"&&!state.executiveWorkspace?"Search anything - members, loans, contracts, meetings...":state.role==="Finance Officer"||state.executiveWorkspace==="finance"?"Search receipts, vouchers, suppliers, invoices, amounts...":state.role==="Credits Officer"||state.executiveWorkspace==="credits"?"Search member, account, loan, guarantor, receipt...":state.role==="Investment Officer"||state.executiveWorkspace==="investment"?"Search projects, investors, proposals, contracts...":"Search members, departments, records..."}"></div>
           <div class="top-actions">
-            ${state.executiveWorkspace?`<button class="button secondary desktop-only-back" data-executive-workspace-exit>${icons.arrowUp} Back to Executive</button>`:""}
+            ${state.executiveWorkspace?`<button class="button secondary desktop-only-back" data-executive-workspace-exit>${icons.arrowUp} ${oversightExitLabel()}</button>`:""}
             <button class="icon-button" data-action="help" title="Help">${icons.help}</button>
             <button class="icon-button" data-action="notifications" title="Notifications">${icons.bell}<span class="notification-dot"></span></button>
             ${state.role==="Executive Officer"?`<button class="icon-button exec-calendar-button" data-executive-page="executive-meetings">${icons.clock}</button><div class="exec-top-profile"><div class="avatar blue">${initials(actor())}</div><div><strong>${actor()}</strong><span>${state.executiveWorkspace?(isExecutiveReadOnly()?`Viewing ${state.executiveWorkspace} (read only)`:`${state.executiveWorkspace==="finance"?"Finance":state.executiveWorkspace}`):"Executive Department"}</span></div></div>`:""}
+            ${state.role==="Auditor"&&state.executiveWorkspace?`<div class="exec-top-profile"><div class="avatar blue">${initials(actor())}</div><div><strong>${actor()}</strong><span>Viewing ${state.executiveWorkspace} (read only)</span></div></div>`:""}
             ${state.role==="Finance Officer"?`<div class="exec-top-profile"><div class="avatar blue">${initials(actor())}</div><div><strong>${actor()}</strong><span>Finance</span></div></div>`:""}
             ${state.role==="Credits Officer"?`<div class="exec-top-profile"><div class="avatar blue">${initials(actor())}</div><div><strong>${actor()}</strong><span>Credits Department</span></div></div>`:""}
             ${state.role==="Investment Officer"?`<div class="exec-top-profile"><div class="avatar blue">${initials(actor())}</div><div><strong>${actor()}</strong><span>Investment Department</span></div></div>`:""}
@@ -813,6 +824,7 @@ function sidebar() {
   if(state.executiveWorkspace==="credits") return injectWorkspaceSwitcher(creditsSidebar());
   if(state.executiveWorkspace==="finance") return injectWorkspaceSwitcher(financeSidebar());
   if(state.executiveWorkspace==="investment") return injectWorkspaceSwitcher(investmentSidebar());
+  if(state.executiveWorkspace==="executive") return injectWorkspaceSwitcher(executiveSidebar());
   if(state.role==="Executive Officer") return injectWorkspaceSwitcher(executiveSidebar());
   if(state.role==="Finance Officer") return injectWorkspaceSwitcher(financeSidebar());
   if(state.role==="System Admin") return injectWorkspaceSwitcher(technicianSidebar());
@@ -847,8 +859,8 @@ function investmentSidebar() {
   return `<aside class="sidebar executive-sidebar investment-sidebar" id="sidebar">
     <div class="executive-brand"><div class="executive-crest investment-crest">${icons.reports}</div><div><strong>KASANGATI G40<br>KWAGALANA</strong><span>INVESTMENT DEPARTMENT</span></div></div>
     <nav class="nav executive-nav">${[...sidebarPages].filter(page=>pages.includes(page)).map(page=>`<button class="nav-item ${state.page===page?"active":""}" data-page="${page}">${icons[iconMap[page]||page]||icons.dashboard}<span>${labels[page]}</span>${page==="messages"?messagesNavBadge():navAlertDot(page==="investment-proposals"&&pending)}</button>`).join("")}</nav>
-    <div class="sidebar-bottom">${state.executiveWorkspace?`<button class="executive-quick" data-executive-workspace-exit>${icons.arrowUp}<span>Back to Executive</span></button>`:`<button class="executive-quick" data-action="investment-quick">${icons.arrowUp}<span>Quick Actions</span><b>&gt;</b></button>`}
-      <div class="sidebar-user"><div class="avatar blue">${initials(actor())}</div><div><div class="user-name">${actor()}</div><div class="user-role">${state.executiveWorkspace?"Executive read-only view":"Investment Department"}</div></div></div></div>
+    <div class="sidebar-bottom">${state.executiveWorkspace?`<button class="executive-quick" data-executive-workspace-exit>${icons.arrowUp}<span>${oversightExitLabel()}</span></button>`:`<button class="executive-quick" data-action="investment-quick">${icons.arrowUp}<span>Quick Actions</span><b>&gt;</b></button>`}
+      <div class="sidebar-user"><div class="avatar blue">${initials(actor())}</div><div><div class="user-name">${actor()}</div><div class="user-role">${state.executiveWorkspace?`${oversightHomeName()} read-only view`:"Investment Department"}</div></div></div></div>
   </aside>`;
 }
 function creditsSidebar() {
@@ -875,8 +887,8 @@ function creditsSidebar() {
   return `<aside class="sidebar executive-sidebar credits-sidebar" id="sidebar">
     <div class="executive-brand"><div class="executive-crest credits-crest">${icons.loans}</div><div><strong>KASANGATI G40<br>KWAGALANA</strong><span>SACCO - CREDITS DEPARTMENT</span></div></div>
     <nav class="nav executive-nav">${[...sidebarPages].filter(page=>pages.includes(page)).map(page=>`<button class="nav-item ${state.page===page?"active":""}" data-page="${page}">${icons[iconMap[page]||page]||icons.dashboard}<span>${labels[page]}</span>${page==="messages"?messagesNavBadge():navAlertDot(alertFor(page))}</button>`).join("")}</nav>
-    <div class="sidebar-bottom">${state.executiveWorkspace?`<button class="executive-quick" data-executive-workspace-exit>${icons.arrowUp}<span>Back to Executive</span></button>`:`<button class="executive-quick" data-action="credits-quick">${icons.arrowUp}<span>Quick Actions</span><b>&gt;</b></button>`}
-      <div class="sidebar-user"><div class="avatar blue">${initials(actor())}</div><div><div class="user-name">${actor()}</div><div class="user-role">${state.executiveWorkspace?"Executive read-only view":"Credits Department"}</div></div></div></div>
+    <div class="sidebar-bottom">${state.executiveWorkspace?`<button class="executive-quick" data-executive-workspace-exit>${icons.arrowUp}<span>${oversightExitLabel()}</span></button>`:`<button class="executive-quick" data-action="credits-quick">${icons.arrowUp}<span>Quick Actions</span><b>&gt;</b></button>`}
+      <div class="sidebar-user"><div class="avatar blue">${initials(actor())}</div><div><div class="user-name">${actor()}</div><div class="user-role">${state.executiveWorkspace?`${oversightHomeName()} read-only view`:"Credits Department"}</div></div></div></div>
   </aside>`;
 }
 function technicianSidebar() {
@@ -907,8 +919,8 @@ function financeSidebar() {
   return `<aside class="sidebar executive-sidebar finance-sidebar" id="sidebar">
     <div class="executive-brand"><div class="executive-crest finance-crest">${icons.wallet}</div><div><strong>KASANGATI G40<br>KWAGALANA</strong><span>Finance</span></div></div>
     <nav class="nav executive-nav">${[...sidebarPages].filter(page=>pages.includes(page)).map(page=>`<button class="nav-item ${state.page===page?"active":""}" data-page="${page}">${icons[iconsByPage[page]||page]||icons.dashboard}<span>${labels[page]}</span>${page==="messages"?messagesNavBadge():navAlertDot(alertFor(page))}</button>`).join("")}</nav>
-    <div class="sidebar-bottom">${state.executiveWorkspace?`<button class="executive-quick" data-executive-workspace-exit>${icons.arrowUp}<span>Back to Executive</span></button>`:`<button class="executive-quick" data-action="finance-quick">${icons.arrowUp}<span>Quick Actions</span><b>&gt;</b></button>`}
-      <div class="sidebar-user"><div class="avatar blue">${initials(actor())}</div><div><div class="user-name">${actor()}</div><div class="user-role">${isExecutiveReadOnly()?"Executive read-only view":"Finance"}</div></div></div></div>
+    <div class="sidebar-bottom">${state.executiveWorkspace?`<button class="executive-quick" data-executive-workspace-exit>${icons.arrowUp}<span>${oversightExitLabel()}</span></button>`:`<button class="executive-quick" data-action="finance-quick">${icons.arrowUp}<span>Quick Actions</span><b>&gt;</b></button>`}
+      <div class="sidebar-user"><div class="avatar blue">${initials(actor())}</div><div><div class="user-name">${actor()}</div><div class="user-role">${isExecutiveReadOnly()?`${oversightHomeName()} read-only view`:"Finance"}</div></div></div></div>
   </aside>`;
 }
 function executiveSidebar() {
@@ -922,11 +934,12 @@ function executiveSidebar() {
     notifications:"bell","executive-documents":"file",users:"lock"};
   const pending=state.executive?.stats?.pendingApprovals||((state.executive?.approvals||[]).length+((state.executive?.documents||[]).filter(d=>d.status==="pending_executive").length));
   const sidebarPages=new Set(["dashboard","executive-approvals","members","departments","executive-meetings","executive-reports","executive-documents","users","notifications","messages","settings"]);
+  if(state.role==="Auditor") sidebarPages.delete("users");
   const alertFor=page=>page==="executive-approvals"&&pending||page==="notifications"&&(state.notifications||[]).some(n=>!n.readAt);
   return `<aside class="sidebar executive-sidebar" id="sidebar">
     <div class="executive-brand"><div class="executive-crest">${icons.shield}</div><div><strong>KASANGATI G40<br>KWAGALANA</strong><span>Executive Department</span></div></div>
-    <nav class="nav executive-nav">${[...sidebarPages].filter(page=>rolePages[state.role].includes(page)).map(page=>`<button class="nav-item ${state.page===page?"active":""}" data-page="${page}">${icons[iconMap[page]||page]||icons.dashboard}<span>${labels[page]}</span>${page==="messages"?messagesNavBadge():navAlertDot(alertFor(page))}</button>`).join("")}</nav>
-    <div class="sidebar-bottom"><button class="executive-quick" data-action="executive-quick">${icons.arrowUp}<span>Quick Actions</span><b>&gt;</b></button>
+    <nav class="nav executive-nav">${[...sidebarPages].filter(page=>(rolePages[executiveWorkspaceRole()]||rolePages[state.role]||[]).includes(page)).map(page=>`<button class="nav-item ${state.page===page?"active":""}" data-page="${page}">${icons[iconMap[page]||page]||icons.dashboard}<span>${labels[page]}</span>${page==="messages"?messagesNavBadge():navAlertDot(alertFor(page))}</button>`).join("")}</nav>
+    <div class="sidebar-bottom">${state.role==="Auditor"?`<button class="executive-quick" data-executive-workspace-exit>${icons.arrowUp}<span>${oversightExitLabel()}</span></button>`:`<button class="executive-quick" data-action="executive-quick">${icons.arrowUp}<span>Quick Actions</span><b>&gt;</b></button>`}
       <div class="sidebar-user"><div class="avatar blue">${initials(actor())}</div><div><div class="user-name">${actor()}</div><div class="user-role">Executive Department</div></div></div></div>
   </aside>`;
 }
@@ -936,6 +949,7 @@ function subtitle() {
 }
 
 function headActions() {
+  if(isExecutiveReadOnly()) return "";
   if(state.role==="Investment Officer") {
     if(state.page==="investment-projects") return `<div class="head-actions"><button class="button primary" data-investment-modal="project">${icons.plus}Add project</button></div>`;
     if(state.page==="investment-proposals") return `<div class="head-actions"><button class="button primary" data-investment-modal="proposal">${icons.plus}Create proposal</button></div>`;
@@ -1071,7 +1085,7 @@ const departmentModules = {
   credits:["Savings","Loan applications","Guarantors","Credit approvals","Disbursement","Repayment schedules"],
 };
 function departmentsView() {
-  if(state.role==="Executive Officer") return executiveDepartmentsView();
+  if(canOpenDepartmentDesks()) return executiveDepartmentsView();
   if(state.departmentData) return departmentDashboardView(state.departmentData);
   const departments=state.organization?.departments||[];
   if(!departments.length) return `<div class="permission-empty">${icons.lock}<h2>No departmental assignment</h2><p>Your account has no active department access. A manager or system administrator must assign your position and authority.</p></div>`;
@@ -1084,7 +1098,7 @@ function departmentsView() {
     <div class="notice">${icons.shield}<div><strong>Information is shared safely</strong><p>All departments use one verified member identity. Sensitive activities are filtered by department, assignment rights and leadership level.</p></div></div>`;
 }
 function departmentIcon(code) {
-  return ({welfare:"users",investment:"reports",finance:"wallet",legal:"file",executive:"building",supervisory:"shield",credits:"loans"})[code]||"building";
+  return ({welfare:"users",investment:"reports",finance:"wallet",legal:"file",executive:"building",supervisory:"shield",credits:"loans",audit:"audit"})[code]||"building";
 }
 function departmentDashboardView(data) {
   const d=data.department,a=data.access,modules=departmentModules[d.code]||[];
@@ -1180,7 +1194,7 @@ function executiveDashboardView() {
         ["Pending follow-ups",e.supervisory.followups],["Departments below target",e.supervisory.departmentsBelowTarget]])}
     </div>`}
     <div class="exec-bottom-grid">${executiveNotificationsWidget(e.notifications.slice(0,6))}${executiveCalendarWidget(e.meetings.slice(0,7))}</div>
-    ${executiveQuickPanel()}`;
+    ${isExecutiveReadOnly()?"":executiveQuickPanel()}`;
 }
 function executiveStatCard(label,value,icon,target,note,index) {
   const colors=["blue","green","violet","orange","red","teal"];
@@ -1246,8 +1260,10 @@ function executiveQuickPanel() {
 }
 function executiveDepartmentsView() {
   const e=state.executive;
+  if(!e?.stats) return `<div class="executive-loading">Loading department desks…</div>`;
+  const auditOnly=state.role==="Auditor";
   const modules=[
-    ["executive","Executive Department","Strategy and authority","Pending approvals",e.stats.pendingApprovals,"Upcoming meetings",e.stats.upcomingMeetings,"dashboard",null],
+    ["executive","Executive Department","Strategy and authority","Pending approvals",e.stats.pendingApprovals,"Upcoming meetings",e.stats.upcomingMeetings,"dashboard","executive"],
     ["finance","Finance Department","Budgets and finances","Income this month",money(e.stats.organizationReceiptsMonth??e.stats.organizationIncomeMonth??0),"Expenses this month",money(e.stats.organizationExpenditureMonth||0),"executive-finance","finance"],
     ["credits","Credits Department (SACCO)","Savings, loans and credit","Total savings",money(e.stats.totalSavings),"Outstanding loans",money(e.stats.outstandingLoans),"executive-credits","credits"],
     ["investment","Investment Department","Old Mutual unit trust","UAP account",money(e.investment.unitTrust?.balance??e.investment.current_value),"Profit so far",money(e.investment.unitTrust?.profitThisMonth||0),"executive-investments","investment"],
@@ -1263,7 +1279,7 @@ function executiveDepartmentsView() {
       const text=String(value).replace(/,/g,"").trim();
       return !/^(UGX\s*)?0+(\.0+)?$/.test(text);
     });
-    return `<article class="exec-department-card"><div class="exec-dept-title"><span class="${m[0]==="finance"?"green":m[0]==="credits"?"blue":m[0]==="investment"?"violet":m[0]==="welfare"?"orange":m[0]==="legal"?"red":m[0]==="audit"?"teal":m[0]==="supervisory"?"amber":"blue"}">${icons[departmentIcon(m[0])]}</span><div><h3>${m[1]}</h3><p>${m[2]}</p></div></div>${metrics.length?`<div class="exec-dept-values"><div>${metrics.map(([label,value])=>`<small>${label}</small><strong>${value}</strong>`).join("")}</div></div>`:""}<div class="exec-dept-actions"><button type="button" data-executive-page="${m[7]}">View summary <b>&gt;</b></button>${m[8]?`<button type="button" class="primary" data-executive-workspace="${m[8]}">Open desk <b>&gt;</b></button>`:""}</div></article>`;
+    return `<article class="exec-department-card"><div class="exec-dept-title"><span class="${m[0]==="finance"?"green":m[0]==="credits"?"blue":m[0]==="investment"?"violet":m[0]==="welfare"?"orange":m[0]==="legal"?"red":m[0]==="audit"?"teal":m[0]==="supervisory"?"amber":"blue"}">${icons[departmentIcon(m[0])]}</span><div><h3>${m[1]}</h3><p>${m[2]}</p></div></div>${metrics.length?`<div class="exec-dept-values"><div>${metrics.map(([label,value])=>`<small>${label}</small><strong>${value}</strong>`).join("")}</div></div>`:""}<div class="exec-dept-actions">${auditOnly?"":`<button type="button" data-executive-page="${m[7]}">View summary <b>&gt;</b></button>`}${m[8]?`<button type="button" class="primary" data-executive-workspace="${m[8]}">Open desk <b>&gt;</b></button>`:""}</div></article>`;
   }).join("")}</div>`;
 }
 function executiveModuleView(module) {
@@ -2994,7 +3010,7 @@ function creditsNotificationsWidget(c) {
   return `<section class="finance-panel"><div class="finance-panel-head"><div><h3>Notifications</h3></div><button data-credits-page="credits-notifications">View all ></button></div><div class="finance-notifications credits-card-scroll">${(c.notifications||[]).map(n=>`<button type="button" class="finance-notification-item ${n.level}" ${n.target?`data-credits-page="${n.target}"`:""} ${n.transactionId?`data-credits-transaction="${n.transactionId}"`:""}><span>${n.level==="success"?icons.check:icons.info}</span><div><strong>${escapeHtml(n.title)}</strong>${n.detail?`<small>${escapeHtml(n.detail)}</small>`:""}</div><time>${relativeTime(n.createdAt||n.time)}</time></button>`).join("")||`<div class="exec-empty">No current Credits notifications.</div>`}</div></section>`;
 }
 function creditsQuickPanel() {
-  if(isExecutiveReadOnly()) return `<div class="notice"><div>${icons.shield}</div><div><strong>Executive read-only mode</strong><p>You can inspect the live Credits dashboard. Recording deposits, loans and repayments remains with Credits officers.</p></div></div>`;
+  if(isExecutiveReadOnly()) return `<div class="notice"><div>${icons.shield}</div><div><strong>${oversightHomeName()} read-only mode</strong><p>You can inspect the live Credits dashboard. Recording deposits, loans and repayments remains with Credits officers.</p></div></div>`;
   return `<div class="exec-floating"><button class="exec-fab credits-fab" data-action="credits-quick">${icons.plus}<span>Quick Actions</span></button>${state.creditsQuickOpen?`<div class="exec-quick-menu">
     <button data-credits-modal="deposit">${icons.savings}Record deposit</button><button data-credits-modal="loan">${icons.loans}New loan application</button>
     <button data-credits-modal="repayment">${icons.receipt}Record repayment</button><button data-open-loan-calculator>${icons.reports}Loan calculator</button><button data-credits-page="credits-approvals">${icons.approvals}Review loans</button>
@@ -3340,7 +3356,7 @@ function creditsLoanOptions(filter=()=>true,selected="") {
   return state.credits.loans.filter(filter).map(l=>`<option value="${l.id}" ${String(l.id)===String(selected)?"selected":""}>${l.reference} - ${l.member} - ${money(l.balance)}</option>`).join("");
 }
 async function openCreditsModal(type,context="") {
-  if(isExecutiveReadOnly()) return toast("Executive is viewing this dashboard read-only. Operational posting stays with the department officers.");
+  if(isExecutiveReadOnly()) return toast(`${oversightHomeName()} is viewing this dashboard read-only. Operational posting stays with the department officers.`);
   if(type==="loan"&&!state.guarantorCandidates) {
     try{state.guarantorCandidates=(await api("/api/loans/guarantor-candidates")).candidates;}catch{state.guarantorCandidates=[];}
   }
@@ -3378,10 +3394,10 @@ async function submitCreditsForm(event) {
 }
 async function refreshCredits(){state.credits=await api("/api/credits/command-center");const boot=normalize(await api("/api/bootstrap"));state.loans=boot.loans;state.transactions=boot.transactions;state.members=boot.members;}
 async function openExecutiveWorkspace(code,landingPage) {
-  if(state.role!=="Executive Officer") return;
-  const endpoints={credits:"/api/credits/command-center",finance:"/api/finance/command-center",investment:"/api/investment/command-center",welfare:"/api/welfare/command-center",legal:"/api/legal/command-center",audit:"/api/audit/command-center",supervisory:"/api/supervisory/command-center"};
-  const stateKeys={credits:"credits",finance:"finance",investment:"investment",welfare:"welfare",legal:"legal",audit:"auditCenter",supervisory:"supervisory"};
-  const landingPages={credits:"credits-active",finance:"dashboard",investment:"dashboard",welfare:"dashboard",legal:"dashboard",audit:"dashboard",supervisory:"dashboard"};
+  if(!canOpenDepartmentDesks()) return;
+  const endpoints={executive:"/api/executive/command-center",credits:"/api/credits/command-center",finance:"/api/finance/command-center",investment:"/api/investment/command-center",welfare:"/api/welfare/command-center",legal:"/api/legal/command-center",audit:"/api/audit/command-center",supervisory:"/api/supervisory/command-center"};
+  const stateKeys={executive:"executive",credits:"credits",finance:"finance",investment:"investment",welfare:"welfare",legal:"legal",audit:"auditCenter",supervisory:"supervisory"};
+  const landingPages={executive:"dashboard",credits:"credits-active",finance:"dashboard",investment:"dashboard",welfare:"dashboard",legal:"dashboard",audit:"dashboard",supervisory:"dashboard"};
   if(!endpoints[code]) return toast("That department dashboard is not available.");
   try{
     if(!state[stateKeys[code]])state[stateKeys[code]]=await api(endpoints[code]);
@@ -3570,10 +3586,11 @@ function downloadCreditsStatement(memberId) {
 function downloadCreditsReport(name,format="excel") { downloadGeneratedReport("credits",name,format); }
 function dashboardView() {
   if (state.role === "Member") return memberDashboard();
-  if (state.role === "Executive Officer") return executiveDashboardView();
-  if (state.role === "Finance Officer") return financeDashboardView();
-  if (state.role === "Credits Officer") return creditsDashboardView();
-  if (state.role === "Investment Officer") return investmentDashboardView();
+  const desk=executiveWorkspaceRole();
+  if (desk === "Executive Officer") return executiveDashboardView();
+  if (desk === "Finance Officer") return financeDashboardView();
+  if (desk === "Credits Officer") return creditsDashboardView();
+  if (desk === "Investment Officer") return investmentDashboardView();
   if (state.role === "System Admin") return technicianDashboardView();
   const totalSavings = state.members.reduce((n, m) => n + m.savings, 0);
   const outstanding = state.loans.filter(l => ["active", "overdue"].includes(l.status)).reduce((n, l) => n + l.balance, 0);
@@ -4431,6 +4448,9 @@ function bind() {
     if(state.role==="System Admin"&&(state.page==="dashboard"||state.page==="technician-members")&&!state.technician){
       try{state.technician=await api("/api/technician/command-center");render();}catch(error){toast(error.message);}
     }
+    if(state.role==="Auditor"&&state.page==="departments"&&!state.executive){
+      try{state.executive=await api("/api/executive/command-center");render();}catch(error){toast(error.message||"Could not load department desks.");}
+    }
   }));
   document.querySelectorAll("[data-technician-books]").forEach(el=>el.addEventListener("click",()=>openTechnicianBooks(el.dataset.technicianBooks)));
   document.querySelectorAll("[data-technician-member]").forEach(el=>el.addEventListener("click",()=>openTechnicianBooks("set",el.dataset.technicianMember)));
@@ -4444,6 +4464,18 @@ function bind() {
   document.querySelectorAll("[data-executive-page]").forEach(el=>el.addEventListener("click",async event=>{
     event.preventDefault();const target=el.dataset.executivePage;
     if(target==="finance-unit-trust")return openExecutiveUap();
+    if(state.role==="Auditor"){
+      const deskByPage={
+        "executive-finance":"finance","executive-credits":"credits","executive-investments":"investment",
+        "executive-welfare":"welfare","executive-legal":"legal","executive-audit":"audit",
+        "executive-supervisory":"supervisory",dashboard:"executive"
+      };
+      if(state.executiveWorkspace==="executive"&&(rolePages["Executive Officer"].includes(target)||target==="executive-search")){
+        state.page=target;state.execQuickOpen=false;persistUiState();render();window.scrollTo(0,0);return;
+      }
+      if(deskByPage[target])return openExecutiveWorkspace(deskByPage[target]);
+      return toast("Open the department desk from Departments to inspect it.");
+    }
     if(!rolePages["Executive Officer"].includes(target)&&target!=="executive-search")return toast("This Executive page is not available.");
     state.executiveWorkspace=null;state.page=target;state.execQuickOpen=false;
     render();window.scrollTo(0,0);

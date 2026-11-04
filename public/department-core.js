@@ -37,16 +37,16 @@
     },
     Auditor: {
       key:"audit", title:"Audit Department", dashboardTitle:"",
-      pages:["dashboard","messages","audit-plans","audits","audit-findings","audit-investigations","audit-recommendations",
+      pages:["dashboard","departments","messages","audit-plans","audits","audit-findings","audit-investigations","audit-recommendations",
         "audit-compliance","audit-risk","audit-fraud","audit-reports","audit-analytics","audit-documents",
         "audit-calendar","audit-notifications","settings","audit-search"],
-      sidebarPages:["dashboard","messages","audit-plans","audits","audit-findings","audit-investigations","audit-recommendations","audit-reports","audit-documents","audit-notifications","settings"],
-      labels:{dashboard:"Dashboard",messages:"Messages","audit-plans":"Audit Plans",audits:"Audits","audit-findings":"Audit Findings",
+      sidebarPages:["dashboard","departments","messages","audit-plans","audits","audit-findings","audit-investigations","audit-recommendations","audit-reports","audit-documents","audit-notifications","settings"],
+      labels:{dashboard:"Dashboard",departments:"Departments",messages:"Messages","audit-plans":"Audit Plans",audits:"Audits","audit-findings":"Audit Findings",
         "audit-investigations":"Investigations","audit-recommendations":"Recommendations",
         "audit-compliance":"Compliance Monitoring","audit-risk":"Risk Management","audit-fraud":"Fraud Detection",
         "audit-reports":"Reports","audit-analytics":"Analytics","audit-documents":"Documents","audit-calendar":"Calendar",
         "audit-notifications":"Notifications",settings:"Settings"},
-      icons:{"audit-plans":"clock",audits:"audit","audit-findings":"file","audit-investigations":"search",
+      icons:{departments:"building","audit-plans":"clock",audits:"audit","audit-findings":"file","audit-investigations":"search",
         "audit-recommendations":"approvals","audit-compliance":"shield","audit-risk":"reports","audit-fraud":"bell",
         "audit-reports":"reports","audit-analytics":"reports","audit-documents":"file","audit-calendar":"clock",
         "audit-notifications":"bell"}
@@ -103,6 +103,7 @@
     if(state.executiveWorkspace==="legal") return configs["Legal Officer"];
     if(state.executiveWorkspace==="audit") return configs.Auditor;
     if(state.executiveWorkspace==="supervisory") return configs["Supervisory Officer"];
+    if(state.executiveWorkspace) return null;
     return configs[state.role];
   }
   async function reload(message=""){const cfg=effectiveConfig();if(!cfg)return;state[cfg.key==="audit"?"auditCenter":cfg.key]=await api(`/api/${cfg.key}/command-center`);render();if(message)toast(message);}
@@ -127,7 +128,7 @@
     const badgePage=cfg.key==="audit"?"audit-findings":cfg.key==="legal"?"legal-calendar":"welfare-emergencies";
     return `<aside class="sidebar executive-sidebar ${cfg.key}-sidebar" id="sidebar"><div class="executive-brand"><div class="executive-crest ${cfg.key}-crest">${icons[cfg.key==="welfare"?"users":cfg.key==="legal"?"file":"audit"]}</div><div><strong>KASANGATI G40<br>KWAGALANA</strong><span>${cfg.title.toUpperCase()}</span></div></div>
       <nav class="nav executive-nav">${(cfg.sidebarPages||cfg.pages).filter(x=>!x.endsWith("-search")&&cfg.pages.includes(x)).map(page=>`<button class="nav-item ${state.page===page?"active":""}" data-page="${page}">${icons[cfg.icons[page]||page]||icons.dashboard}<span>${cfg.labels[page]}</span>${page==="messages"?messagesNavBadge():page===badgePage&&badgeValue?`<span class="nav-alert-dot" aria-hidden="true"></span>`:""}</button>`).join("")}</nav>
-      <div class="sidebar-bottom">${state.executiveWorkspace?`<button class="executive-quick" data-executive-workspace-exit>${icons.arrowUp}<span>Back to Executive</span></button>`:`<button class="executive-quick" data-dept-quick="${cfg.key}">${icons.arrowUp}<span>Quick Actions</span><b>^</b></button>`}<div class="sidebar-user"><div class="avatar blue">${profileImage(state.user.id,actor(),state.user.has_profile_photo)}</div><div><div class="user-name">${esc(actor())}</div><div class="user-role">${state.executiveWorkspace?"Executive read-only view":cfg.title}</div></div></div></div></aside>`;
+      <div class="sidebar-bottom">${state.executiveWorkspace?`<button class="executive-quick" data-executive-workspace-exit>${icons.arrowUp}<span>${typeof oversightExitLabel==="function"?oversightExitLabel():"Back to Executive"}</span></button>`:`<button class="executive-quick" data-dept-quick="${cfg.key}">${icons.arrowUp}<span>Quick Actions</span><b>^</b></button>`}<div class="sidebar-user"><div class="avatar blue">${profileImage(state.user.id,actor(),state.user.has_profile_photo)}</div><div><div class="user-name">${esc(actor())}</div><div class="user-role">${state.executiveWorkspace?`${typeof oversightHomeName==="function"?oversightHomeName():"Executive"} read-only view`:cfg.title}</div></div></div></div></aside>`;
   }
   const baseSidebar=sidebar;
   sidebar=function(){const cfg=effectiveConfig();if(!cfg)return baseSidebar();return typeof injectWorkspaceSwitcher==="function"?injectWorkspaceSwitcher(deptSidebar(cfg)):deptSidebar(cfg);};
@@ -153,5 +154,5 @@
     clone.addEventListener("input",event=>{searchTerm=event.target.value;clearTimeout(timer);if(searchTerm.length<2)return;timer=setTimeout(async()=>{try{state[`${cfg.key}SearchResults`]=(await api(`/api/${cfg.key}/search?q=${encodeURIComponent(searchTerm)}`)).results;state.page=`${cfg.key}-search`;render();const next=document.getElementById("global-search");next?.focus();next?.setSelectionRange(searchTerm.length,searchTerm.length);}catch(error){toast(error.message);}},260);});
   }
   const baseBind=bind;
-  bind=function(){baseBind();const cfg=effectiveConfig();if(!cfg)return;installSearch();document.querySelectorAll("[data-dept-target]").forEach(x=>x.addEventListener("click",()=>go(x.dataset.deptTarget)));document.querySelectorAll("[data-dept-modal]").forEach(x=>x.addEventListener("click",()=>{if(state.executiveWorkspace)return toast("Executive is viewing this dashboard read-only.");ui.quick[cfg.key]?.(x.dataset.deptModal);}));document.querySelectorAll("[data-dept-report]").forEach(x=>{if(!x.parentElement.querySelector("[data-dept-report-preview]")){const preview=document.createElement("button");preview.type="button";preview.dataset.deptReportPreview=x.dataset.deptReport;preview.innerHTML=`${icons.eye}Preview`;x.before(preview);}x.addEventListener("click",()=>ui.actions[`${cfg.key}Report`]?.(x.dataset.deptReport));});document.querySelectorAll("[data-dept-report-preview]").forEach(x=>x.addEventListener("click",()=>openOperationalReportPreview(cfg.key,x.dataset.deptReportPreview)));document.querySelectorAll("[data-dept-quick]").forEach(x=>x.addEventListener("click",()=>{if(state.executiveWorkspace)return toast("Executive is viewing this dashboard read-only.");ui.quick[cfg.key]?.("menu");}));ui.binders.forEach(fn=>fn(cfg));};
+  bind=function(){baseBind();const cfg=effectiveConfig();if(!cfg)return;installSearch();document.querySelectorAll("[data-dept-target]").forEach(x=>x.addEventListener("click",()=>go(x.dataset.deptTarget)));document.querySelectorAll("[data-dept-modal]").forEach(x=>x.addEventListener("click",()=>{if(state.executiveWorkspace)return toast(`${typeof oversightHomeName==="function"?oversightHomeName():"Executive"} is viewing this dashboard read-only.`);ui.quick[cfg.key]?.(x.dataset.deptModal);}));document.querySelectorAll("[data-dept-report]").forEach(x=>{if(!x.parentElement.querySelector("[data-dept-report-preview]")){const preview=document.createElement("button");preview.type="button";preview.dataset.deptReportPreview=x.dataset.deptReport;preview.innerHTML=`${icons.eye}Preview`;x.before(preview);}x.addEventListener("click",()=>ui.actions[`${cfg.key}Report`]?.(x.dataset.deptReport));});document.querySelectorAll("[data-dept-report-preview]").forEach(x=>x.addEventListener("click",()=>openOperationalReportPreview(cfg.key,x.dataset.deptReportPreview)));document.querySelectorAll("[data-dept-quick]").forEach(x=>x.addEventListener("click",()=>{if(state.executiveWorkspace)return toast(`${typeof oversightHomeName==="function"?oversightHomeName():"Executive"} is viewing this dashboard read-only.`);ui.quick[cfg.key]?.("menu");}));ui.binders.forEach(fn=>fn(cfg));};
 })();

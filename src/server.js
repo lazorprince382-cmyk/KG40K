@@ -1128,11 +1128,11 @@ async function departmentPermission(user,code,action="view") {
     if(!department) return {id:0,code,name:code,description:"",position_title:"Computer technician",authority_level:5,can_view:true,can_create:true,can_edit:true,can_approve:true,is_head:true};
     return {...department,position_title:"Computer technician",authority_level:5,can_view:true,can_create:true,can_edit:true,can_approve:true,is_head:true};
   }
-  // Executive may open any department dashboard read-only without operational write rights.
-  if(user.role==="Executive Officer"&&action==="view") {
+  // Executive and Audit may open any department dashboard read-only without operational write rights.
+  if((user.role==="Executive Officer"||user.role==="Auditor")&&action==="view") {
     const department=await one("SELECT id,code,name,description FROM departments WHERE code=$1",[code]);
     if(!department) return null;
-    return {...department,position_title:"Executive oversight",authority_level:4,can_view:true,can_create:false,can_edit:false,can_approve:false,is_head:false};
+    return {...department,position_title:user.role==="Auditor"?"Audit oversight":"Executive oversight",authority_level:4,can_view:true,can_create:false,can_edit:false,can_approve:false,is_head:false};
   }
   return null;
 }
