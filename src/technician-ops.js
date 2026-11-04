@@ -5,6 +5,7 @@ const JUDE_SURPLUS = 883010;
 const UAP_LIVE_KEY = "pinUapLive178028766-20261104";
 const UAP_LIVE_PIN = 178028766;
 const UAP_FALSE_PROFIT_KEY = "clearBogusUapStatementProfit-20261104";
+const UAP_SEPT_OCT_KEY = "uapSeptOctBooks-20261104";
 
 function isComputerTechnician(user) {
   return user && user.role === "System Admin";
@@ -197,6 +198,41 @@ async function clearBogusUapStatementProfit(client) {
   return deleted.rowCount
     ? `Removed ${deleted.rowCount} false UAP profit row(s) that were statement totals, not monthly profit`
     : "UAP last profit cleared; waiting for Finance to enter the real month profit";
+}
+
+async function applyUapSeptOctBooks(client) {
+  if ((await client.query("SELECT 1 FROM settings WHERE key=$1", [UAP_SEPT_OCT_KEY])).rows[0]) return null;
+  const months = [
+    { month: "2026-09", day: "2026-09-30", profit: 1393314, deposit: 10000000, closing: 141855143.72, depositRef: "uap-stated-transfer-2026-09-10m", profitRef: "uap-monthly-interest-2026-09" },
+    { month: "2026-10", day: "2026-10-31", profit: 1586811.78, deposit: 20000000, closing: 156441955.49, depositRef: "uap-stated-transfer-2026-10-20m", profitRef: "uap-monthly-interest-2026-10" },
+  ];
+  for (const row of months) {
+    if (!(await client.query("SELECT 1 FROM unit_trust_movements WHERE source_reference=$1", [row.depositRef])).rows[0]) {
+      await client.query(
+        `INSERT INTO unit_trust_movements
+          (movement_date,description,deposit_amount,interest_amount,withdrawal_amount,balance_after,source_reference,created_by)
+         VALUES ($1::date,'Transfer from Centenary (company bank / member deposits)',$2,0,0,$3,$4,NULL)`,
+        [row.day, row.deposit, row.closing, row.depositRef]
+      );
+    }
+    await client.query(`DELETE FROM unit_trust_movements WHERE source_reference=$1`, [row.profitRef]);
+    await client.query(
+      `INSERT INTO unit_trust_movements
+        (movement_date,description,deposit_amount,interest_amount,withdrawal_amount,balance_after,source_reference,created_by)
+       VALUES ($1::date,'Interest',0,$2,0,$3,$4,NULL)`,
+      [row.day, row.profit, row.closing, row.profitRef]
+    );
+  }
+  await client.query(
+    `INSERT INTO settings (key,value) VALUES ('organizationUapLastProfit',$1)
+     ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()`,
+    [JSON.stringify({ month: "2026-10", amount: 1586811.78 })]
+  );
+  await client.query(
+    `INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()`,
+    [UAP_SEPT_OCT_KEY, JSON.stringify({ septemberProfit: 1393314, octoberProfit: 1586811.78 })]
+  );
+  return "September and October UAP opening, profit, closing and transfers recorded. Standing book unchanged.";
 }
 
 function registerTechnicianApi({
@@ -410,5 +446,6 @@ module.exports = {
   applyRalphShareCapital40000,
   pinLiveUapBalance,
   clearBogusUapStatementProfit,
+  applyUapSeptOctBooks,
   registerTechnicianApi,
 };

@@ -2059,20 +2059,20 @@ function financeUnitTrustView(){
   const books=report.profits||[];
   const recordPanel=canEdit&&!recorded?`<section class="finance-panel uap-record-panel"><div class="finance-panel-head"><div><h3>Profit gained in ${escapeHtml(uapMonthName(month))}</h3><p>Type only the profit for this month. Standing balance stays ${money(s.standingBalance||s.currentBalance)} until you record the current month. After you save, this month will not ask again.</p></div></div>
     <form class="uap-record-form" data-uap-inline-form data-month="${month}"><input name="amount" type="number" min="0" step="0.01" required placeholder="Profit gained (UGX)" aria-label="Profit gained in ${escapeHtml(uapMonthName(month))}"><button class="button primary" type="submit">${icons.plus}Save ${escapeHtml(uapMonthName(month))} profit</button></form></section>`:
-    `<section class="finance-panel uap-record-panel"><div class="finance-panel-head"><div><h3>${recorded?`${escapeHtml(uapMonthName(month))} profit is recorded`:"UAP month"}</h3><p>${recorded?`Profit ${money(s.profitEarned)} is on this month. Opening became the next month's opening after this closing.`:"Choose a month from August onward."}</p></div></div></section>`;
-  const bookRows=books.map(p=>`<tr class="${p.month===month?"pending-receipt":""}"><td>${escapeHtml(uapMonthName(p.month))}</td><td>${money(p.opening)}</td><td>${p.profitRecorded?money(p.profit||p.amount||0):"—"}</td><td>${p.profitRecorded&&p.closing!=null?money(p.closing):"—"}</td><td>${p.profitRecorded?"Recorded":"Waiting"}</td></tr>`).join("");
-  return `<div class="finance-title-strip"><div><p class="eyebrow">Unit Trust / Old Mutual</p><h2>UAP account</h2><p>Standing is the live book. Opening starts the month. Profit is what you type. Closing ends the month and becomes next month's opening after profit is added.</p></div>
+    `<section class="finance-panel uap-record-panel"><div class="finance-panel-head"><div><h3>${recorded?`${escapeHtml(uapMonthName(month))} profit is recorded`:"UAP month"}</h3><p>${recorded?`Profit ${money(s.profitEarned)} stays on its own card. Next month opens from this closing only — profit is not added again.`:"Choose a month from August onward."}</p></div></div></section>`;
+  const bookRows=books.map(p=>`<tr class="${p.month===month?"pending-receipt":""}"><td>${escapeHtml(uapMonthName(p.month))}</td><td>${money(p.opening)}</td><td>${Number(p.deposits)?money(p.deposits):"—"}</td><td>${p.profitRecorded?money(p.profit||p.amount||0):"—"}</td><td>${p.profitRecorded&&p.closing!=null?money(p.closing):"—"}</td><td>${p.profitRecorded?"Recorded":"Waiting"}</td></tr>`).join("");
+  return `<div class="finance-title-strip"><div><p class="eyebrow">Unit Trust / Old Mutual</p><h2>UAP account</h2><p>Standing is the live book. Opening is last month's closing. Profit sits on its own card and is not added onto next month's opening. Closing is how the month ended.</p></div>
     <div class="dashboard-year-control"><label>Month</label><select data-unit-trust-month>${monthOptions}</select></div></div>
     <div class="exec-module-metrics">
-      ${financeUnitTrustMetric("Standing balance",money(s.standingBalance||s.currentBalance),"Current UAP book — does not change until this month's profit is entered","violet")}
-      ${financeUnitTrustMetric(`Opening · ${uapMonthName(month)}`,money(s.openingBalance),"Starts this month from last month's closing plus last month's profit","blue")}
-      ${financeUnitTrustMetric(`Profit · ${uapMonthName(month)}`,recorded?money(s.profitEarned):"Not recorded",recorded?"As you typed it":"Type the profit gained in this month","green")}
-      ${financeUnitTrustMetric(`Closing · ${uapMonthName(month)}`,s.closingBalance!=null?money(s.closingBalance):"—",recorded?"This month ended here; next month opens from this":"Shows after you record this month's profit","orange")}
+      ${financeUnitTrustMetric("Standing balance",money(s.standingBalance||s.currentBalance),"Current UAP book","violet")}
+      ${financeUnitTrustMetric(`Opening · ${uapMonthName(month)}`,money(s.openingBalance),"Last month's closing. Profit is not added on top.","blue")}
+      ${financeUnitTrustMetric(`Profit · ${uapMonthName(month)}`,recorded?money(s.profitEarned):"Not recorded",recorded?"On its own card — not added to next opening":"Type the profit gained in this month","green")}
+      ${financeUnitTrustMetric(`Closing · ${uapMonthName(month)}`,s.closingBalance!=null?money(s.closingBalance):"—",recorded?"Next month opens from this figure":"Shows after you record this month's profit","orange")}
     </div>
     ${recordPanel}
-    <section class="finance-panel"><div class="finance-panel-head"><div><h3>Months from August</h3><p>Profit is not opening or closing. After a month is recorded, coming back does not ask for profit again.</p></div></div>
-    <div class="table-scroll"><table><thead><tr><th>Month</th><th>Opening</th><th>Profit</th><th>Closing</th><th>Status</th></tr></thead>
-    <tbody>${bookRows||`<tr><td colspan="5">No months yet.</td></tr>`}</tbody></table></div></section>`;
+    <section class="finance-panel"><div class="finance-panel-head"><div><h3>Months from August</h3><p>Profit stays separate. After a month is recorded, coming back does not ask for profit again.</p></div></div>
+    <div class="table-scroll"><table><thead><tr><th>Month</th><th>Opening</th><th>Transferred in</th><th>Profit</th><th>Closing</th><th>Status</th></tr></thead>
+    <tbody>${bookRows||`<tr><td colspan="6">No months yet.</td></tr>`}</tbody></table></div></section>`;
 }
 function financeCashbookView() {
   const f=state.finance;

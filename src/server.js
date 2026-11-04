@@ -26,7 +26,7 @@ const { loadWelfareStanding, loadWelfareMonth, enforceOneMonthlyWelfareCharge } 
 const { chargeWelfareFromCoveredSavings, catchUpWelfareFromSavings, loadMemberSchedule, loadScheduleSettings, buildSchedule, monthIndex, monthKey, monthLabel } = require("./savings-schedule");
 const { buildStandingPdf } = require("./standing-reports");
 const { isHostingFeeCategory, loadHostingFeeStanding, paymentCycleId, startHostingCycleForMeeting, recordBanumbaOctober30Meeting } = require("./hosting-fees");
-const { isComputerTechnician, applyJudeOctoberSurplusToShares, applyRalphShareCapital40000, pinLiveUapBalance, clearBogusUapStatementProfit, registerTechnicianApi } = require("./technician-ops");
+const { isComputerTechnician, applyJudeOctoberSurplusToShares, applyRalphShareCapital40000, pinLiveUapBalance, clearBogusUapStatementProfit, applyUapSeptOctBooks, registerTechnicianApi } = require("./technician-ops");
 const { isWordUpload, convertWordUploadToPdf, convertPlainTextToPdf } = require("./services/office-pdf");
 
 function mimeFromFilename(name="",fallback="application/octet-stream"){
@@ -7055,6 +7055,10 @@ app.patch("/api/settings/:key",auth,permit("system:manage"),asyncRoute(async(req
 const UAP_MONTHLY_INTEREST_FROM="2026-10-01";
 const UAP_FIRST_ENTRY_MONTH="2026-08";
 const UAP_BOOK_START_MONTH="2026-08";
+const UAP_PINNED_MONTH_BOOKS={
+  "2026-09":{opening:130461829.36,profit:1393314,closing:141855143.72,deposits:10000000,withdrawals:0},
+  "2026-10":{opening:141855143.72,profit:1586811.78,closing:156441955.49,deposits:20000000,withdrawals:0}
+};
 async function recomputeUnitTrustBalances(client,fromDate){
   const anchor=(await client.query(`SELECT balance_after::float AS balance FROM unit_trust_movements
     WHERE movement_date<$1::date ORDER BY movement_date DESC,id DESC LIMIT 1`,[fromDate])).rows[0];
@@ -7147,13 +7151,20 @@ async function buildUapMonthBooks(runner,endMonth){
   let opening=await uapStatementOpening(runner);
   const books=[];
   for(let month=UAP_BOOK_START_MONTH;month<=last;month=uapWaitingMonth(month,null)){
-    const flow=nets[month]||{deposits:0,withdrawals:0};
-    const profitRecorded=Object.prototype.hasOwnProperty.call(profits,month);
-    const profit=profitRecorded?Number(profits[month]):0;
-    const closing=profitRecorded?Math.round((opening+flow.deposits-flow.withdrawals+profit)*100)/100:null;
-    books.push({month,opening,deposits:flow.deposits,withdrawals:flow.withdrawals,profit,profitRecorded,closing,
-      amount:profit});
-    opening=closing!=null?closing:Math.round((opening+flow.deposits-flow.withdrawals)*100)/100;
+    const pin=UAP_PINNED_MONTH_BOOKS[month];
+    if(pin){
+      books.push({month,opening:pin.opening,deposits:pin.deposits,withdrawals:pin.withdrawals,
+        profit:pin.profit,profitRecorded:true,closing:pin.closing,amount:pin.profit});
+      opening=pin.closing;
+    }else{
+      const flow=nets[month]||{deposits:0,withdrawals:0};
+      const profitRecorded=Object.prototype.hasOwnProperty.call(profits,month);
+      const profit=profitRecorded?Number(profits[month]):0;
+      const closing=profitRecorded?Math.round((opening+flow.deposits-flow.withdrawals+profit)*100)/100:null;
+      books.push({month,opening,deposits:flow.deposits,withdrawals:flow.withdrawals,profit,profitRecorded,closing,
+        amount:profit});
+      opening=closing!=null?closing:Math.round((opening+flow.deposits-flow.withdrawals)*100)/100;
+    }
     const next=uapWaitingMonth(month,null);
     if(!next||next===month)break;
   }
@@ -7210,6 +7221,10 @@ async function runScheduledMaintenance() {
     const uapProfit=await transaction(client=>clearBogusUapStatementProfit(client));
     if(uapProfit)console.log(`UAP profit card: ${uapProfit}`);
   }catch(error){console.error("UAP false profit clear failed:",error.message);}
+  try{
+    const uapBooks=await transaction(client=>applyUapSeptOctBooks(client));
+    if(uapBooks)console.log(`UAP Sept/Oct books: ${uapBooks}`);
+  }catch(error){console.error("UAP Sept/Oct books failed:",error.message);}
   try{
     const meeting=await transaction(client=>recordBanumbaOctober30Meeting(client));
     if(meeting)console.log(`October 30 meeting: ${meeting}`);
