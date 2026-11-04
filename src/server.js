@@ -3019,21 +3019,33 @@ app.post("/api/finance/withdraw-from-uap",auth,requireFinance("create"),asyncRou
   res.status(201).json(result);
 }));
 app.get("/api/finance/unit-trust",auth,requireFinance("view"),asyncRoute(async(req,res)=>{
+  const requested=String(req.query.month||"").trim();
   const account=await one(`SELECT id,account_code AS "accountCode",account_name AS "accountName",balance::float,
     bank_name AS "bankName",account_number AS "accountNumber" FROM finance_accounts WHERE account_code='GL-4500' AND active=true`);
   const kampala=(await one(`SELECT (CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date::text AS day`))?.day;
-  const totals=await unitTrustInterestTotals({query},kampala);
-  const profits=(await query(`SELECT to_char(date_trunc('month',movement_date),'YYYY-MM') AS month,
-      SUM(interest_amount)::float AS amount
-    FROM unit_trust_movements
-    WHERE source_reference LIKE 'uap-monthly-interest-%' AND interest_amount < 10000000
-    GROUP BY 1 ORDER BY 1 DESC`)).rows;
   const current=String(kampala||"").slice(0,7);
-  const waitingMonth=uapWaitingMonth(totals.lastInterestMonth,current);
+  const month=requested&&/^\d{4}-\d{2}$/.test(requested)&&requested>=UAP_BOOK_START_MONTH&&requested<=current?requested:current;
+  const books=await buildUapMonthBooks({query},current);
+  const book=books.find(item=>item.month===month)||books.at(-1)||{month,opening:0,profit:0,profitRecorded:false,closing:null,deposits:0,withdrawals:0};
+  const totals=await unitTrustInterestTotals({query},kampala);
   const canRecord=Boolean(await departmentPermission(req.user,"finance","create"));
   res.json({
-    account,month:null,availableMonths:profits.map(p=>p.month),movements:[],profits,canRecord,
-    summary:{...totals,currentBalance:Number(account?.balance||0),waitingMonth,viewMonth:current,accruesDaily:false,asOf:kampala}
+    account,month:book.month,availableMonths:books.map(item=>item.month),movements:[],profits:books,canRecord,
+    summary:{
+      ...totals,
+      currentBalance:Number(account?.balance||0),
+      standingBalance:Number(account?.balance||0),
+      openingBalance:book.opening,
+      profitEarned:book.profitRecorded?book.profit:0,
+      profitRecorded:book.profitRecorded,
+      closingBalance:book.closing,
+      deposits:book.deposits,
+      withdrawals:book.withdrawals,
+      waitingMonth:book.profitRecorded?null:book.month,
+      viewMonth:book.month,
+      accruesDaily:false,
+      asOf:kampala
+    }
   });
 }));
 app.get("/api/finance/unit-trust/export.csv",auth,requireFinance("view"),asyncRoute(async(req,res)=>{
@@ -3066,28 +3078,35 @@ app.post("/api/finance/unit-trust/monthly-interest",auth,requireFinance("create"
   const month=String(req.body.month||"").trim(),amount=Number(req.body.amount);
   if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(month))return res.status(400).json({error:"Choose the month the interest was earned"});
   if(!Number.isFinite(amount)||amount<0)return res.status(400).json({error:"Enter the interest earned for the month (0 or more)"});
-  if(month<UAP_FIRST_ENTRY_MONTH)return res.status(400).json({error:"Months before September 2026 come from the reconciled UAP statement"});
+  if(month<UAP_FIRST_ENTRY_MONTH)return res.status(400).json({error:"Months before August 2026 are not on this UAP book"});
   const result=await transaction(async client=>{
     const account=(await client.query(`SELECT id,balance::float AS balance FROM finance_accounts WHERE account_code='GL-4500' AND active=true LIMIT 1 FOR UPDATE`)).rows[0];
     if(!account){const error=new Error("UAP account not found");error.status=404;throw error;}
     const dates=(await client.query(`SELECT (CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date::text AS today,
       (date_trunc('month',$1::date)+INTERVAL '1 month - 1 day')::date::text AS month_end`,[`${month}-01`])).rows[0];
-    if(`${month}-01`>dates.today){const error=new Error("You cannot enter interest for a month that has not started");error.status=400;throw error;}
+    if(`${month}-01`>dates.today){const error=new Error("You cannot enter profit for a month that has not started");error.status=400;throw error;}
     const day=dates.month_end>dates.today?dates.today:dates.month_end;
+    const current=String(dates.today||"").slice(0,7);
     const replaced=(await client.query(`DELETE FROM unit_trust_movements
       WHERE source_reference=$1
       RETURNING interest_amount::float AS interest`,[`uap-monthly-interest-${month}`])).rows;
     const replacedAmount=replaced.reduce((s,r)=>s+Number(r.interest||0),0);
-    const live=Math.round((Number(account.balance)-replacedAmount+amount)*100)/100;
-    await client.query(`UPDATE finance_accounts SET balance=$1,updated_at=NOW() WHERE id=$2`,[live,account.id]);
+    let live=Number(account.balance);
+    if(month===current){
+      live=Math.round((live-replacedAmount+amount)*100)/100;
+      await client.query(`UPDATE finance_accounts SET balance=$1,updated_at=NOW() WHERE id=$2`,[live,account.id]);
+      await publishLiveUap(client,live);
+    }
+    const books=await buildUapMonthBooks(client,current);
+    const prior=books.find(item=>item.month===month);
+    const closing=Math.round((Number(prior?.opening||live)+Number(prior?.deposits||0)-Number(prior?.withdrawals||0)+amount)*100)/100;
     await client.query(`INSERT INTO unit_trust_movements
       (movement_date,description,deposit_amount,interest_amount,withdrawal_amount,rate_percent,balance_after,source_reference,created_by)
-      VALUES ($1::date,'Interest',0,$2,0,NULL,$3,$4,$5)`,[day,amount,live,`uap-monthly-interest-${month}`,req.user.id]);
+      VALUES ($1::date,'Interest',0,$2,0,NULL,$3,$4,$5)`,[day,amount,closing,`uap-monthly-interest-${month}`,req.user.id]);
     await client.query(`INSERT INTO settings (key,value) VALUES ('organizationUapLastProfit',$1)
       ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()`,
       [JSON.stringify({month,amount})]);
-    await publishLiveUap(client,live);
-    return {month,amount,day,balance:live,replacedRows:replaced.length,replacedAmount};
+    return {month,amount,day,balance:live,closing,replacedRows:replaced.length,replacedAmount};
   });
   await audit({userId:req.user.id,action:"UNIT_TRUST_MONTHLY_INTEREST",entityType:"unit_trust",entityId:month,
     details:`UGX ${amount} interest for ${month} (replaced ${result.replacedRows} rows, UGX ${result.replacedAmount})`,...metadata(req)});
@@ -3945,11 +3964,8 @@ app.get("/api/investment/projects/:id/summary",auth,requireInvestment("view"),as
   if(isUnitTrustRecord(project)){
     const account=await one(`SELECT balance::float AS balance FROM finance_accounts WHERE account_code='GL-4500' AND active=true`);
     const totals=await unitTrustInterestTotals({query},kampala);
-    const months=(await query(`SELECT to_char(date_trunc('month',movement_date),'YYYY-MM') AS month,
-        0::float AS deposits, SUM(interest_amount)::float AS interest, 0::float AS withdrawals,
-        NULL::float AS closing
-      FROM unit_trust_movements WHERE source_reference LIKE 'uap-monthly-interest-%'
-      GROUP BY 1 ORDER BY 1 DESC LIMIT 12`)).rows;
+    const books=await buildUapMonthBooks({query},String(kampala||"").slice(0,7));
+    const months=books.map(item=>({month:item.month,opening:item.opening,interest:item.profitRecorded?item.profit:0,profit:item.profitRecorded?item.profit:0,closing:item.closing,profitRecorded:item.profitRecorded}));
     return res.json({kind:"unit-trust",project,balance:Number(account?.balance||0),deposits:0,withdrawals:0,...totals,
       waitingMonth:uapWaitingMonth(totals.lastInterestMonth,String(kampala||"").slice(0,7)),months});
   }
@@ -7037,7 +7053,8 @@ app.patch("/api/settings/:key",auth,permit("system:manage"),asyncRoute(async(req
 }));
 
 const UAP_MONTHLY_INTEREST_FROM="2026-10-01";
-const UAP_FIRST_ENTRY_MONTH="2026-09";
+const UAP_FIRST_ENTRY_MONTH="2026-08";
+const UAP_BOOK_START_MONTH="2026-08";
 async function recomputeUnitTrustBalances(client,fromDate){
   const anchor=(await client.query(`SELECT balance_after::float AS balance FROM unit_trust_movements
     WHERE movement_date<$1::date ORDER BY movement_date DESC,id DESC LIMIT 1`,[fromDate])).rows[0];
@@ -7088,13 +7105,66 @@ function uapWaitingMonth(lastInterestMonth,currentMonth){
   if(!y||!m)return currentMonth||null;
   return m===12?`${y+1}-01`:`${y}-${String(m+1).padStart(2,"0")}`;
 }
+async function loadUapTypedProfitMap(runner){
+  const rows=(await runner.query(`SELECT regexp_replace(source_reference,'^uap-monthly-interest-','') AS month,
+      interest_amount::float AS amount
+    FROM unit_trust_movements WHERE source_reference LIKE 'uap-monthly-interest-%'`)).rows;
+  const map={};
+  for(const row of rows){
+    const amount=Number(row.amount||0);
+    if(!row.month||!/^\d{4}-\d{2}$/.test(row.month)||!Number.isFinite(amount)||amount>=10000000)continue;
+    map[row.month]=amount;
+  }
+  return map;
+}
+async function uapStatementOpening(runner){
+  const row=(await runner.query(`SELECT balance_after::float AS balance FROM unit_trust_movements
+    WHERE description='Opening Balance' ORDER BY movement_date,id LIMIT 1`)).rows[0];
+  return Number(row?.balance||0);
+}
+async function loadUapMonthNets(runner,endMonth){
+  const rows=(await runner.query(`SELECT to_char(date_trunc('month',movement_date),'YYYY-MM') AS month,
+      COALESCE(SUM(deposit_amount) FILTER (
+        WHERE description NOT IN ('Opening Balance','Interest','Live UAP book as given by Finance','UAP live book adjustment')
+          AND COALESCE(source_reference,'') NOT LIKE 'uap-monthly-interest-%'
+          AND COALESCE(source_reference,'') NOT LIKE 'pinUapLive%'
+          AND COALESCE(source_reference,'') NOT LIKE 'uap-book-edit-%'
+      ),0)::float AS deposits,
+      COALESCE(SUM(withdrawal_amount) FILTER (
+        WHERE description NOT IN ('Live UAP book as given by Finance','UAP live book adjustment')
+          AND COALESCE(source_reference,'') NOT LIKE 'pinUapLive%'
+          AND COALESCE(source_reference,'') NOT LIKE 'uap-book-edit-%'
+      ),0)::float AS withdrawals
+    FROM unit_trust_movements
+    WHERE movement_date>=$1::date AND movement_date<($2::date+INTERVAL '1 month')
+    GROUP BY 1`,[`${UAP_BOOK_START_MONTH}-01`,`${endMonth}-01`])).rows;
+  return Object.fromEntries(rows.map(r=>[r.month,{deposits:Number(r.deposits||0),withdrawals:Number(r.withdrawals||0)}]));
+}
+async function buildUapMonthBooks(runner,endMonth){
+  const last=endMonth&&endMonth>=UAP_BOOK_START_MONTH?endMonth:UAP_BOOK_START_MONTH;
+  const profits=await loadUapTypedProfitMap(runner);
+  const nets=await loadUapMonthNets(runner,last);
+  let opening=await uapStatementOpening(runner);
+  const books=[];
+  for(let month=UAP_BOOK_START_MONTH;month<=last;month=uapWaitingMonth(month,null)){
+    const flow=nets[month]||{deposits:0,withdrawals:0};
+    const profitRecorded=Object.prototype.hasOwnProperty.call(profits,month);
+    const profit=profitRecorded?Number(profits[month]):0;
+    const closing=profitRecorded?Math.round((opening+flow.deposits-flow.withdrawals+profit)*100)/100:null;
+    books.push({month,opening,deposits:flow.deposits,withdrawals:flow.withdrawals,profit,profitRecorded,closing,
+      amount:profit});
+    opening=closing!=null?closing:Math.round((opening+flow.deposits-flow.withdrawals)*100)/100;
+    const next=uapWaitingMonth(month,null);
+    if(!next||next===month)break;
+  }
+  return books;
+}
 async function unitTrustInterestTotals(runner,asOf){
-  const saved=(await runner.query(`SELECT value FROM settings WHERE key='organizationUapLastProfit'`)).rows[0];
-  let last=null;
-  try{last=saved?.value?JSON.parse(saved.value):null;}catch{last=null;}
-  const month=last?.month&&/^\d{4}-\d{2}$/.test(String(last.month))?String(last.month):null;
-  const amount=Number(last?.amount||0);
-  if(!month||!Number.isFinite(amount)||amount<=0)return {lastInterestMonth:null,lastInterestAmount:0,totalInterest:0};
+  const profits=await loadUapTypedProfitMap(runner);
+  const months=Object.keys(profits).sort();
+  const month=months.at(-1)||null;
+  const amount=month?Number(profits[month]||0):0;
+  if(!month||amount<=0)return {lastInterestMonth:null,lastInterestAmount:0,totalInterest:0};
   if(asOf&&`${month}-01`>String(asOf).slice(0,10))return {lastInterestMonth:null,lastInterestAmount:0,totalInterest:0};
   return {lastInterestMonth:month,lastInterestAmount:amount,totalInterest:0};
 }
