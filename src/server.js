@@ -3019,54 +3019,21 @@ app.post("/api/finance/withdraw-from-uap",auth,requireFinance("create"),asyncRou
   res.status(201).json(result);
 }));
 app.get("/api/finance/unit-trust",auth,requireFinance("view"),asyncRoute(async(req,res)=>{
-  const month=String(req.query.month||"").trim();
-  const monthStart=month&&/^\d{4}-\d{2}$/.test(month)?`${month}-01`:null;
   const account=await one(`SELECT id,account_code AS "accountCode",account_name AS "accountName",balance::float,
     bank_name AS "bankName",account_number AS "accountNumber" FROM finance_accounts WHERE account_code='GL-4500' AND active=true`);
-  const movements=monthStart
-    ?(await query(`SELECT id,movement_date::text AS "date",description,deposit_amount::float AS deposit,
-        interest_amount::float AS interest,withdrawal_amount::float AS withdrawal,rate_percent::float AS rate,
-        balance_after::float AS balance,source_reference AS "sourceReference"
-        FROM unit_trust_movements
-        WHERE movement_date>=$1::date AND movement_date<($1::date+INTERVAL '1 month')
-        ORDER BY movement_date,id`,[monthStart])).rows
-    :(await query(`SELECT id,movement_date::text AS "date",description,deposit_amount::float AS deposit,
-        interest_amount::float AS interest,withdrawal_amount::float AS withdrawal,rate_percent::float AS rate,
-        balance_after::float AS balance,source_reference AS "sourceReference"
-        FROM unit_trust_movements ORDER BY movement_date DESC,id DESC LIMIT 120`)).rows;
-  const ordered=monthStart?movements:[...movements].reverse();
-  let opening=Number(account?.balance||0);
-  if(monthStart){
-    const prior=await one(`SELECT balance_after::float AS balance FROM unit_trust_movements
-      WHERE movement_date<$1::date ORDER BY movement_date DESC,id DESC LIMIT 1`,[monthStart]);
-    if(prior)opening=Number(prior.balance);
-    else if(ordered[0]?.description==="Opening Balance")opening=Number(ordered[0].balance);
-    else if(ordered[0])opening=Number(ordered[0].balance)-Number(ordered[0].deposit||0)-Number(ordered[0].interest||0)+Number(ordered[0].withdrawal||0);
-  }else if(ordered[0]?.description==="Opening Balance")opening=Number(ordered[0].balance);
-  else if(ordered[0])opening=Number(ordered[0].balance)-Number(ordered[0].deposit||0)-Number(ordered[0].interest||0)+Number(ordered[0].withdrawal||0);
-  const closing=ordered.length?Number(ordered[ordered.length-1].balance):Number(account?.balance||opening);
-  const interest=ordered.reduce((s,r)=>s+Number(r.interest||0),0);
-  const deposits=ordered.reduce((s,r)=>s+Number(r.deposit||0),0);
-  const withdrawals=ordered.reduce((s,r)=>s+Number(r.withdrawal||0),0);
   const kampala=(await one(`SELECT (CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date::text AS day`))?.day;
-  const viewMonth=monthStart?month:String(kampala||"").slice(0,7);
-  const arrived=ordered.filter(row=>!kampala||String(row.date).slice(0,10)<=kampala);
-  const liveBalance=arrived.length?Number(arrived.at(-1).balance):closing;
-  const monthInterest=monthStart&&arrived.length
-    ?Math.round((liveBalance-opening-deposits+withdrawals)*100)/100
-    :(await unitTrustMonthInterest({query},viewMonth));
   const totals=await unitTrustInterestTotals({query},kampala);
-  const months=(await query(`SELECT to_char(date_trunc('month',movement_date),'YYYY-MM') AS month
-    FROM unit_trust_movements WHERE movement_date<=$1::date
-    GROUP BY 1 ORDER BY 1 DESC`,[kampala])).rows.map(r=>r.month);
+  const profits=(await query(`SELECT to_char(date_trunc('month',movement_date),'YYYY-MM') AS month,
+      SUM(interest_amount)::float AS amount
+    FROM unit_trust_movements
+    WHERE source_reference LIKE 'uap-monthly-interest-%'
+    GROUP BY 1 ORDER BY 1 DESC`)).rows;
+  const current=String(kampala||"").slice(0,7);
+  const waitingMonth=uapWaitingMonth(totals.lastInterestMonth,current);
   const canRecord=Boolean(await departmentPermission(req.user,"finance","create"));
   res.json({
-    account,month:monthStart?month:null,availableMonths:months,movements:arrived,canRecord,
-    summary:{openingBalance:opening,closingBalance:liveBalance,interestEarned:monthStart?monthInterest:interest,deposits,withdrawals,
-      profitThisMonth:monthInterest,projectedProfit:0,profitByMonthEnd:monthInterest,projectedClosing:liveBalance,
-      ...totals,viewMonth,
-      balanceIfNoWithdrawal:closing+withdrawals,currentBalance:Number(account?.balance||closing),
-      accruesDaily:false,asOf:kampala}
+    account,month:null,availableMonths:profits.map(p=>p.month),movements:[],profits,canRecord,
+    summary:{...totals,currentBalance:Number(account?.balance||0),waitingMonth,viewMonth:current,accruesDaily:false,asOf:kampala}
   });
 }));
 app.get("/api/finance/unit-trust/export.csv",auth,requireFinance("view"),asyncRoute(async(req,res)=>{
@@ -3976,14 +3943,13 @@ app.get("/api/investment/projects/:id/summary",auth,requireInvestment("view"),as
   if(isUnitTrustRecord(project)){
     const account=await one(`SELECT balance::float AS balance FROM finance_accounts WHERE account_code='GL-4500' AND active=true`);
     const totals=await unitTrustInterestTotals({query},kampala);
-    const flows=await one(`SELECT COALESCE(SUM(deposit_amount),0)::float AS deposits,COALESCE(SUM(withdrawal_amount),0)::float AS withdrawals
-      FROM unit_trust_movements WHERE movement_date<=$1::date AND description<>'Opening Balance'`,[kampala]);
     const months=(await query(`SELECT to_char(date_trunc('month',movement_date),'YYYY-MM') AS month,
-        COALESCE(SUM(deposit_amount) FILTER (WHERE description<>'Opening Balance'),0)::float AS deposits,
-        COALESCE(SUM(interest_amount),0)::float AS interest,COALESCE(SUM(withdrawal_amount),0)::float AS withdrawals,
-        (ARRAY_AGG(balance_after ORDER BY movement_date DESC,id DESC))[1]::float AS closing
-      FROM unit_trust_movements WHERE movement_date<=$1::date GROUP BY 1 ORDER BY 1 DESC LIMIT 6`,[kampala])).rows;
-    return res.json({kind:"unit-trust",project,balance:Number(account?.balance||0),deposits:flows.deposits,withdrawals:flows.withdrawals,...totals,months});
+        0::float AS deposits, SUM(interest_amount)::float AS interest, 0::float AS withdrawals,
+        NULL::float AS closing
+      FROM unit_trust_movements WHERE source_reference LIKE 'uap-monthly-interest-%'
+      GROUP BY 1 ORDER BY 1 DESC LIMIT 12`)).rows;
+    return res.json({kind:"unit-trust",project,balance:Number(account?.balance||0),deposits:0,withdrawals:0,...totals,
+      waitingMonth:uapWaitingMonth(totals.lastInterestMonth,String(kampala||"").slice(0,7)),months});
   }
   const months=(await query(`SELECT to_char(date_trunc('month',transaction_date),'YYYY-MM') AS month,
       COALESCE(SUM(amount) FILTER (WHERE transaction_type='revenue'),0)::float AS revenue,
@@ -7114,13 +7080,19 @@ async function unitTrustMonthInterest(runner,month){
   if(row?.closing==null||row?.opening==null)return Number(row?.summed||0);
   return Math.round((Number(row.closing)-Number(row.opening)-Number(row.net||0))*100)/100;
 }
+function uapWaitingMonth(lastInterestMonth,currentMonth){
+  if(!lastInterestMonth)return currentMonth||null;
+  const [y,m]=String(lastInterestMonth).split("-").map(Number);
+  if(!y||!m)return currentMonth||null;
+  return m===12?`${y+1}-01`:`${y}-${String(m+1).padStart(2,"0")}`;
+}
 async function unitTrustInterestTotals(runner,asOf){
-  const last=(await runner.query(`SELECT to_char(movement_date,'YYYY-MM') AS month
-    FROM unit_trust_movements WHERE description='Interest' AND movement_date<=$1::date
-    GROUP BY 1 HAVING SUM(interest_amount)>0 ORDER BY 1 DESC LIMIT 1`,[asOf])).rows[0];
-  const total=(await runner.query(`SELECT COALESCE(SUM(interest_amount),0)::float AS total FROM unit_trust_movements WHERE movement_date<=$1::date`,[asOf])).rows[0];
-  const lastInterestAmount=last?.month?await unitTrustMonthInterest(runner,last.month):0;
-  return {lastInterestMonth:last?.month||null,lastInterestAmount,totalInterest:Number(total?.total||0)};
+  const last=(await runner.query(`SELECT to_char(date_trunc('month',movement_date),'YYYY-MM') AS month,
+      SUM(interest_amount)::float AS amount
+    FROM unit_trust_movements
+    WHERE source_reference LIKE 'uap-monthly-interest-%' AND ($1::date IS NULL OR movement_date<=$1::date)
+    GROUP BY 1 HAVING SUM(interest_amount)>0 ORDER BY 1 DESC LIMIT 1`,[asOf||null])).rows[0];
+  return {lastInterestMonth:last?.month||null,lastInterestAmount:Number(last?.amount||0),totalInterest:0};
 }
 function isUnitTrustRecord(project){
   return /unit trust|old mutual|\buap\b|INV-FUND-OM/i.test(`${project?.reference||""} ${project?.name||""} ${project?.category||""}`);
@@ -7129,22 +7101,12 @@ async function liveUnitTrustPosition(){
   const account=await one(`SELECT balance::float AS balance FROM finance_accounts WHERE account_code='GL-4500' AND active=true`);
   const kampala=(await one(`SELECT (CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date::text AS day`))?.day||"";
   const month=kampala.slice(0,7);
-  const monthStart=month?`${month}-01`:null;
-  const monthRows=monthStart?(await query(`SELECT movement_date::text AS date, interest_amount::float AS interest,
-      balance_after::float AS balance, rate_percent::float AS rate
-      FROM unit_trust_movements
-      WHERE movement_date>=$1::date AND movement_date<($1::date+INTERVAL '1 month')
-      ORDER BY movement_date,id`,[monthStart])).rows:[];
-  const posted=monthRows.filter(row=>String(row.date).slice(0,10)<=kampala);
-  const monthInterest=posted.reduce((sum,row)=>sum+Number(row.interest||0),0);
-  const last=posted.at(-1)||await one(`SELECT movement_date::text AS date, balance_after::float AS balance, rate_percent::float AS rate
-    FROM unit_trust_movements WHERE movement_date<=$1::date ORDER BY movement_date DESC,id DESC LIMIT 1`,[kampala||"2026-09-14"]);
+  const totals=await unitTrustInterestTotals({query},kampala||null);
   const balance=Number(account?.balance||0);
-  const totals=await unitTrustInterestTotals({query},kampala||"2026-09-14");
-  const capital=Math.max(0,Math.round((balance-totals.totalInterest)*100)/100);
+  const recordedThisMonth=totals.lastInterestMonth===month?totals.lastInterestAmount:0;
   return {
-    balance,capital,...totals,profitThisMonth:monthInterest,projectedProfit:0,
-    profitByMonthEnd:monthInterest,projectedClosing:balance,
+    balance,capital:balance,...totals,profitThisMonth:recordedThisMonth,projectedProfit:0,
+    profitByMonthEnd:recordedThisMonth,projectedClosing:balance,waitingMonth:uapWaitingMonth(totals.lastInterestMonth,month),
     rate:null,asOf:kampala,accruesDaily:false
   };
 }
