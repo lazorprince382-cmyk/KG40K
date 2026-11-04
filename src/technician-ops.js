@@ -2,6 +2,8 @@
 
 const JUDE_SURPLUS_KEY = "judeOctoberSurplusToShares202610";
 const JUDE_SURPLUS = 883010;
+const UAP_LIVE_KEY = "pinUapLive178028766-20261104";
+const UAP_LIVE_PIN = 178028766;
 
 function isComputerTechnician(user) {
   return user && user.role === "System Admin";
@@ -133,6 +135,50 @@ async function applyRalphShareCapital40000(client) {
     [RALPH_SHARES_KEY, JSON.stringify({ memberId: member.id, added: RALPH_SHARES_ADD })]
   );
   return `${member.full_name}: UGX ${RALPH_SHARES_ADD.toLocaleString()} added to share capital (Centenary unchanged)`;
+}
+
+async function pinLiveUapBalance(client) {
+  if ((await client.query("SELECT 1 FROM settings WHERE key=$1", [UAP_LIVE_KEY])).rows[0]) return null;
+  const account = (
+    await client.query(
+      `SELECT id, balance::float AS balance FROM finance_accounts WHERE account_code='GL-4500' AND active=true LIMIT 1 FOR UPDATE`
+    )
+  ).rows[0];
+  if (!account) {
+    await client.query(
+      `INSERT INTO settings (key,value) VALUES ($1,'skipped-missing') ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()`,
+      [UAP_LIVE_KEY]
+    );
+    return "UAP account not found";
+  }
+  const previous = Number(account.balance || 0);
+  const live = UAP_LIVE_PIN;
+  const delta = Math.round((live - previous) * 100) / 100;
+  await client.query(`UPDATE finance_accounts SET balance=$1, updated_at=NOW() WHERE id=$2`, [live, account.id]);
+  await client.query(
+    `INSERT INTO settings (key,value) VALUES ('organizationUapBalance',$1)
+     ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()`,
+    [String(live)]
+  );
+  await client.query(
+    `UPDATE investment_fund_accounts SET current_value=$1, updated_at=NOW()
+     WHERE reference IN ('FUND-OLD-MUTUAL-2025','FUND-UAP-UMBRELLA')`,
+    [live]
+  );
+  if (Math.abs(delta) > 0.004) {
+    await client.query(
+      `INSERT INTO unit_trust_movements
+        (movement_date,description,deposit_amount,interest_amount,withdrawal_amount,balance_after,source_reference,created_by)
+       VALUES ((CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date,
+         'Live UAP book as given by Finance', $1, 0, $2, $3, $4, NULL)`,
+      [delta > 0 ? delta : 0, delta < 0 ? Math.abs(delta) : 0, live, UAP_LIVE_KEY]
+    );
+  }
+  await client.query(
+    `INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()`,
+    [UAP_LIVE_KEY, String(live)]
+  );
+  return `UAP live book set to UGX ${live.toLocaleString()} (was ${previous.toLocaleString()})`;
 }
 
 function registerTechnicianApi({
@@ -344,5 +390,6 @@ module.exports = {
   isComputerTechnician,
   applyJudeOctoberSurplusToShares,
   applyRalphShareCapital40000,
+  pinLiveUapBalance,
   registerTechnicianApi,
 };

@@ -26,7 +26,7 @@ const { loadWelfareStanding, loadWelfareMonth, enforceOneMonthlyWelfareCharge } 
 const { chargeWelfareFromCoveredSavings, catchUpWelfareFromSavings, loadMemberSchedule, loadScheduleSettings, buildSchedule, monthIndex, monthKey, monthLabel } = require("./savings-schedule");
 const { buildStandingPdf } = require("./standing-reports");
 const { isHostingFeeCategory, loadHostingFeeStanding, paymentCycleId, startHostingCycleForMeeting, recordBanumbaOctober30Meeting } = require("./hosting-fees");
-const { isComputerTechnician, applyJudeOctoberSurplusToShares, applyRalphShareCapital40000, registerTechnicianApi } = require("./technician-ops");
+const { isComputerTechnician, applyJudeOctoberSurplusToShares, applyRalphShareCapital40000, pinLiveUapBalance, registerTechnicianApi } = require("./technician-ops");
 const { isWordUpload, convertWordUploadToPdf, convertPlainTextToPdf } = require("./services/office-pdf");
 
 function mimeFromFilename(name="",fallback="application/octet-stream"){
@@ -2674,6 +2674,15 @@ app.patch("/api/finance/accounts/:id",auth,requireFinance("edit"),asyncRoute(asy
         updated.accountName,Math.abs(delta),req.user.id,updated.id]);
     }
     if(updated.accountCode==="GL-4104")await syncOrganizationBankBalanceSetting(client,updated.id);
+    if(updated.accountCode==="GL-4500"){
+      await publishLiveUap(client,live);
+      if(Math.abs(delta)>0.004){
+        await client.query(`INSERT INTO unit_trust_movements
+          (movement_date,description,deposit_amount,interest_amount,withdrawal_amount,balance_after,source_reference,created_by)
+          VALUES ((CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date,'UAP live book adjustment',$1,0,$2,$3,$4,$5)`,
+          [delta>0?delta:0,delta<0?Math.abs(delta):0,live,`uap-book-edit-${updated.id}`,req.user.id]);
+      }
+    }
     return updated;
   });
   if(!row)return res.status(404).json({error:"Active finance account not found"});
@@ -3047,10 +3056,9 @@ app.get("/api/finance/unit-trust",auth,requireFinance("view"),asyncRoute(async(r
     ?Math.round((liveBalance-opening-deposits+withdrawals)*100)/100
     :(await unitTrustMonthInterest({query},viewMonth));
   const totals=await unitTrustInterestTotals({query},kampala);
-  const months=(await query(`SELECT to_char(m,'YYYY-MM') AS month FROM (
-      SELECT date_trunc('month',movement_date) AS m FROM unit_trust_movements WHERE movement_date<=$1::date
-      UNION SELECT generate_series($2::date,date_trunc('month',$1::date),INTERVAL '1 month')
-    ) x GROUP BY 1 ORDER BY 1 DESC`,[kampala,`${UAP_FIRST_ENTRY_MONTH}-01`])).rows.map(r=>r.month);
+  const months=(await query(`SELECT to_char(date_trunc('month',movement_date),'YYYY-MM') AS month
+    FROM unit_trust_movements WHERE movement_date<=$1::date
+    GROUP BY 1 ORDER BY 1 DESC`,[kampala])).rows.map(r=>r.month);
   const canRecord=Boolean(await departmentPermission(req.user,"finance","create"));
   res.json({
     account,month:monthStart?month:null,availableMonths:months,movements:arrived,canRecord,
@@ -3093,7 +3101,7 @@ app.post("/api/finance/unit-trust/monthly-interest",auth,requireFinance("create"
   if(!Number.isFinite(amount)||amount<0)return res.status(400).json({error:"Enter the interest earned for the month (0 or more)"});
   if(month<UAP_FIRST_ENTRY_MONTH)return res.status(400).json({error:"Months before September 2026 come from the reconciled UAP statement"});
   const result=await transaction(async client=>{
-    const account=(await client.query(`SELECT id FROM finance_accounts WHERE account_code='GL-4500' AND active=true LIMIT 1 FOR UPDATE`)).rows[0];
+    const account=(await client.query(`SELECT id,balance::float AS balance FROM finance_accounts WHERE account_code='GL-4500' AND active=true LIMIT 1 FOR UPDATE`)).rows[0];
     if(!account){const error=new Error("UAP account not found");error.status=404;throw error;}
     const dates=(await client.query(`SELECT (CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date::text AS today,
       (date_trunc('month',$1::date)+INTERVAL '1 month - 1 day')::date::text AS month_end`,[`${month}-01`])).rows[0];
@@ -3102,12 +3110,15 @@ app.post("/api/finance/unit-trust/monthly-interest",auth,requireFinance("create"
     const replaced=(await client.query(`DELETE FROM unit_trust_movements
       WHERE description='Interest' AND movement_date>=$1::date AND movement_date<($1::date+INTERVAL '1 month')
       RETURNING interest_amount::float AS interest`,[`${month}-01`])).rows;
+    const replacedAmount=replaced.reduce((s,r)=>s+Number(r.interest||0),0);
+    const live=Math.round((Number(account.balance)-replacedAmount+amount)*100)/100;
+    await client.query(`UPDATE finance_accounts SET balance=$1,updated_at=NOW() WHERE id=$2`,[live,account.id]);
     await client.query(`INSERT INTO unit_trust_movements
       (movement_date,description,deposit_amount,interest_amount,withdrawal_amount,rate_percent,balance_after,source_reference,created_by)
-      VALUES ($1::date,'Interest',0,$2,0,NULL,0,$3,$4)`,[day,amount,`uap-monthly-interest-${month}`,req.user.id]);
+      VALUES ($1::date,'Interest',0,$2,0,NULL,$3,$4,$5)`,[day,amount,live,`uap-monthly-interest-${month}`,req.user.id]);
     await recomputeUnitTrustBalances(client,`${month}-01`);
-    const balance=await syncUnitTrustAccount(client);
-    return {month,amount,day,balance,replacedRows:replaced.length,replacedAmount:replaced.reduce((s,r)=>s+Number(r.interest||0),0)};
+    await publishLiveUap(client,live);
+    return {month,amount,day,balance:live,replacedRows:replaced.length,replacedAmount};
   });
   await audit({userId:req.user.id,action:"UNIT_TRUST_MONTHLY_INTEREST",entityType:"unit_trust",entityId:month,
     details:`UGX ${amount} interest for ${month} (replaced ${result.replacedRows} rows, UGX ${result.replacedAmount})`,...metadata(req)});
@@ -3121,10 +3132,18 @@ app.delete("/api/finance/unit-trust/movements/:id",auth,requireFinance("edit"),a
     source_reference AS "sourceReference" FROM unit_trust_movements WHERE id=$1`,[id]);
   if(!row)return res.status(404).json({error:"Unit Trust movement not found"});
   await transaction(async client=>{
-    const deleted=(await client.query(`DELETE FROM unit_trust_movements WHERE id=$1 RETURNING movement_date::text AS day,description`,[id])).rows[0];
+    const deleted=(await client.query(`DELETE FROM unit_trust_movements WHERE id=$1 RETURNING movement_date::text AS day,description,interest_amount::float AS interest`,[id])).rows[0];
     if(deleted?.description==="Interest"){
+      const interest=Number(deleted.interest||0);
+      if(interest){
+        const account=(await client.query(`SELECT id,balance::float AS balance FROM finance_accounts WHERE account_code='GL-4500' AND active=true LIMIT 1 FOR UPDATE`)).rows[0];
+        if(account){
+          const live=Math.round((Number(account.balance)-interest)*100)/100;
+          await client.query(`UPDATE finance_accounts SET balance=$1,updated_at=NOW() WHERE id=$2`,[live,account.id]);
+          await publishLiveUap(client,live);
+        }
+      }
       await recomputeUnitTrustBalances(client,deleted.day);
-      await syncUnitTrustAccount(client);
     }
   });
   await audit({userId:req.user.id,action:"UNIT_TRUST_MOVEMENT_DELETED",entityType:"unit_trust_movement",entityId:String(id),
@@ -7066,26 +7085,23 @@ async function recomputeUnitTrustBalances(client,fromDate){
       await client.query("UPDATE unit_trust_movements SET balance_after=$1 WHERE id=$2",[running,row.id]);
   }
 }
-async function syncUnitTrustAccount(client){
-  const account=(await client.query(`SELECT id FROM finance_accounts WHERE account_code='GL-4500' AND active=true LIMIT 1 FOR UPDATE`)).rows[0];
-  if(!account)return null;
-  const today=(await client.query(`SELECT (CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Kampala')::date::text AS day`)).rows[0].day;
-  const posted=(await client.query(`SELECT balance_after::float AS balance FROM unit_trust_movements
-    WHERE movement_date<=$1::date ORDER BY movement_date DESC, id DESC LIMIT 1`,[today])).rows[0];
-  if(!posted)return null;
-  const live=Number(posted.balance);
-  await client.query(`UPDATE finance_accounts SET balance=$1, updated_at=NOW() WHERE id=$2`,[live,account.id]);
+async function publishLiveUap(client,balance){
+  const live=Number(balance||0);
   await client.query(`INSERT INTO settings (key,value) VALUES ('organizationUapBalance',$1)
     ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()`,[String(live)]);
   await client.query(`UPDATE investment_fund_accounts SET current_value=$1,updated_at=NOW()
     WHERE reference IN ('FUND-OLD-MUTUAL-2025','FUND-UAP-UMBRELLA')`,[live]);
   return live;
 }
+async function syncUnitTrustAccount(client){
+  const account=(await client.query(`SELECT id, balance::float AS balance FROM finance_accounts WHERE account_code='GL-4500' AND active=true LIMIT 1 FOR UPDATE`)).rows[0];
+  if(!account)return null;
+  return publishLiveUap(client,account.balance);
+}
 async function accrueUnitTrustInterest(client){
-  const removed=await client.query(`DELETE FROM unit_trust_movements
+  await client.query(`DELETE FROM unit_trust_movements
     WHERE description='Interest' AND source_reference LIKE 'live-uap-interest-%' AND movement_date>=$1::date`,[UAP_MONTHLY_INTEREST_FROM]);
   await recomputeUnitTrustBalances(client,UAP_MONTHLY_INTEREST_FROM);
-  await syncUnitTrustAccount(client);
 }
 async function unitTrustMonthInterest(runner,month){
   if(!/^\d{4}-\d{2}$/.test(String(month||"")))return 0;
@@ -7123,7 +7139,7 @@ async function liveUnitTrustPosition(){
   const monthInterest=posted.reduce((sum,row)=>sum+Number(row.interest||0),0);
   const last=posted.at(-1)||await one(`SELECT movement_date::text AS date, balance_after::float AS balance, rate_percent::float AS rate
     FROM unit_trust_movements WHERE movement_date<=$1::date ORDER BY movement_date DESC,id DESC LIMIT 1`,[kampala||"2026-09-14"]);
-  const balance=Number(last?.balance||account?.balance||0);
+  const balance=Number(account?.balance||0);
   const totals=await unitTrustInterestTotals({query},kampala||"2026-09-14");
   const capital=Math.max(0,Math.round((balance-totals.totalInterest)*100)/100);
   return {
@@ -7150,6 +7166,10 @@ async function runScheduledMaintenance() {
     const ralphShares=await transaction(client=>applyRalphShareCapital40000(client));
     if(ralphShares)console.log(`Ralph share capital: ${ralphShares}`);
   }catch(error){console.error("Ralph share capital 40,000 failed:",error.message);}
+  try{
+    const uapPin=await transaction(client=>pinLiveUapBalance(client));
+    if(uapPin)console.log(`UAP live book: ${uapPin}`);
+  }catch(error){console.error("UAP live book pin failed:",error.message);}
   try{
     const meeting=await transaction(client=>recordBanumbaOctober30Meeting(client));
     if(meeting)console.log(`October 30 meeting: ${meeting}`);
