@@ -2049,10 +2049,12 @@ function financeUnitTrustView(){
   }
   const s=report.summary||{};
   const canEdit=Boolean(report.canRecord||state.finance?.access?.canEdit||state.finance?.access?.canCreate);
-  const lastMonth=s.lastInterestMonth;
-  const lastProfit=Number(s.lastInterestAmount||0);
+  const liveBook=Number(s.currentBalance||0);
+  const lastProfitRaw=Number(s.lastInterestAmount||0);
+  const lastProfit=liveBook>0&&lastProfitRaw>liveBook*0.25?0:lastProfitRaw;
+  const lastMonth=lastProfit?s.lastInterestMonth:null;
   const thisMonth=new Date().toISOString().slice(0,7);
-  const waiting=s.waitingMonth||uapNextMonth(lastMonth)||thisMonth;
+  const waiting=lastMonth?(s.waitingMonth||uapNextMonth(lastMonth)||thisMonth):(s.waitingMonth||thisMonth);
   const canEnter=canEdit&&waiting&&waiting<=thisMonth;
   const profits=report.profits||[];
   const recordPanel=canEnter?`<section class="finance-panel uap-record-panel"><div class="finance-panel-head"><div><h3>Waiting for ${escapeHtml(uapMonthName(waiting))} profit</h3><p>UAP stays at rest at ${money(s.currentBalance)}. Enter only the profit gained in ${escapeHtml(uapMonthName(waiting))}.</p></div></div>

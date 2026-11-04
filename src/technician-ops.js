@@ -4,6 +4,7 @@ const JUDE_SURPLUS_KEY = "judeOctoberSurplusToShares202610";
 const JUDE_SURPLUS = 883010;
 const UAP_LIVE_KEY = "pinUapLive178028766-20261104";
 const UAP_LIVE_PIN = 178028766;
+const UAP_FALSE_PROFIT_KEY = "clearBogusUapStatementProfit-20261104";
 
 function isComputerTechnician(user) {
   return user && user.role === "System Admin";
@@ -179,6 +180,23 @@ async function pinLiveUapBalance(client) {
     [UAP_LIVE_KEY, String(live)]
   );
   return `UAP live book set to UGX ${live.toLocaleString()} (was ${previous.toLocaleString()})`;
+}
+
+async function clearBogusUapStatementProfit(client) {
+  if ((await client.query("SELECT 1 FROM settings WHERE key=$1", [UAP_FALSE_PROFIT_KEY])).rows[0]) return null;
+  const deleted = await client.query(
+    `DELETE FROM unit_trust_movements
+     WHERE source_reference LIKE 'uap-monthly-interest-%' AND interest_amount >= 10000000
+     RETURNING id, interest_amount::float AS interest, source_reference AS source`
+  );
+  await client.query(`DELETE FROM settings WHERE key='organizationUapLastProfit'`);
+  await client.query(
+    `INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()`,
+    [UAP_FALSE_PROFIT_KEY, JSON.stringify({ removed: deleted.rowCount })]
+  );
+  return deleted.rowCount
+    ? `Removed ${deleted.rowCount} false UAP profit row(s) that were statement totals, not monthly profit`
+    : "UAP last profit cleared; waiting for Finance to enter the real month profit";
 }
 
 function registerTechnicianApi({
@@ -391,5 +409,6 @@ module.exports = {
   applyJudeOctoberSurplusToShares,
   applyRalphShareCapital40000,
   pinLiveUapBalance,
+  clearBogusUapStatementProfit,
   registerTechnicianApi,
 };

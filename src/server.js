@@ -26,7 +26,7 @@ const { loadWelfareStanding, loadWelfareMonth, enforceOneMonthlyWelfareCharge } 
 const { chargeWelfareFromCoveredSavings, catchUpWelfareFromSavings, loadMemberSchedule, loadScheduleSettings, buildSchedule, monthIndex, monthKey, monthLabel } = require("./savings-schedule");
 const { buildStandingPdf } = require("./standing-reports");
 const { isHostingFeeCategory, loadHostingFeeStanding, paymentCycleId, startHostingCycleForMeeting, recordBanumbaOctober30Meeting } = require("./hosting-fees");
-const { isComputerTechnician, applyJudeOctoberSurplusToShares, applyRalphShareCapital40000, pinLiveUapBalance, registerTechnicianApi } = require("./technician-ops");
+const { isComputerTechnician, applyJudeOctoberSurplusToShares, applyRalphShareCapital40000, pinLiveUapBalance, clearBogusUapStatementProfit, registerTechnicianApi } = require("./technician-ops");
 const { isWordUpload, convertWordUploadToPdf, convertPlainTextToPdf } = require("./services/office-pdf");
 
 function mimeFromFilename(name="",fallback="application/octet-stream"){
@@ -3026,7 +3026,7 @@ app.get("/api/finance/unit-trust",auth,requireFinance("view"),asyncRoute(async(r
   const profits=(await query(`SELECT to_char(date_trunc('month',movement_date),'YYYY-MM') AS month,
       SUM(interest_amount)::float AS amount
     FROM unit_trust_movements
-    WHERE source_reference LIKE 'uap-monthly-interest-%'
+    WHERE source_reference LIKE 'uap-monthly-interest-%' AND interest_amount < 10000000
     GROUP BY 1 ORDER BY 1 DESC`)).rows;
   const current=String(kampala||"").slice(0,7);
   const waitingMonth=uapWaitingMonth(totals.lastInterestMonth,current);
@@ -3075,15 +3075,17 @@ app.post("/api/finance/unit-trust/monthly-interest",auth,requireFinance("create"
     if(`${month}-01`>dates.today){const error=new Error("You cannot enter interest for a month that has not started");error.status=400;throw error;}
     const day=dates.month_end>dates.today?dates.today:dates.month_end;
     const replaced=(await client.query(`DELETE FROM unit_trust_movements
-      WHERE description='Interest' AND movement_date>=$1::date AND movement_date<($1::date+INTERVAL '1 month')
-      RETURNING interest_amount::float AS interest`,[`${month}-01`])).rows;
+      WHERE source_reference=$1
+      RETURNING interest_amount::float AS interest`,[`uap-monthly-interest-${month}`])).rows;
     const replacedAmount=replaced.reduce((s,r)=>s+Number(r.interest||0),0);
     const live=Math.round((Number(account.balance)-replacedAmount+amount)*100)/100;
     await client.query(`UPDATE finance_accounts SET balance=$1,updated_at=NOW() WHERE id=$2`,[live,account.id]);
     await client.query(`INSERT INTO unit_trust_movements
       (movement_date,description,deposit_amount,interest_amount,withdrawal_amount,rate_percent,balance_after,source_reference,created_by)
       VALUES ($1::date,'Interest',0,$2,0,NULL,$3,$4,$5)`,[day,amount,live,`uap-monthly-interest-${month}`,req.user.id]);
-    await recomputeUnitTrustBalances(client,`${month}-01`);
+    await client.query(`INSERT INTO settings (key,value) VALUES ('organizationUapLastProfit',$1)
+      ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()`,
+      [JSON.stringify({month,amount})]);
     await publishLiveUap(client,live);
     return {month,amount,day,balance:live,replacedRows:replaced.length,replacedAmount};
   });
@@ -7087,12 +7089,14 @@ function uapWaitingMonth(lastInterestMonth,currentMonth){
   return m===12?`${y+1}-01`:`${y}-${String(m+1).padStart(2,"0")}`;
 }
 async function unitTrustInterestTotals(runner,asOf){
-  const last=(await runner.query(`SELECT to_char(date_trunc('month',movement_date),'YYYY-MM') AS month,
-      SUM(interest_amount)::float AS amount
-    FROM unit_trust_movements
-    WHERE source_reference LIKE 'uap-monthly-interest-%' AND ($1::date IS NULL OR movement_date<=$1::date)
-    GROUP BY 1 HAVING SUM(interest_amount)>0 ORDER BY 1 DESC LIMIT 1`,[asOf||null])).rows[0];
-  return {lastInterestMonth:last?.month||null,lastInterestAmount:Number(last?.amount||0),totalInterest:0};
+  const saved=(await runner.query(`SELECT value FROM settings WHERE key='organizationUapLastProfit'`)).rows[0];
+  let last=null;
+  try{last=saved?.value?JSON.parse(saved.value):null;}catch{last=null;}
+  const month=last?.month&&/^\d{4}-\d{2}$/.test(String(last.month))?String(last.month):null;
+  const amount=Number(last?.amount||0);
+  if(!month||!Number.isFinite(amount)||amount<=0)return {lastInterestMonth:null,lastInterestAmount:0,totalInterest:0};
+  if(asOf&&`${month}-01`>String(asOf).slice(0,10))return {lastInterestMonth:null,lastInterestAmount:0,totalInterest:0};
+  return {lastInterestMonth:month,lastInterestAmount:amount,totalInterest:0};
 }
 function isUnitTrustRecord(project){
   return /unit trust|old mutual|\buap\b|INV-FUND-OM/i.test(`${project?.reference||""} ${project?.name||""} ${project?.category||""}`);
@@ -7132,6 +7136,10 @@ async function runScheduledMaintenance() {
     const uapPin=await transaction(client=>pinLiveUapBalance(client));
     if(uapPin)console.log(`UAP live book: ${uapPin}`);
   }catch(error){console.error("UAP live book pin failed:",error.message);}
+  try{
+    const uapProfit=await transaction(client=>clearBogusUapStatementProfit(client));
+    if(uapProfit)console.log(`UAP profit card: ${uapProfit}`);
+  }catch(error){console.error("UAP false profit clear failed:",error.message);}
   try{
     const meeting=await transaction(client=>recordBanumbaOctober30Meeting(client));
     if(meeting)console.log(`October 30 meeting: ${meeting}`);
