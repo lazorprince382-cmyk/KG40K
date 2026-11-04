@@ -73,6 +73,68 @@ async function applyJudeOctoberSurplusToShares(client) {
   return `${member.full_name}: annual shares recorded`;
 }
 
+const RALPH_SHARES_KEY = "ralphShareCapitalPlus40000-20261104";
+const RALPH_SHARES_REF = "SHR-RALPH-40000-20261104";
+const RALPH_SHARES_ADD = 40000;
+
+async function applyRalphShareCapital40000(client) {
+  if ((await client.query("SELECT 1 FROM settings WHERE key=$1", [RALPH_SHARES_KEY])).rows[0]) return null;
+  const member = (
+    await client.query(
+      `SELECT id, full_name, share_capital::float AS shares
+       FROM members
+       WHERE deleted_at IS NULL AND full_name ILIKE '%ralph%' AND full_name ILIKE '%masaba%'
+       ORDER BY id LIMIT 1 FOR UPDATE`
+    )
+  ).rows[0];
+  if (!member) {
+    await client.query(
+      `INSERT INTO settings (key,value) VALUES ($1,'skipped-member-missing') ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()`,
+      [RALPH_SHARES_KEY]
+    );
+    return "Ralph Masaba not found";
+  }
+  const already = (
+    await client.query(
+      `SELECT id FROM transactions WHERE reference=$1 AND status IN ('completed','verified','approved') LIMIT 1`,
+      [RALPH_SHARES_REF]
+    )
+  ).rows[0];
+  if (already) {
+    await client.query(
+      `INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()`,
+      [RALPH_SHARES_KEY, String(member.id)]
+    );
+    return null;
+  }
+  const recorder = (
+    await client.query(
+      `SELECT id FROM users WHERE active=true
+       ORDER BY CASE role WHEN 'System Admin' THEN 1 WHEN 'Finance Officer' THEN 2 ELSE 3 END, id LIMIT 1`
+    )
+  ).rows[0];
+  if (!recorder) return "No user to record Ralph share capital";
+  await client.query("UPDATE members SET share_capital=share_capital+$1 WHERE id=$2", [RALPH_SHARES_ADD, member.id]);
+  await client.query(
+    `INSERT INTO transactions
+      (reference,member_id,type,method,amount,status,notes,recorded_by,verified_by,verified_at,created_at,receipt_number,submission_source)
+     VALUES ($1,$2,'Share purchase','Book adjustment',$3,'completed',$4,$5,$5,NOW(),NOW(),$6,'system')`,
+    [
+      RALPH_SHARES_REF,
+      member.id,
+      RALPH_SHARES_ADD,
+      `UGX ${RALPH_SHARES_ADD.toLocaleString()} added to share capital on the member card. Centenary unchanged.`,
+      recorder.id,
+      "RCPT-RALPH-SHR-40000",
+    ]
+  );
+  await client.query(
+    `INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()`,
+    [RALPH_SHARES_KEY, JSON.stringify({ memberId: member.id, added: RALPH_SHARES_ADD })]
+  );
+  return `${member.full_name}: UGX ${RALPH_SHARES_ADD.toLocaleString()} added to share capital (Centenary unchanged)`;
+}
+
 function registerTechnicianApi({
   app,
   auth,
@@ -281,5 +343,6 @@ function registerTechnicianApi({
 module.exports = {
   isComputerTechnician,
   applyJudeOctoberSurplusToShares,
+  applyRalphShareCapital40000,
   registerTechnicianApi,
 };

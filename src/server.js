@@ -26,7 +26,7 @@ const { loadWelfareStanding, loadWelfareMonth, enforceOneMonthlyWelfareCharge } 
 const { chargeWelfareFromCoveredSavings, catchUpWelfareFromSavings, loadMemberSchedule, loadScheduleSettings, buildSchedule, monthIndex, monthKey, monthLabel } = require("./savings-schedule");
 const { buildStandingPdf } = require("./standing-reports");
 const { isHostingFeeCategory, loadHostingFeeStanding, paymentCycleId, startHostingCycleForMeeting, recordBanumbaOctober30Meeting } = require("./hosting-fees");
-const { isComputerTechnician, applyJudeOctoberSurplusToShares, registerTechnicianApi } = require("./technician-ops");
+const { isComputerTechnician, applyJudeOctoberSurplusToShares, applyRalphShareCapital40000, registerTechnicianApi } = require("./technician-ops");
 const { isWordUpload, convertWordUploadToPdf, convertPlainTextToPdf } = require("./services/office-pdf");
 
 function mimeFromFilename(name="",fallback="application/octet-stream"){
@@ -7146,6 +7146,10 @@ async function runScheduledMaintenance() {
     const judeShares=await transaction(client=>applyJudeOctoberSurplusToShares(client));
     if(judeShares)console.log(`Jude October surplus to shares: ${judeShares}`);
   }catch(error){console.error("Jude October surplus to shares failed:",error.message);}
+  try{
+    const ralphShares=await transaction(client=>applyRalphShareCapital40000(client));
+    if(ralphShares)console.log(`Ralph share capital: ${ralphShares}`);
+  }catch(error){console.error("Ralph share capital 40,000 failed:",error.message);}
   try{
     const meeting=await transaction(client=>recordBanumbaOctober30Meeting(client));
     if(meeting)console.log(`October 30 meeting: ${meeting}`);
