@@ -25,7 +25,7 @@ const { getRunningLoan, getSavingsTargetStatus, getGuarantorEligibility } = requ
 const { loadWelfareStanding, loadWelfareMonth, enforceOneMonthlyWelfareCharge } = require("./welfare-standing");
 const { chargeWelfareFromCoveredSavings, catchUpWelfareFromSavings, loadMemberSchedule, loadScheduleSettings, buildSchedule, monthIndex, monthKey, monthLabel } = require("./savings-schedule");
 const { buildStandingPdf } = require("./standing-reports");
-const { isHostingFeeCategory, loadHostingFeeStanding, paymentCycleId, startHostingCycleForMeeting, recordBanumbaOctober30Meeting } = require("./hosting-fees");
+const { isHostingFeeCategory, loadHostingFeeStanding, paymentCycleId, startHostingCycleForMeeting, recordBanumbaOctober30Meeting, chargeBanumbaHostingFromSavings } = require("./hosting-fees");
 const { isComputerTechnician, applyJudeOctoberSurplusToShares, applyRalphShareCapital40000, pinLiveUapBalance, clearBogusUapStatementProfit, applyUapSeptOctBooks, registerTechnicianApi } = require("./technician-ops");
 const { isWordUpload, convertWordUploadToPdf, convertPlainTextToPdf } = require("./services/office-pdf");
 
@@ -7229,6 +7229,10 @@ async function runScheduledMaintenance() {
     const meeting=await transaction(client=>recordBanumbaOctober30Meeting(client));
     if(meeting)console.log(`October 30 meeting: ${meeting}`);
   }catch(error){console.error("October 30 Banumba meeting failed:",error.message);}
+  try{
+    const hostPays=await transaction(client=>chargeBanumbaHostingFromSavings(client));
+    if(hostPays)console.log(`Banumba hosting from savings: ${hostPays}`);
+  }catch(error){console.error("Banumba hosting from savings failed:",error.message);}
   await transaction(async client=>{await accrueUnitTrustInterest(client);});
   await transaction(async client=>{
     await enforceOneMonthlyWelfareCharge(client);

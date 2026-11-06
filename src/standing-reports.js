@@ -879,8 +879,8 @@ function drawHostingFeeReport(doc, standing, label) {
   const x0 = 18;
   doc.font("Helvetica").fontSize(10).fillColor("#5B6B7C")
     .text(standing.reminderActive
-      ? `Hosting fee of UGX ${money(expected)} per member for ${standing.meetingLabel || "the upcoming meeting"}. Collected UGX ${money(standing.collected)} from ${paid.length} member${paid.length === 1 ? "" : "s"} as at ${label}.`
-      : `No hosting fee is currently due. The last meeting was 30 October 2026. Reminders start when Executive schedules the next meeting.`, x0, y, { width: pageW });
+      ? `Hosting fee of UGX ${money(expected)} per member, including the host, for ${standing.meetingLabel || "the upcoming meeting"}. Collected UGX ${money(standing.collected)} from ${paid.length} member${paid.length === 1 ? "" : "s"} as at ${label}.`
+      : `No hosting fee is currently due. The last meeting was 30 October 2026. Every member pays, including the host. Reminders start when Executive schedules the next meeting.`, x0, y, { width: pageW });
   y += 28;
   cellText(doc, "Members who have paid", x0, y, pageW, 16, { bold: true, size: 12, color: NAVY });
   y += 18;

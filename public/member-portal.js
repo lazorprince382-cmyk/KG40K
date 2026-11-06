@@ -396,9 +396,9 @@
     const active=Boolean(h.reminderActive??s.hostingFeeReminder);
     const rows=(h.payments||[]).map(x=>`<tr><td><strong>${esc(x.receiptNumber||x.reference)}</strong></td><td>${esc(x.method||"Bank transfer")}</td><td>${money(x.amount)}</td><td>${date(x.paidOn)}</td><td>${status(x.status||"completed")}</td></tr>`).join("");
     const note=active
-      ?`Hosting fee of ${money(expected)} is due for ${esc(h.meetingLabel||s.hostingMeetingLabel||"the upcoming meeting")}.`
-      :"No hosting fee is due until the next meeting is scheduled. The last meeting was 30 October 2026.";
-    return `<div class="member-stack"><p class="member-policy-note">${note}</p><div class="member-summary-grid compact">${metric("Hosting fee paid",money(paid),"receipt","member-hosting-fee",paid>0.5?"Posted to Centenary":(active?"Not paid yet":"Not due"))}${metric(active?"Still to pay":"Expected when next meeting is set",money(active?due:expected),"wallet","member-hosting-fee",active?"For this meeting only":"Cleared after the last meeting")}</div>${panel("Hosting fee payments","Collected when a member hosts a meeting. Posted to Centenary.",gridTable(["Receipt","Method","Amount","Date","Status"],rows))}</div>`;
+      ?`Hosting fee of ${money(expected)} is due for ${esc(h.meetingLabel||s.hostingMeetingLabel||"the upcoming meeting")}. Every member pays, including the host.`
+      :"No hosting fee is due until the next meeting is scheduled. The last meeting was 30 October 2026. Every member pays, including the host.";
+    return `<div class="member-stack"><p class="member-policy-note">${note}</p><div class="member-summary-grid compact">${metric("Hosting fee paid",money(paid),"receipt","member-hosting-fee",paid>0.5?"Posted to Centenary":(active?"Not paid yet":"Not due"))}${metric(active?"Still to pay":"Expected when next meeting is set",money(active?due:expected),"wallet","member-hosting-fee",active?"For this meeting only":"Cleared after the last meeting")}</div>${panel("Hosting fee payments","Collected from every member for each hosted meeting, including the host. Posted to Centenary.",gridTable(["Receipt","Method","Amount","Date","Status"],rows))}</div>`;
   }
   function welfare(){
     const w=C().welfare||{},s=C().summary||{},fund=C().welfareFund||{},org=C()?.orgWelfareStanding||{};

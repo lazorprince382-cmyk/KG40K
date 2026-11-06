@@ -14,8 +14,7 @@ async function hostingFeeExpected(runner) {
   return Number.isFinite(amount) && amount > 0 ? amount : 50000;
 }
 
-function statusForPaid(paid, expected, reminderActive, isHost) {
-  if (isHost) return "host";
+function statusForPaid(paid, expected, reminderActive) {
   if (!reminderActive) return Number(paid) > 0.5 ? "paid" : "not_due";
   if (Number(paid) >= Number(expected) - 0.5) return "paid";
   if (Number(paid) > 0.5) return "partial";
@@ -99,12 +98,12 @@ async function loadHostingFeeStanding() {
       name: m.name,
       memberNumber: m.memberNumber,
       paid,
-      expected: isHost ? 0 : expected,
-      due: reminderActive && !isHost ? Math.max(0, expected - paid) : 0,
+      expected,
+      due: reminderActive ? Math.max(0, expected - paid) : 0,
       lastPaidOn: m.lastPaidOn,
       receiptNumber: m.receiptNumber,
       isHost,
-      status: statusForPaid(paid, expected, reminderActive, isHost),
+      status: statusForPaid(paid, expected, reminderActive),
     };
   });
   const collected = list.reduce((sum, row) => sum + row.paid, 0);
@@ -190,19 +189,20 @@ async function startHostingCycleForMeeting(client, {
     const when = new Date(`${date}T12:00:00+03:00`).toLocaleDateString("en-GB", {
       day: "numeric", month: "long", year: "numeric", timeZone: "Africa/Kampala",
     });
-    const message = `A meeting is scheduled for ${when}${title ? ` (${String(title).trim()})` : ""}. Pay the hosting fee of UGX ${Number(expected).toLocaleString()} for this meeting. The member hosting the sitting does not pay.`;
+    const message = `A meeting is scheduled for ${when}${title ? ` (${String(title).trim()})` : ""}. Pay the hosting fee of UGX ${Number(expected).toLocaleString()} for this meeting. Every member pays, including the host.`;
     await client.query(
       `INSERT INTO notifications (member_id, title, message)
        SELECT id, 'Pay hosting fee for the upcoming meeting', $1
-       FROM members WHERE deleted_at IS NULL AND status='active'
-         AND ($2::bigint IS NULL OR id<>$2)`,
-      [message, hostId]
+       FROM members WHERE deleted_at IS NULL AND status='active'`,
+      [message]
     );
   }
   return cycle;
 }
 
 const BANUMBA_MEETING_KEY = "banumbaOctober30Meeting2026";
+const BANUMBA_HOST_PAYS_KEY = "banumbaHostPaysHosting50000-20261106";
+const BANUMBA_HOST_AMOUNT = 50000;
 const OCT30_AGENDA = `1. Opening Prayer
 2. Confirmation of the quorum
 3. Communication from the Chairperson
@@ -318,23 +318,9 @@ async function recordBanumbaOctober30Meeting(client) {
        ORDER BY id LIMIT 1 FOR UPDATE`
     )
   ).rows[0];
-  let restoredNow = 0;
-  if (host) {
-    restoredNow = await refundHostHostingFee(client, host.id, 50000);
-    if (restoredNow > 0.5) {
-      await client.query(
-        `INSERT INTO notifications (member_id,title,message) VALUES ($1,$2,$3)`,
-        [
-          host.id,
-          "Hosting fee returned",
-          `UGX ${restoredNow.toLocaleString()} hosting fee was returned to your savings. The member who hosts the meeting does not pay hosting fee.`,
-        ]
-      );
-    }
-  }
   if ((await client.query("SELECT 1 FROM settings WHERE key=$1", [BANUMBA_MEETING_KEY])).rows[0]) {
     if (!host) return "Banumba Francis not found";
-    return restoredNow > 0.5 ? `${host.full_name}: UGX ${restoredNow.toLocaleString()} hosting returned to savings` : null;
+    return null;
   }
   if (!host) {
     await client.query(
@@ -429,9 +415,247 @@ async function recordBanumbaOctober30Meeting(client) {
   }
   await client.query(
     `INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()`,
-    [BANUMBA_MEETING_KEY, JSON.stringify({ meetingId, hostId: host.id, restored: restoredNow })]
+    [BANUMBA_MEETING_KEY, JSON.stringify({ meetingId, hostId: host.id })]
   );
-  return `${host.full_name}: meeting recorded${restoredNow > 0.5 ? `, UGX ${restoredNow.toLocaleString()} hosting returned to savings` : ", no hosting chop to return"}`;
+  return `${host.full_name}: meeting recorded`;
+}
+
+async function restoreCentenaryIfNeeded(client, accountId, amount) {
+  if (!accountId || amount < 0.5) return;
+  await client.query(
+    `UPDATE finance_accounts SET balance=balance+$1, updated_at=NOW() WHERE id=$2`,
+    [amount, accountId]
+  );
+  const bank = (
+    await client.query(`SELECT account_code FROM finance_accounts WHERE id=$1`, [accountId])
+  ).rows[0];
+  if (bank?.account_code === "GL-4104") {
+    await client.query(
+      `INSERT INTO settings (key,value) VALUES ('organizationBankBalance',
+         (SELECT ROUND(balance)::text FROM finance_accounts WHERE id=$1))
+       ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()`,
+      [accountId]
+    );
+  }
+}
+
+async function chargeBanumbaHostingFromSavings(client) {
+  if ((await client.query("SELECT 1 FROM settings WHERE key=$1", [BANUMBA_HOST_PAYS_KEY])).rows[0]) return null;
+  const host = (
+    await client.query(
+      `SELECT id, full_name, savings_balance::float AS savings
+       FROM members
+       WHERE deleted_at IS NULL AND full_name ILIKE '%banumba%' AND full_name ILIKE '%francis%'
+       ORDER BY id LIMIT 1 FOR UPDATE`
+    )
+  ).rows[0];
+  if (!host) {
+    await client.query(
+      `INSERT INTO settings (key,value) VALUES ($1,'skipped-host-missing') ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()`,
+      [BANUMBA_HOST_PAYS_KEY]
+    );
+    return "Banumba Francis not found";
+  }
+  const cycle = (
+    await client.query(
+      `SELECT id FROM hosting_fee_cycles WHERE meeting_date='2026-10-30' ORDER BY id DESC LIMIT 1`
+    )
+  ).rows[0];
+  const alreadyPaid = Number(
+    (
+      await client.query(
+        `SELECT COALESCE(SUM(amount),0)::float AS paid
+         FROM hosting_fee_payments
+         WHERE member_id=$1 AND status='completed'
+           AND ($2::bigint IS NULL OR cycle_id=$2)`,
+        [host.id, cycle?.id || null]
+      )
+    ).rows[0]?.paid || 0
+  );
+  if (alreadyPaid >= BANUMBA_HOST_AMOUNT - 0.5) {
+    await client.query(
+      `INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()`,
+      [BANUMBA_HOST_PAYS_KEY, JSON.stringify({ memberId: host.id, alreadyPaid, deducted: 0 })]
+    );
+    return `${host.full_name}: hosting fee already on record`;
+  }
+  const recorder = (
+    await client.query(
+      `SELECT id FROM users WHERE active=true
+       ORDER BY CASE role WHEN 'Finance Officer' THEN 1 WHEN 'Executive Officer' THEN 2 WHEN 'System Admin' THEN 3 ELSE 4 END, id LIMIT 1`
+    )
+  ).rows[0];
+  const voided = (
+    await client.query(
+      `SELECT p.id, p.amount::float, p.transaction_id, p.finance_entry_id, p.cycle_id
+       FROM hosting_fee_payments p
+       WHERE p.member_id=$1 AND p.status='voided'
+         AND (p.notes ILIKE '%host does not pay%' OR p.notes ILIKE '%Returned%')
+       ORDER BY p.id DESC`,
+      [host.id]
+    )
+  ).rows;
+  let charged = 0;
+  let restoredBank = 0;
+  for (const row of voided) {
+    if (charged >= BANUMBA_HOST_AMOUNT - 0.5) break;
+    const amount = Math.min(Number(row.amount || 0), BANUMBA_HOST_AMOUNT - charged);
+    if (amount < 0.5) continue;
+    await client.query(
+      `UPDATE hosting_fee_payments
+          SET status='completed',
+              cycle_id=COALESCE(cycle_id,$2),
+              notes=TRIM(BOTH FROM COALESCE(notes,'')||' | Restored: host also pays hosting fee')
+        WHERE id=$1`,
+      [row.id, cycle?.id || null]
+    );
+    if (row.transaction_id) {
+      await client.query(
+        `UPDATE transactions SET status='completed',
+           notes=TRIM(BOTH FROM COALESCE(notes,'')||' | Restored: hosting taken from savings')
+         WHERE id=$1`,
+        [row.transaction_id]
+      );
+    }
+    if (row.finance_entry_id) {
+      const entry = (
+        await client.query(
+          `SELECT id, amount::float, finance_account_id, status FROM organization_finance_entries WHERE id=$1`,
+          [row.finance_entry_id]
+        )
+      ).rows[0];
+      if (entry && /void/i.test(String(entry.status || ""))) {
+        await client.query(
+          `UPDATE organization_finance_entries SET status='completed',
+             description=TRIM(BOTH FROM COALESCE(description,'')||' | Restored: host also pays hosting fee')
+           WHERE id=$1`,
+          [entry.id]
+        );
+        const bankAmount = Number(entry.amount || amount);
+        await restoreCentenaryIfNeeded(client, entry.finance_account_id, bankAmount);
+        restoredBank += bankAmount;
+      }
+    }
+    charged += amount;
+  }
+  if (charged < BANUMBA_HOST_AMOUNT - 0.5) {
+    const extraTx = (
+      await client.query(
+        `SELECT t.id, t.amount::float, t.finance_entry_id
+         FROM transactions t
+         WHERE t.member_id=$1 AND t.type='Hosting fee' AND t.status='voided'
+           AND (t.notes ILIKE '%host does not pay%' OR t.notes ILIKE '%Returned to savings%')
+           AND NOT EXISTS (
+             SELECT 1 FROM hosting_fee_payments p WHERE p.transaction_id=t.id AND p.status='completed'
+           )
+         ORDER BY t.id DESC`,
+        [host.id]
+      )
+    ).rows;
+    for (const row of extraTx) {
+      if (charged >= BANUMBA_HOST_AMOUNT - 0.5) break;
+      const amount = Math.min(Number(row.amount || 0), BANUMBA_HOST_AMOUNT - charged);
+      if (amount < 0.5) continue;
+      await client.query(
+        `UPDATE transactions SET status='completed',
+           notes=TRIM(BOTH FROM COALESCE(notes,'')||' | Restored: hosting taken from savings')
+         WHERE id=$1`,
+        [row.id]
+      );
+      if (row.finance_entry_id) {
+        const entry = (
+          await client.query(
+            `SELECT id, amount::float, finance_account_id, status FROM organization_finance_entries WHERE id=$1`,
+            [row.finance_entry_id]
+          )
+        ).rows[0];
+        if (entry && /void/i.test(String(entry.status || ""))) {
+          await client.query(
+            `UPDATE organization_finance_entries SET status='completed',
+               description=TRIM(BOTH FROM COALESCE(description,'')||' | Restored: host also pays hosting fee')
+             WHERE id=$1`,
+            [entry.id]
+          );
+          const bankAmount = Number(entry.amount || amount);
+          await restoreCentenaryIfNeeded(client, entry.finance_account_id, bankAmount);
+          restoredBank += bankAmount;
+        }
+      }
+      await client.query(
+        `INSERT INTO hosting_fee_payments
+          (member_id,amount,paid_on,status,reference,receipt_number,finance_entry_id,transaction_id,notes,recorded_by,cycle_id)
+         VALUES ($1,$2,'2026-10-30','completed',$3,$4,$5,$6,$7,$8,$9)`,
+        [
+          host.id,
+          amount,
+          `HOST-BANUMBA-HOSTPAYS-${row.id}`,
+          "RCPT-BANUMBA-HOSTPAYS-50K",
+          row.finance_entry_id || null,
+          row.id,
+          "Hosting fee restored from savings. Every member pays, including the host.",
+          recorder?.id || null,
+          cycle?.id || null,
+        ]
+      );
+      charged += amount;
+    }
+  }
+  if (charged < BANUMBA_HOST_AMOUNT - 0.5) {
+    const amount = BANUMBA_HOST_AMOUNT - charged;
+    await client.query("SAVEPOINT banumba_host_pays");
+    try {
+      const tx = (
+        await client.query(
+          `INSERT INTO transactions
+            (reference,member_id,type,method,amount,status,notes,recorded_by,verified_by,verified_at,created_at,receipt_number,submission_source)
+           VALUES ($1,$2,'Hosting fee','Savings transfer',$3,'completed',$4,$5,$5,NOW(),TIMESTAMPTZ '2026-10-30 21:00:00+03',$6,'system')
+           RETURNING id`,
+          [
+            "TRX-BANUMBA-HOSTPAYS-50000",
+            host.id,
+            amount,
+            `Hosting fee taken from savings. The host also pays. received=${amount.toFixed(2)}.`,
+            recorder?.id || null,
+            "RCPT-BANUMBA-HOSTPAYS-50K",
+          ]
+        )
+      ).rows[0];
+      await client.query(
+        `INSERT INTO hosting_fee_payments
+          (member_id,amount,paid_on,status,reference,receipt_number,transaction_id,notes,recorded_by,cycle_id)
+         VALUES ($1,$2,'2026-10-30','completed',$3,$4,$5,$6,$7,$8)`,
+        [
+          host.id,
+          amount,
+          "HOST-BANUMBA-HOSTPAYS-50000",
+          "RCPT-BANUMBA-HOSTPAYS-50K",
+          tx.id,
+          "Hosting fee taken from savings. Every member pays, including the host.",
+          recorder?.id || null,
+          cycle?.id || null,
+        ]
+      );
+      charged += amount;
+      await client.query("RELEASE SAVEPOINT banumba_host_pays");
+    } catch (error) {
+      await client.query("ROLLBACK TO SAVEPOINT banumba_host_pays");
+      if (error.code !== "23505") throw error;
+    }
+  }
+  await client.query(`UPDATE members SET savings_balance=savings_balance-$1 WHERE id=$2`, [charged, host.id]);
+  await client.query(
+    `INSERT INTO notifications (member_id,title,message) VALUES ($1,$2,$3)`,
+    [
+      host.id,
+      "Hosting fee taken from savings",
+      `UGX ${charged.toLocaleString()} hosting fee was taken from your savings. Every member pays hosting fee, including the host.`,
+    ]
+  );
+  await client.query(
+    `INSERT INTO settings (key,value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value, updated_at=NOW()`,
+    [BANUMBA_HOST_PAYS_KEY, JSON.stringify({ memberId: host.id, charged, restoredBank, cycleId: cycle?.id || null })]
+  );
+  return `${host.full_name}: UGX ${charged.toLocaleString()} hosting taken from savings`;
 }
 
 module.exports = {
@@ -443,4 +667,5 @@ module.exports = {
   paymentCycleId,
   startHostingCycleForMeeting,
   recordBanumbaOctober30Meeting,
+  chargeBanumbaHostingFromSavings,
 };
