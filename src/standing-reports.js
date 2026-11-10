@@ -654,11 +654,14 @@ async function loadActiveLoanReports() {
     await query(
       `SELECT l.id, l.reference, l.amount::float AS amount, l.balance::float AS balance, l.status,
               l.term_months AS "termMonths", l.created_at AS "requestedAt", l.disbursed_at AS "disbursedAt",
+              l.processing_fee::float AS "processingFee",
               m.id AS "memberId", m.full_name AS member, m.member_number AS "memberNumber",
               COALESCE(p.name, l.custom_product_name, 'Loan') AS product,
               COALESCE(p.late_penalty_rate,5)::float AS "latePenaltyRate",
               COALESCE((SELECT SUM(s.principal_paid) FROM loan_repayment_schedule s WHERE s.loan_id=l.id),0)::float AS "principalPaid",
               COALESCE((SELECT SUM(s.interest_paid) FROM loan_repayment_schedule s WHERE s.loan_id=l.id),0)::float AS "interestPaid",
+              COALESCE((SELECT SUM(c.paid_amount) FROM loan_charges c
+                WHERE c.loan_id=l.id AND c.charge_type='Late payment penalty'),0)::float AS "penaltyPaid",
               ROUND((${withLoanAlias(LOAN_PRINCIPAL_LEFT_SQL, "l")})::numeric,2)::float AS "principalLeft",
               ROUND((${withLoanAlias(LOAN_INTEREST_LEFT_SQL, "l")})::numeric,2)::float AS "interestLeft",
               ROUND((${withLoanAlias(LOAN_PENALTY_LEFT_SQL, "l")})::numeric,2)::float AS "penaltyLeft"
@@ -945,51 +948,61 @@ function drawHostingFeeReport(doc, standing, label) {
   ]), { header: RED });
 }
 
+function drawLoanCardRow(doc, x0, y, pageW, boxes, rowH = 54) {
+  const boxW = pageW / boxes.length;
+  boxes.forEach((box, i) => {
+    const x = x0 + i * boxW;
+    fillRect(doc, x, y, boxW, rowH, box.bg || WHITE);
+    doc.strokeColor(LINE).lineWidth(0.4).rect(x, y, boxW, rowH).stroke();
+    doc.fillColor(box.labelColor || "#4A5D73").font("Helvetica").fontSize(8);
+    doc.text(ascii(box.label), x + 8, y + 7, { width: boxW - 16, align: "left", lineBreak: true, height: 18 });
+    doc.fillColor(box.valueColor || NAVY).font("Helvetica-Bold").fontSize(13);
+    doc.text(ascii(box.value), x + 8, y + 28, { width: boxW - 16, align: "left", height: 22 });
+  });
+  return y + rowH;
+}
+
 function drawActiveLoanReports(doc, loans, label) {
   let y = 50;
   const pageW = doc.page.width - 36;
   const x0 = 18;
   doc.font("Helvetica").fontSize(10).fillColor("#5B6B7C")
-    .text(`Active and overdue loans as at ${label}. Schedule columns match loan details: due, opening, principal, interest, penalty, outstanding, paid and surplus.`, x0, y, { width: pageW });
+    .text(`Active and overdue loans as at ${label}. Surplus on the schedule is the paper "In Advance". Processing fee is the paper Fees of 2% kept at disbursement, not a repayment.`, x0, y, { width: pageW });
   y += 24;
   loans.forEach((loan, index) => {
-    if (index) y = ensureRowSpace(doc, y, 120);
+    if (index) y = ensureRowSpace(doc, y, 160);
     const principalPaid = Number(loan.principalPaid || 0);
     const interestPaid = Number(loan.interestPaid || 0);
+    const penaltyPaid = Number(loan.penaltyPaid || 0);
     const principalLeft = Number(loan.principalLeft || 0);
     const interestLeft = Number(loan.interestLeft || 0);
+    const penaltyLeft = Number(loan.penaltyLeft || 0);
+    const totalPaid = roundMoney(principalPaid + interestPaid + penaltyPaid);
+    const totalStillToPay = roundMoney(principalLeft + interestLeft + penaltyLeft);
+    const processingFee = Number(loan.processingFee || 0);
     fillRect(doc, x0, y, pageW, 24, index % 2 === 0 ? NAVY : BLUE);
     cellText(doc, `${loan.member}   ${loan.reference}   ${loan.product}   ${loan.status}`, x0, y, pageW, 24, { color: WHITE, bold: true, size: 12 });
     y += 24;
-    const facts = [
-      ["Requested", formatDay(loan.requestedAt)],
-      ["Disbursed", formatDay(loan.disbursedAt)],
-      ["Principal lent", money(loan.amount)],
-      ["Term", `${loan.termMonths || "-"} months`],
-    ];
-    const boxW = pageW / 4;
-    facts.forEach((fact, i) => {
-      fillRect(doc, x0 + i * boxW, y, boxW, 36, WHITE);
-      doc.strokeColor(LINE).lineWidth(0.3).rect(x0 + i * boxW, y, boxW, 36).stroke();
-      cellText(doc, fact[0], x0 + i * boxW, y, boxW, 14, { size: 9, color: "#5B6B7C" });
-      cellText(doc, fact[1], x0 + i * boxW, y + 14, boxW, 20, { size: 11, bold: true, color: NAVY });
-    });
-    y += 36;
-    const penaltyLeft = Number(loan.penaltyLeft || 0);
-    const moneyBoxes = [
-      ["Principal paid", moneyExact(principalPaid), GREEN_CELL, GREEN_TEXT],
-      ["Principal remaining", moneyExact(principalLeft), "#FCE4D6", "#C65911"],
-      ["Interest paid", moneyExact(interestPaid), GREEN_CELL, GREEN_TEXT],
-      ["Interest remaining", moneyExact(interestLeft), "#FFF2CC", "#7F6000"],
-      ["Penalties remaining", moneyExact(penaltyLeft), RED_CELL, WHITE],
-    ];
-    const moneyW = pageW / 5;
-    moneyBoxes.forEach((box, i) => {
-      fillRect(doc, x0 + i * moneyW, y, moneyW, 40, box[2]);
-      cellText(doc, box[0], x0 + i * moneyW, y, moneyW, 16, { size: 9, color: box[3] });
-      cellText(doc, box[1], x0 + i * moneyW, y + 16, moneyW, 22, { size: 12, bold: true, color: box[3] });
-    });
-    y += 46;
+    y = drawLoanCardRow(doc, x0, y, pageW, [
+      { label: "Date requested", value: formatDay(loan.requestedAt) },
+      { label: "Date disbursed", value: formatDay(loan.disbursedAt) },
+      { label: "Principal lent", value: money(loan.amount) },
+      { label: "Term", value: `${loan.termMonths || "-"} months` },
+      { label: "Processing fee (2%)", value: money(processingFee) },
+    ], 50);
+    y = drawLoanCardRow(doc, x0, y, pageW, [
+      { label: "Principal already paid", value: moneyExact(principalPaid), bg: GREEN_CELL, valueColor: GREEN_TEXT },
+      { label: "Interest already paid", value: moneyExact(interestPaid), bg: GREEN_CELL, valueColor: GREEN_TEXT },
+      { label: "Penalties already paid", value: moneyExact(penaltyPaid), bg: GREEN_CELL, valueColor: GREEN_TEXT },
+      { label: "Total already paid", value: moneyExact(totalPaid), bg: "#1F7A4D", labelColor: WHITE, valueColor: WHITE },
+    ], 54);
+    y = drawLoanCardRow(doc, x0, y, pageW, [
+      { label: "Principal still to pay", value: moneyExact(principalLeft), bg: "#FCE4D6", valueColor: "#C65911" },
+      { label: "Interest still to pay", value: moneyExact(interestLeft), bg: "#FFF2CC", valueColor: "#7F6000" },
+      { label: "Penalties still to pay", value: moneyExact(penaltyLeft), bg: RED_CELL, valueColor: WHITE },
+      { label: "Total still to pay", value: moneyExact(totalStillToPay), bg: NAVY, labelColor: WHITE, valueColor: WHITE },
+    ], 54);
+    y += 8;
     cellText(doc, "How and when installments were paid", x0, y, pageW, 16, { bold: true, size: 11, color: NAVY });
     y += 16;
     y = drawMiniTable(doc, x0, y, [
@@ -1025,7 +1038,19 @@ function drawActiveLoanReports(doc, loans, label) {
       dashMoney(s.amountPaid),
       dashMoney(s.surplusPaid),
       s.status,
-    ]), { header: NAVY });
+    ]).concat([[
+      "",
+      "Total",
+      "",
+      moneyExact(loan.schedule.reduce((s, r) => s + Number(r.principal || 0), 0)),
+      moneyExact(loan.schedule.reduce((s, r) => s + Number(r.interest || 0), 0)),
+      dashMoney(loan.schedule.reduce((s, r) => s + Number(r.penalty || 0), 0)),
+      moneyExact(loan.schedule.reduce((s, r) => s + Number(r.dueAmount || 0), 0)),
+      moneyExact(loan.schedule.reduce((s, r) => s + Number(r.outstanding || 0), 0)),
+      dashMoney(loan.schedule.reduce((s, r) => s + Number(r.amountPaid || 0), 0)),
+      dashMoney(loan.schedule.reduce((s, r) => s + Number(r.surplusPaid || 0), 0)),
+      "",
+    ]]), { header: NAVY });
     y += 14;
   });
   if (!loans.length) {
