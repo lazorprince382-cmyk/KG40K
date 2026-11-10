@@ -175,4 +175,7 @@ a,.link-button,.dept-link{color:#16558f!important}
 .standing-reports-block .exec-panel-head{margin-bottom:12px;display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;justify-content:space-between}
 .standing-reports-block .exec-report-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .standing-report-month{display:flex;flex-direction:column;gap:4px;font-size:12px;font-weight:700;color:#0b3b70}
-.standing-report-month input{min-width:170px;padding:8px 10px;border:1px solid #c5d4e4;border-radius:8px;background:#fff}
+.standing-report-month input,.standing-report-month select{min-width:170px;padding:8px 10px;border:1px solid #c5d4e4;border-radius:8px;background:#fff}
+.standing-report-filters{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end}
+.standing-report-month select{min-width:240px}
+.credits-statement-grid article .exec-report-actions{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end}

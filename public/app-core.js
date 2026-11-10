@@ -1497,8 +1497,34 @@ function standingReportMonth(){
   if(state.standingReportMonth)return state.standingReportMonth;
   try{return new Date().toLocaleDateString("en-CA",{timeZone:"Africa/Kampala"}).slice(0,7);}catch(_){return new Date().toISOString().slice(0,7);}
 }
-function standingReportHref(kind,download=false){
-  return `/api/standing-reports/${kind}?asOf=${encodeURIComponent(standingReportMonth())}${download?"&download=1":""}`;
+function standingReportMemberId(){
+  const id=Number(state.standingReportMemberId||"");
+  return Number.isInteger(id)&&id>0?id:null;
+}
+function standingReportMembers(){
+  const seen=new Map();
+  for(const m of [
+    ...(state.standingReportMembers||[]),
+    ...(state.credits?.members||[]),
+    ...(state.finance?.hostingFee?.members||[]),
+    ...(state.executive?.hostingFee?.members||[]),
+    ...(state.members||[])
+  ]){
+    const id=m.id||m.memberId;
+    const name=m.name||m.fullName||m.full_name;
+    if(!id||!name||seen.has(String(id)))continue;
+    seen.set(String(id),{id,name,memberNumber:m.memberNumber||m.member_number||""});
+  }
+  return [...seen.values()].sort((a,b)=>String(a.name).localeCompare(String(b.name),"en"));
+}
+function standingReportMemberName(){
+  const id=standingReportMemberId();
+  if(!id)return "";
+  return standingReportMembers().find(m=>Number(m.id)===id)?.name||"";
+}
+function standingReportHref(kind,download=false,memberId=standingReportMemberId()){
+  const person=Number(memberId)>0&&["savings","welfare","loans","active-loans"].includes(kind)?`&memberId=${Number(memberId)}`:"";
+  return `/api/standing-reports/${kind}?asOf=${encodeURIComponent(standingReportMonth())}${download?"&download=1":""}${person}`;
 }
 function standingReportsSection() {
   const month=standingReportMonth();
@@ -1514,14 +1540,19 @@ function standingReportsSection() {
     ["income-statement","Income statement","Income and expenses for the report month, with year-to-date totals"],
     ["debtors-aging","Who still owes on loans","Simple list of members with money still on a loan, and whether they are late"]
   ];
-  return `<section class="standing-reports-block"><div class="exec-panel-head"><div><h3>Standing reports (PDF)</h3><p>Pick a month for savings and welfare. Company standing, assistance and active loans use live books.</p></div>
-      <label class="standing-report-month">Report month<input type="month" min="2024-06" max="${max}" value="${month}" data-standing-report-month></label></div>
-    <div class="exec-report-grid">${reports.map(([kind,name,desc],i)=>`<article><span class="${["blue","green","violet","orange","teal","blue","green","orange"][i%8]}">${icons.file}</span><div><h3>${name}</h3><p>${desc}</p><small>PDF · ${escapeHtml(month)}</small></div><div class="exec-report-actions"><button type="button" data-standing-report-view="${kind}">${icons.eye}View PDF</button><a class="button secondary" href="${standingReportHref(kind,true)}" download>${icons.download}Download</a></div></article>`).join("")}</div></section>`;
+  const people=standingReportMembers();
+  const selected=standingReportMemberId();
+  const person=standingReportMemberName();
+  const memberFilter=`<label class="standing-report-month">Member<select data-standing-report-member><option value="">All members</option>${people.map(m=>`<option value="${m.id}" ${Number(m.id)===selected?"selected":""}>${escapeHtml(m.name)}${m.memberNumber?` · ${escapeHtml(m.memberNumber)}`:""}</option>`).join("")}</select></label>`;
+  return `<section class="standing-reports-block"><div class="exec-panel-head"><div><h3>Standing reports (PDF)</h3><p>Pick a month, then a member to view or download that person's savings or loan report. Leave member on All members for the full list.</p></div>
+      <div class="standing-report-filters">${memberFilter}<label class="standing-report-month">Report month<input type="month" min="2024-06" max="${max}" value="${month}" data-standing-report-month></label></div></div>
+    <div class="exec-report-grid">${reports.map(([kind,name,desc],i)=>{const personal=["savings","welfare","loans","active-loans"].includes(kind)&&person;return `<article><span class="${["blue","green","violet","orange","teal","blue","green","orange"][i%8]}">${icons.file}</span><div><h3>${name}</h3><p>${desc}</p><small>PDF · ${escapeHtml(month)}${personal?` · ${escapeHtml(person)}`:""}</small></div><div class="exec-report-actions"><button type="button" data-standing-report-view="${kind}">${icons.eye}View PDF</button><a class="button secondary" href="${standingReportHref(kind,true)}" download>${icons.download}Download</a></div></article>`;}).join("")}</div></section>`;
 }
-function openStandingReport(kind){
+function openStandingReport(kind,memberId=standingReportMemberId()){
   const titles={savings:"Personal savings standing",welfare:"Welfare standings",loans:"Loans full analysis",company:"Company standing",assistance:"Welfare assistance register","active-loans":"Active loans and installments","hosting-fee":"Hosting fee payments","income-statement":"Income statement","debtors-aging":"Who still owes on loans"};
-  const href=standingReportHref(kind,false);
-  openSecureContentViewer(href,`${titles[kind]||"Standing report"} · ${standingReportMonth()}`,{downloadHref:standingReportHref(kind,true),replaceModal:false});
+  const person=["savings","welfare","loans","active-loans"].includes(kind)?(standingReportMembers().find(m=>Number(m.id)===Number(memberId))?.name||""):"";
+  const href=standingReportHref(kind,false,memberId);
+  openSecureContentViewer(href,`${person?`${person} · `:""}${titles[kind]||"Standing report"} · ${standingReportMonth()}`,{downloadHref:standingReportHref(kind,true,memberId),replaceModal:false});
 }
 function executiveReportsView() {
   return standingReportsSection();
@@ -3305,7 +3336,7 @@ function creditsRecoveryView() {
     <div class="credits-recovery-cards">${overdue.map(l=>{const history=c.recovery.filter(r=>r.loanId===l.id);return `<article><div><span>${l.reference}</span><h3>${l.member}</h3><p>${l.daysOverdue} days overdue - ${money(l.balance)}</p></div>${status(l.status)}<div class="credits-recovery-history">${history.map(r=>`<div><strong>${r.actionType}</strong><span>${r.notes}</span><small>${new Date(r.createdAt).toLocaleDateString()} - Follow-up ${r.followUpDate?new Date(r.followUpDate).toLocaleDateString():"not set"}</small></div>`).join("")||"<small>No recovery action recorded yet.</small>"}</div><button data-credits-recover="${l.id}">Record follow-up</button></article>`}).join("")||`<div class="exec-empty">No defaulted loans.</div>`}</div>`;
 }
 function creditsStatementsView() {
-  return `<div class="credits-statement-grid">${state.credits.members.map(m=>`<article><div class="avatar blue">${initials(m.name)}</div><div><span>${m.memberNumber}</span><h3>${m.name}</h3><p>Savings ${money(m.savings)} - Loans ${money(m.outstandingBalance)}</p></div><button data-credits-statement="${m.id}">${icons.download}Statement</button></article>`).join("")}</div>`;
+  return `<div class="credits-statement-grid">${state.credits.members.map(m=>`<article><div class="avatar blue">${initials(m.name)}</div><div><span>${m.memberNumber}</span><h3>${m.name}</h3><p>Savings ${money(m.savings)} - Loans ${money(m.outstandingBalance)}</p></div><div class="exec-report-actions"><button type="button" data-standing-report-view="savings" data-member-id="${m.id}">${icons.eye}View savings</button><button type="button" data-standing-report-view="active-loans" data-member-id="${m.id}">${icons.eye}View loans</button><a class="button secondary" href="${standingReportHref("savings",true,m.id)}" download>${icons.download}Savings</a><a class="button secondary" href="${standingReportHref("active-loans",true,m.id)}" download>${icons.download}Loans</a></div></article>`).join("")}</div>`;
 }
 function creditsChargesView() {
   const c=state.credits;
@@ -3562,8 +3593,9 @@ function creditsMemberDetails(id) {
     <div class="loan-detail-summary"><div><span>Total savings</span><strong>${money(m.savings)}</strong></div><div><span>Outstanding loans</span><strong>${money(m.outstandingBalance)}</strong></div><div><span>Guarantees given</span><strong>${m.guaranteesGiven}</strong></div><div><span>Guarantees received</span><strong>${m.guaranteesReceived}</strong></div></div>
     <h3 class="loan-section-title">Loan history</h3>${financeDataTable("Facilities",["Loan","Product","Amount","Balance","Status"],loans.map(l=>[l.reference,l.product,money(l.amount),money(l.balance),status(l.status)]))}
     <h3 class="loan-section-title">Savings history</h3>${financeDataTable("Transactions",["Receipt","Date","Type","Amount","Status"],transactions.slice(0,20).map(t=>[t.receiptNumber,new Date(t.createdAt).toLocaleDateString(),t.type,money(t.amount),status(t.status)]))}
-    <button class="button primary" data-credits-statement="${m.id}">${icons.download}Download member statement</button></div></div>`);
-  document.querySelector("[data-close]").onclick=closeModal;document.querySelector("[data-credits-statement]").onclick=()=>downloadCreditsStatement(m.id);
+    <div class="exec-report-actions" style="margin-top:12px"><button type="button" class="button secondary" data-standing-report-view="savings" data-member-id="${m.id}">${icons.eye}View savings PDF</button><button type="button" class="button secondary" data-standing-report-view="active-loans" data-member-id="${m.id}">${icons.eye}View loans PDF</button><a class="button secondary" href="${standingReportHref("savings",true,m.id)}" download>${icons.download}Savings</a><a class="button secondary" href="${standingReportHref("active-loans",true,m.id)}" download>${icons.download}Loan installments</a></div></div></div>`);
+  document.querySelector("[data-close]").onclick=closeModal;
+  document.querySelectorAll("[data-standing-report-view]").forEach(el=>el.addEventListener("click",()=>openStandingReport(el.dataset.standingReportView,el.dataset.memberId)));
 }
 function downloadCreditsStatement(memberId) {
   const c=state.credits,m=c.members.find(x=>String(x.id)===String(memberId));if(!m)return;
@@ -4607,7 +4639,15 @@ function bind() {
   document.querySelectorAll("[data-finance-budget-delete]").forEach(el=>el.addEventListener("click",()=>deleteFinanceBudget(el.dataset.financeBudgetDelete)));
   document.querySelectorAll("[data-procurement-advance]").forEach(el=>el.addEventListener("click",()=>advanceProcurement(el.dataset.procurementAdvance)));
   document.querySelectorAll("[data-standing-report-month]").forEach(el=>el.addEventListener("change",()=>{state.standingReportMonth=el.value;render();}));
-  document.querySelectorAll("[data-standing-report-view]").forEach(el=>el.addEventListener("click",()=>openStandingReport(el.dataset.standingReportView)));
+  document.querySelectorAll("[data-standing-report-member]").forEach(el=>el.addEventListener("change",()=>{state.standingReportMemberId=el.value||"";render();}));
+  document.querySelectorAll("[data-standing-report-view]").forEach(el=>el.addEventListener("click",()=>openStandingReport(el.dataset.standingReportView,el.dataset.memberId||standingReportMemberId())));
+  if(document.querySelector("[data-standing-report-member]")&&state.standingReportMembers==null){
+    state.standingReportMembers=[];
+    api("/api/standing-reports/members").then(data=>{
+      state.standingReportMembers=data.members||[];
+      if(state.standingReportMembers.length)render();
+    }).catch(()=>{});
+  }
   document.querySelectorAll("[data-finance-report]").forEach(el=>el.addEventListener("click",()=>downloadFinanceReport(el.dataset.financeReport,el.dataset.format||"excel")));
   document.querySelectorAll("[data-finance-report-preview]").forEach(el=>el.addEventListener("click",()=>openOperationalReportPreview("finance",el.dataset.financeReportPreview)));
   document.querySelectorAll("[data-credits-page]").forEach(el=>el.addEventListener("click",()=>{

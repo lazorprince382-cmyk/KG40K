@@ -195,7 +195,7 @@ async function loadPersonalSavingsRows(asOf) {
         0,
         Number(m.shares || 0) - (parsed.isCurrent ? 0 : Number(m.sharesAfter || 0))
       );
-      return { name: m.name, memberNumber: m.memberNumber, paid, expected, variance, shares };
+      return { id: m.id, name: m.name, memberNumber: m.memberNumber, paid, expected, variance, shares };
     })
     .sort((a, b) => a.variance - b.variance || a.name.localeCompare(b.name));
 }
@@ -226,6 +226,7 @@ async function loadWelfareRows(asOf) {
       const expected = months * monthly;
       const paid = Number(row.paid || 0);
       return {
+        id: row.id,
         name: row.member,
         memberNumber: row.memberNumber,
         paid,
@@ -241,7 +242,7 @@ async function loadLoanRows(asOf) {
   const parsed = parseAsOf(asOf);
   const rows = (
     await query(
-      `SELECT l.reference, m.full_name AS member, m.member_number AS "memberNumber",
+      `SELECT l.reference, m.id AS "memberId", m.full_name AS member, m.member_number AS "memberNumber",
          COALESCE(p.name,'Loan') AS product,
          l.amount::float, l.balance::float, l.status, l.due_date AS "dueDate",
          l.term_months AS "termMonths",
@@ -283,9 +284,35 @@ function cellText(doc, text, x, y, w, h, { align = "left", color = "#0B1F3B", bo
   });
 }
 
-function drawHeader(doc, title) {
+function drawHeader(doc, title, subtitle) {
   doc.font("Helvetica-Bold").fontSize(13).fillColor(NAVY).text("KASANGATI G40 KWAGALANA LIMITED", 18, 16, { align: "center" });
   doc.font("Helvetica-Bold").fontSize(11).fillColor(BLUE).text(title, 18, 32, { align: "center" });
+  if (subtitle) {
+    doc.font("Helvetica").fontSize(9).fillColor("#5B6B7C").text(ascii(subtitle), 18, 46, { align: "center" });
+  }
+}
+
+function parseMemberId(value) {
+  const id = Number(value);
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
+
+function filterMemberRows(rows, memberId, idKey = "id") {
+  if (!memberId) return rows;
+  return (rows || []).filter((row) => Number(row[idKey] ?? row.id ?? row.memberId) === Number(memberId));
+}
+
+async function loadReportMember(memberId) {
+  const id = parseMemberId(memberId);
+  if (!id) return null;
+  const row = (
+    await query(
+      `SELECT id, full_name AS name, member_number AS "memberNumber"
+       FROM members WHERE id=$1 AND deleted_at IS NULL`,
+      [id]
+    )
+  ).rows[0];
+  return row || null;
 }
 
 function ensureRowSpace(doc, y, rowH) {
@@ -627,7 +654,7 @@ async function loadActiveLoanReports() {
     await query(
       `SELECT l.id, l.reference, l.amount::float AS amount, l.balance::float AS balance, l.status,
               l.term_months AS "termMonths", l.created_at AS "requestedAt", l.disbursed_at AS "disbursedAt",
-              m.full_name AS member, m.member_number AS "memberNumber",
+              m.id AS "memberId", m.full_name AS member, m.member_number AS "memberNumber",
               COALESCE(p.name, l.custom_product_name, 'Loan') AS product,
               COALESCE(p.late_penalty_rate,5)::float AS "latePenaltyRate",
               COALESCE((SELECT SUM(s.principal_paid) FROM loan_repayment_schedule s WHERE s.loan_id=l.id),0)::float AS "principalPaid",
@@ -1006,11 +1033,16 @@ function drawActiveLoanReports(doc, loans, label) {
   }
 }
 
-async function buildStandingPdf(kind, { asOf } = {}) {
+async function buildStandingPdf(kind, { asOf, memberId } = {}) {
   const parsed = parseAsOf(asOf);
   const label = asOfLabel(parsed);
+  const member = await loadReportMember(memberId);
+  if (parseMemberId(memberId) && !member) {
+    throw Object.assign(new Error("Member not found"), { status: 404 });
+  }
+  const who = member ? `${member.name}` : "";
   const landscape = kind === "active-loans";
-  const doc = new PDFDocument({ size: "A4", layout: landscape ? "landscape" : "portrait", margin: 18, bufferPages: true, info: { Title: `Kasangati G40 ${kind} report` } });
+  const doc = new PDFDocument({ size: "A4", layout: landscape ? "landscape" : "portrait", margin: 18, bufferPages: true, info: { Title: `Kasangati G40 ${kind} report${who ? ` · ${who}` : ""}` } });
   const chunks = [];
   doc.on("data", (chunk) => chunks.push(chunk));
   const done = new Promise((resolve, reject) => {
@@ -1022,33 +1054,33 @@ async function buildStandingPdf(kind, { asOf } = {}) {
     const monthEndDate = shortDate(parsed.lastDay, parsed.month, parsed.year);
     const toDate = slashDate(parsed.day, parsed.month, parsed.year);
     if (kind === "savings") {
-      const rows = await loadPersonalSavingsRows(parsed.asOfMonth);
-      drawHeader(doc, `Personal Savings Report as at ${label}`);
+      const rows = filterMemberRows(await loadPersonalSavingsRows(parsed.asOfMonth), member?.id);
+      drawHeader(doc, who ? `Personal Savings Report · ${who} as at ${label}` : `Personal Savings Report as at ${label}`);
       drawSavingsStyleTable(doc, rows, {
         paidLabel: `Available\n/Paid up\n${viewDate}`,
         expectedLabel: `Expected\n${monthEndDate}`,
         shareLabel: "Share\ncapital",
-        summaryTitle: "Client Savings Summary",
+        summaryTitle: who ? `${who} savings` : "Client Savings Summary",
         rangeLabel: "Personal Savings",
         fromDate: "2024-01-01",
         toDate,
         unpaidLabel: "",
       });
     } else if (kind === "welfare") {
-      const rows = await loadWelfareRows(parsed.asOfMonth);
-      drawHeader(doc, `Welfare Standing Report as at ${label}`);
+      const rows = filterMemberRows(await loadWelfareRows(parsed.asOfMonth), member?.id);
+      drawHeader(doc, who ? `Welfare Standing Report · ${who} as at ${label}` : `Welfare Standing Report as at ${label}`);
       drawSavingsStyleTable(doc, rows, {
         paidLabel: `Contributed\n${viewDate}`,
         expectedLabel: `Expected\n${monthEndDate}`,
-        summaryTitle: "Client Welfare Summary",
+        summaryTitle: who ? `${who} welfare` : "Client Welfare Summary",
         rangeLabel: "Welfare since join",
         fromDate: "2024-06-01",
         toDate,
         unpaidLabel: "UNPAID WELFARE :",
       });
     } else if (kind === "loans") {
-      const rows = await loadLoanRows(parsed.asOfMonth);
-      drawHeader(doc, `Loans Analysis Report as at ${label}`, "Facilities, outstanding balances and repayment standing");
+      const rows = filterMemberRows(await loadLoanRows(parsed.asOfMonth), member?.id, "memberId");
+      drawHeader(doc, who ? `Loans Analysis Report · ${who} as at ${label}` : `Loans Analysis Report as at ${label}`);
       drawLoanTable(doc, rows);
     } else if (kind === "company") {
       const standing = await loadCompanyStanding();
@@ -1059,8 +1091,8 @@ async function buildStandingPdf(kind, { asOf } = {}) {
       drawHeader(doc, "Welfare Assistance Register");
       drawAssistanceRegister(doc, rows);
     } else if (kind === "active-loans") {
-      const loans = await loadActiveLoanReports();
-      drawHeader(doc, `Active Loans Report as at ${label}`);
+      const loans = filterMemberRows(await loadActiveLoanReports(), member?.id, "memberId");
+      drawHeader(doc, who ? `Active Loans Report · ${who} as at ${label}` : `Active Loans Report as at ${label}`);
       drawActiveLoanReports(doc, loans, label);
     } else if (kind === "hosting-fee") {
       const standing = await loadHostingFeeStanding();
@@ -1106,6 +1138,8 @@ const TITLES = {
 
 module.exports = {
   buildStandingPdf,
+  parseMemberId,
+  loadReportMember,
   loadPersonalSavingsRows,
   loadWelfareRows,
   loadLoanRows,

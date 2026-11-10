@@ -24,7 +24,7 @@ const {
 const { getRunningLoan, getSavingsTargetStatus, getGuarantorEligibility } = require("./loan-eligibility");
 const { loadWelfareStanding, loadWelfareMonth, enforceOneMonthlyWelfareCharge } = require("./welfare-standing");
 const { chargeWelfareFromCoveredSavings, catchUpWelfareFromSavings, loadMemberSchedule, loadScheduleSettings, buildSchedule, monthIndex, monthKey, monthLabel } = require("./savings-schedule");
-const { buildStandingPdf } = require("./standing-reports");
+  const { buildStandingPdf, parseMemberId, loadReportMember } = require("./standing-reports");
 const { isHostingFeeCategory, loadHostingFeeStanding, paymentCycleId, startHostingCycleForMeeting, recordBanumbaOctober30Meeting, chargeBanumbaHostingFromSavings } = require("./hosting-fees");
 const { isComputerTechnician, applyJudeOctoberSurplusToShares, applyRalphShareCapital40000, pinLiveUapBalance, clearBogusUapStatementProfit, applyUapSeptOctBooks, registerTechnicianApi } = require("./technician-ops");
 const { isWordUpload, convertWordUploadToPdf, convertPlainTextToPdf } = require("./services/office-pdf");
@@ -6808,16 +6808,20 @@ async function sendStandingReport(req,res){
   if(!["savings","welfare","loans","company","assistance","active-loans","hosting-fee","income-statement","debtors-aging"].includes(kind)) return res.status(400).json({error:"Choose a standing report"});
   if(!await canAccessStandingReports(req.user)) return res.status(403).json({error:"Standing report access denied"});
   const asOf=String(req.query.asOf||"").trim();
+  const memberId=parseMemberId(req.query.memberId||req.query.member);
   const download=req.query.download==="1"||/\.pdf$/i.test(req.path);
   let pdf;
   try{
-    pdf=await buildStandingPdf(kind,{asOf});
+    pdf=await buildStandingPdf(kind,{asOf,memberId});
   }catch(error){
     console.error("Standing report failed:",error);
-    return res.status(500).json({error:error.message||"Standing report could not be generated"});
+    const status=Number(error.status)||500;
+    return res.status(status).json({error:error.message||"Standing report could not be generated"});
   }
   const month=String(asOf||"").replace(/[^\d-]/g,"").slice(0,7);
-  const filename=`kasangati-g40-${kind}${month?`-${month}`:""}.pdf`;
+  const member=memberId?await loadReportMember(memberId):null;
+  const who=member?`-${String(member.name||"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"")}`:"";
+  const filename=`kasangati-g40-${kind}${who}${month?`-${month}`:""}.pdf`;
   res.set("X-Document-Mime-Type","application/pdf");
   res.set("Cache-Control","no-store");
   res.set("Content-Disposition",`${download?"attachment":"inline"}; filename="${filename}"`);
@@ -6825,6 +6829,12 @@ async function sendStandingReport(req,res){
   else res.type("application/octet-stream");
   res.send(pdf);
 }
+app.get("/api/standing-reports/members",auth,asyncRoute(async(req,res)=>{
+  if(!await canAccessStandingReports(req.user)) return res.status(403).json({error:"Standing report access denied"});
+  const members=(await query(`SELECT id, full_name AS name, member_number AS "memberNumber"
+    FROM members WHERE deleted_at IS NULL AND status='active' ORDER BY full_name`)).rows;
+  res.json({members});
+}));
 app.get("/api/standing-reports/:kind/content",auth,asyncRoute(sendStandingReport));
 app.get("/api/standing-reports/:kind.pdf",auth,asyncRoute(sendStandingReport));
 app.get("/api/standing-reports/:kind",auth,asyncRoute(sendStandingReport));
